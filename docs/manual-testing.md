@@ -13,6 +13,8 @@ Run the relevant section after each story completes. Each test has:
 
 Prerequisites for all tests: Docker running (Rancher Desktop or Docker Desktop), `uv` installed, working directory is `cos/`.
 
+**Always use `uv run python`** (not `python3` or `python`) for any command that imports project code. This ensures the project's virtual environment and dependencies are used. The one exception is T1.1.2, which only uses Python stdlib and pipes from a Docker command.
+
 ---
 
 ## Epic 1 — Runnable Platform Foundation
