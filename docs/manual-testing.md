@@ -154,13 +154,15 @@ uv run cos status
 
 #### T1.1.7 — MCP server entry point **[STUB — scaffolding only]**
 
+> **Note:** After Story 1.2, `cos-mcp` loads `config.yaml` at startup. Run this test from a directory that contains a valid `config.yaml`, or it will exit immediately with a "config file not found" message (which is itself correct behaviour — see T1.2.3).
+
 ```bash
 timeout 3 uv run cos-mcp; echo "exit code: $?"
 ```
 
-**Expected:** Process starts, runs for 3 seconds (waiting for MCP client on stdin), then exits cleanly on timeout. No import errors before the timeout.
+**Expected:** Process starts, loads config, logs a structured JSON startup message, then runs for 3 seconds waiting for a MCP client on stdin before timing out. No import errors before the timeout.
 
-**Fail signal:** An error before the 3-second mark, particularly `ModuleNotFoundError` or `ImportError`.
+**Fail signal:** An error before config is loaded, particularly `ModuleNotFoundError` or `ImportError`.
 
 ---
 
@@ -170,15 +172,154 @@ timeout 3 uv run cos-mcp; echo "exit code: $?"
 uv run pytest tests/ -v
 ```
 
-**Expected:** All tests pass. Current baseline: 15 tests (5 in `tests/output/test_router.py`, remainder are scaffold stubs).
+**Expected:** All tests pass. Baseline after Story 1.2: 22 tests (16 scaffold stubs + 6 config tests in `tests/test_config.py`).
 
 **Fail signal:** Any test failure or collection error.
 
 ---
 
-### Story 1.2: Configuration Loader *(not yet implemented)*
+### Story 1.2: Configuration Loader
 
-Tests will be added here after Story 1.2 is complete.
+#### T1.2.1 — Valid config loads **[LIVE]**
+
+```bash
+uv run python -c "
+from cos.config import CosConfig
+config = CosConfig.load('config.yaml')
+print('provider:', config.llm.provider)
+print('model:', config.llm.model)
+print('role_pack:', config.role_pack.path)
+print('channels:', config.channels)
+print('database host:', config.database.host)
+print('config loaded ok')
+"
+```
+
+**Expected:** Field values printed from your `config.yaml`, ending with `config loaded ok`. No traceback.
+
+**Fail signal:** Any exception, or unexpected `None` values.
+
+---
+
+#### T1.2.2 — Missing required field exits cleanly **[LIVE]**
+
+```bash
+python3 -c "
+import yaml, tempfile, os
+cfg = yaml.safe_load(open('config.yaml'))
+del cfg['llm']
+f = tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False)
+yaml.dump(cfg, f); f.close()
+print('temp config:', f.name)
+" | tail -1 | xargs -I{} uv run python -c "
+from cos.config import CosConfig
+CosConfig.load('{}')
+" 2>&1; echo "exit code: $?"
+```
+
+Or, more simply — create a one-liner bad config inline:
+
+```bash
+uv run python -c "
+import tempfile, pathlib
+from cos.config import CosConfig
+bad = pathlib.Path(tempfile.mktemp(suffix='.yaml'))
+bad.write_text('embedding:\n  provider: anthropic\n  model: voyage-3\n')
+try:
+    CosConfig.load(bad)
+except SystemExit as e:
+    print('SystemExit caught — message:')
+    print(str(e))
+"
+```
+
+**Expected:** `SystemExit` is raised with a human-readable message that includes `llm` identifying the missing field. No raw Python traceback.
+
+**Fail signal:** Raw `ValidationError` traceback, or no mention of the missing field in the message.
+
+---
+
+#### T1.2.3 — Missing config file exits cleanly **[LIVE]**
+
+```bash
+uv run python -c "
+from cos.config import CosConfig
+try:
+    CosConfig.load('/tmp/does-not-exist.yaml')
+except SystemExit as e:
+    print('SystemExit caught — message:')
+    print(str(e))
+"
+```
+
+**Expected:** Clean `SystemExit` with a message containing `not found` and a hint to copy `config.yaml.example`.
+
+**Fail signal:** Raw `FileNotFoundError` traceback.
+
+---
+
+#### T1.2.4 — Malformed YAML exits cleanly **[LIVE]**
+
+```bash
+uv run python -c "
+import tempfile, pathlib
+from cos.config import CosConfig
+bad = pathlib.Path(tempfile.mktemp(suffix='.yaml'))
+bad.write_text('llm:\n  provider: anthropic\n  bad indentation:\nkey: [unclosed')
+try:
+    CosConfig.load(bad)
+except SystemExit as e:
+    print('SystemExit caught — message:')
+    print(str(e))
+"
+```
+
+**Expected:** Clean `SystemExit` with a message containing `YAML syntax error`. No raw `yaml.YAMLError` traceback.
+
+**Fail signal:** Unhandled `yaml.YAMLError` traceback.
+
+---
+
+#### T1.2.5 — Secrets do not appear in repr **[LIVE]**
+
+```bash
+uv run python -c "
+from cos.config import CosConfig
+config = CosConfig.load('config.yaml')
+output = repr(config) + str(config)
+api_key = config.llm.api_key.get_secret_value()
+db_pass = config.database.password.get_secret_value()
+assert api_key not in output, 'FAIL: LLM API key leaked in repr'
+assert db_pass not in output, 'FAIL: DB password leaked in repr'
+print('secret masking ok — no keys in repr/str')
+"
+```
+
+**Expected:** `secret masking ok — no keys in repr/str`.
+
+**Fail signal:** `AssertionError` — a secret value appeared in the model representation.
+
+---
+
+#### T1.2.6 — Port validation rejects out-of-range value **[LIVE]**
+
+```bash
+uv run python -c "
+import tempfile, pathlib
+from cos.config import CosConfig
+bad = pathlib.Path(tempfile.mktemp(suffix='.yaml'))
+bad.write_text(open('config.yaml').read().replace('port: 5432', 'port: 99999'))
+try:
+    CosConfig.load(bad)
+except SystemExit as e:
+    print('SystemExit caught — message:')
+    print(str(e))
+"
+```
+
+**Expected:** Clean `SystemExit` with a message identifying the invalid `port` value.
+
+**Fail signal:** Config loads successfully with `port: 99999`, or raw traceback.
 
 ---
 
@@ -196,7 +337,7 @@ Tests will be added here after Epic 2 stories complete.
 
 ## Running all live tests
 
-Quick smoke-test sequence for the current state of the platform:
+Quick smoke-test sequence for the current state of the platform. Run from the `cos/` directory with a valid `config.yaml` present.
 
 ```bash
 # 1. Start services
@@ -206,9 +347,16 @@ docker compose up -d
 sleep 30 && docker compose ps
 
 # 3. Imports
-uv run python -c "import cos.output.router; print('imports ok')"
+uv run python -c "import cos.output.router; import cos.config; print('imports ok')"
 
-# 4. OutputRouter
+# 4. Config loads
+uv run python -c "
+from cos.config import CosConfig
+c = CosConfig.load('config.yaml')
+print('config ok — role pack:', c.role_pack.path)
+"
+
+# 5. OutputRouter
 uv run python -c "
 from cos.output.router import OutputRouter
 r = OutputRouter(configured_channels=['local'])
@@ -217,8 +365,8 @@ r.send('invalid', 'should be suppressed')
 print('router ok')
 "
 
-# 5. Tests
+# 6. Tests
 uv run pytest tests/ -v
 ```
 
-All five steps should complete without errors.
+All six steps should complete without errors.
