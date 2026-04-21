@@ -210,22 +210,6 @@ print('config loaded ok')
 #### T1.2.2 — Missing required field exits cleanly **[LIVE]**
 
 ```bash
-python3 -c "
-import yaml, tempfile, os
-cfg = yaml.safe_load(open('config.yaml'))
-del cfg['llm']
-f = tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False)
-yaml.dump(cfg, f); f.close()
-print('temp config:', f.name)
-" | tail -1 | xargs -I{} uv run python -c "
-from cos.config import CosConfig
-CosConfig.load('{}')
-" 2>&1; echo "exit code: $?"
-```
-
-Or, more simply — create a one-liner bad config inline:
-
-```bash
 uv run python -c "
 import tempfile, pathlib
 from cos.config import CosConfig
