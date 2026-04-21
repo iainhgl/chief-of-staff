@@ -5,6 +5,20 @@
 - Docker Desktop (includes Docker Compose)
 - [uv](https://docs.astral.sh/uv/) package manager
 
+## First-time configuration
+
+Before starting the platform, create your local config file:
+
+```bash
+cp config.yaml.example config.yaml
+```
+
+Then open `config.yaml` and fill in:
+- `llm.api_key` — your Anthropic API key
+- `database.password` — a password of your choice (must match what Docker Compose uses for Postgres)
+
+`config.yaml` is git-ignored and never committed. `config.yaml.example` is the safe template that stays in the repo.
+
 ## Start the Platform
 
 ```bash

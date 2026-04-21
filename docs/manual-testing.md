@@ -180,6 +180,12 @@ uv run pytest tests/ -v
 
 ### Story 1.2: Configuration Loader
 
+**Prerequisite:** A `config.yaml` must exist in the `cos/` directory. If you haven't created one yet:
+```bash
+cp config.yaml.example config.yaml
+# then edit config.yaml and fill in your Anthropic API key
+```
+
 #### T1.2.1 — Valid config loads **[LIVE]**
 
 ```bash
