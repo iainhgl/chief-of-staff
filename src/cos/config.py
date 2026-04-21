@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Literal
+from urllib.parse import quote
 
 import yaml
 from pydantic import BaseModel, Field, SecretStr, ValidationError
@@ -38,6 +39,12 @@ class DatabaseConfig(BaseModel):
             f"postgresql+psycopg://{self.user}:{self.password.get_secret_value()}"
             f"@{self.host}:{self.port}/{self.dbname}"
         )
+
+    @property
+    def libpq_dsn(self) -> str:
+        # Never log this value — it contains the plaintext password
+        password = quote(self.password.get_secret_value(), safe="")
+        return f"postgresql://{self.user}:{password}@{self.host}:{self.port}/{self.dbname}"
 
 
 class CosConfig(BaseModel):

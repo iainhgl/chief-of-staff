@@ -1,1 +1,1 @@
--- Jobs queue schema — Phase 2 stub
+-- Jobs queue (Phase 2) — schema deferred until Phase 2 background worker design is finalised
