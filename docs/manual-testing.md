@@ -278,18 +278,21 @@ except SystemExit as e:
 uv run python -c "
 from cos.config import CosConfig
 config = CosConfig.load('config.yaml')
-output = repr(config) + str(config)
-api_key = config.llm.api_key.get_secret_value()
-db_pass = config.database.password.get_secret_value()
-assert api_key not in output, 'FAIL: LLM API key leaked in repr'
-assert db_pass not in output, 'FAIL: DB password leaked in repr'
-print('secret masking ok — no keys in repr/str')
+db_repr = repr(config.database)
+llm_repr = repr(config.llm)
+assert \"SecretStr('**********')\" in db_repr, 'FAIL: DB password not masked in repr'
+assert \"SecretStr('**********')\" in llm_repr, 'FAIL: LLM API key not masked in repr'
+print('database repr:', db_repr)
+print('llm repr:', llm_repr)
+print('secret masking ok')
 "
 ```
 
-**Expected:** `secret masking ok — no keys in repr/str`.
+**Expected:** Both repr lines show `SecretStr('**********')` in place of the secret value, ending with `secret masking ok`.
 
-**Fail signal:** `AssertionError` — a secret value appeared in the model representation.
+**Fail signal:** `AssertionError`, or the actual key/password value visible in the printed repr.
+
+> **Note:** Do not check for absence of the secret value in the full repr — if your password happens to match another field (e.g. `password: postgres` also appears as the `user` or `host`), the check gives a false failure even when masking is working correctly.
 
 ---
 
