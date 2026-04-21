@@ -1,0 +1,1 @@
+-- Jobs queue schema — Phase 2 stub

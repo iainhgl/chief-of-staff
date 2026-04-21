@@ -1,0 +1,1 @@
+-- Initial schema migration — implemented in Story 1.3

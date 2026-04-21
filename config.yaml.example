@@ -1,0 +1,26 @@
+llm:
+  provider: anthropic
+  model: claude-sonnet-4-6
+  api_key: YOUR_API_KEY_HERE
+
+embedding:
+  provider: anthropic
+  model: voyage-3
+  # api_key: only required if your embedding provider uses a different key than llm.api_key
+  # Leave as null (or omit) when both providers share the same key.
+  api_key: null
+
+role_pack:
+  path: role_packs/chro.yaml
+
+channels:
+  - local
+
+connectors: []
+
+database:
+  host: postgres
+  port: 5432
+  user: postgres
+  password: postgres
+  dbname: cos

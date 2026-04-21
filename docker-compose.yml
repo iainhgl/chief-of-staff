@@ -1,0 +1,47 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: cos
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  tika:
+    image: apache/tika
+    ports:
+      - "127.0.0.1:9998:9998"
+    healthcheck:
+      test: ["CMD-SHELL", "(echo > /dev/tcp/localhost/9998) &>/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  cos:
+    build: .
+    stdin_open: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      tika:
+        condition: service_healthy
+    volumes:
+      - ./data:/data
+      - ./config.yaml:/app/config.yaml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "/app/.venv/bin/python -c 'import cos' 2>/dev/null && echo ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    # No host ports — MCP uses stdio transport
+
+volumes:
+  postgres_data:
