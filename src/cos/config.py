@@ -47,6 +47,10 @@ class DatabaseConfig(BaseModel):
         return f"postgresql://{self.user}:{password}@{self.host}:{self.port}/{self.dbname}"
 
 
+class TikaConfig(BaseModel):
+    url: str = "http://tika:9998"
+
+
 class CosConfig(BaseModel):
     llm: LLMConfig
     embedding: EmbeddingConfig
@@ -54,6 +58,7 @@ class CosConfig(BaseModel):
     channels: list[str]
     connectors: list[str]
     database: DatabaseConfig
+    tika: TikaConfig = TikaConfig()
 
     @classmethod
     def load(cls, path: str | Path = "config.yaml") -> "CosConfig":

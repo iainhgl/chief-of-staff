@@ -101,3 +101,9 @@ def test_missing_config_file_raises_system_exit(tmp_path):
     with pytest.raises(SystemExit) as exc_info:
         CosConfig.load(tmp_path / "nonexistent.yaml")
     assert "not found" in str(exc_info.value).lower()
+
+
+def test_tika_config_defaults(tmp_path):
+    cfg_file = _write_config(tmp_path, VALID_CONFIG_YAML)
+    config = CosConfig.load(cfg_file)
+    assert config.tika.url == "http://tika:9998"
