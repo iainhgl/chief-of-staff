@@ -5,7 +5,14 @@
 - Docker Desktop (includes Docker Compose)
 - [uv](https://docs.astral.sh/uv/) package manager
 
-## First-time configuration
+## Clone the Repository
+
+```bash
+git clone <repository-url>
+cd cos
+```
+
+## First-time Configuration
 
 Before starting the platform, create your local config file:
 
@@ -13,9 +20,9 @@ Before starting the platform, create your local config file:
 cp config.yaml.example config.yaml
 ```
 
-Then open `config.yaml` and fill in:
+Then open `config.yaml` and fill in the required values — at minimum:
 - `llm.api_key` — your Anthropic API key
-- `database.password` — a password of your choice (must match what Docker Compose uses for Postgres)
+- `database.password` — must match the `POSTGRES_PASSWORD` value in `docker-compose.yml` (default: `postgres`)
 
 `config.yaml` is git-ignored and never committed. `config.yaml.example` is the safe template that stays in the repo.
 
@@ -30,10 +37,42 @@ All three services (postgres, tika, cos) will start and reach a healthy state wi
 ## Check Platform Status
 
 ```bash
-cos status
+docker compose ps
 ```
 
-Shows whether postgres, tika, and the cos service are running and healthy.
+Shows all three services and their health state. All should show `healthy` or `running`.
+
+## Configure the MCP Server
+
+Connect Claude to the CoS MCP server so it can call the platform's tools.
+
+### Claude Code (CLI)
+
+Run from the `cos/` directory:
+
+```bash
+claude mcp add cos -- docker compose exec -i cos uv run cos-mcp
+```
+
+### Claude Desktop
+
+Add the following to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "cos": {
+      "command": "docker",
+      "args": ["compose", "exec", "-i", "cos", "uv", "run", "cos-mcp"],
+      "cwd": "/absolute/path/to/cos"
+    }
+  }
+}
+```
+
+Replace `/absolute/path/to/cos` with the full path to your `cos/` directory.
+
+The `cos` container runs `cos-mcp` as its persistent process. The MCP client starts a second `cos-mcp` instance inside the same container via `docker compose exec -i` (stdio transport). Both instances share Postgres and config — this is safe and expected.
 
 ## Restart the Platform
 
@@ -43,11 +82,11 @@ Three-step restart procedure:
 # Step 1 — stop all services
 docker compose down
 
-# Step 2 — wait a few seconds
-sleep 3
-
-# Step 3 — start again
+# Step 2 — start again
 docker compose up -d
+
+# Step 3 — verify all services are healthy
+docker compose ps
 ```
 
 No manual intervention is needed between steps.
@@ -55,13 +94,11 @@ No manual intervention is needed between steps.
 ## View Logs
 
 ```bash
-cos logs
+docker compose logs cos
 ```
 
-Streams structured JSON logs from all services.
-
-## Ingest a Document
+Streams structured JSON logs from the cos service. To follow logs in real time:
 
 ```bash
-cos ingest /path/to/document.pdf
+docker compose logs -f cos
 ```
