@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Literal
+from urllib.parse import quote
 
 import yaml
 from pydantic import BaseModel, Field, SecretStr, ValidationError
@@ -39,6 +40,16 @@ class DatabaseConfig(BaseModel):
             f"@{self.host}:{self.port}/{self.dbname}"
         )
 
+    @property
+    def libpq_dsn(self) -> str:
+        # Never log this value — it contains the plaintext password
+        password = quote(self.password.get_secret_value(), safe="")
+        return f"postgresql://{self.user}:{password}@{self.host}:{self.port}/{self.dbname}"
+
+
+class TikaConfig(BaseModel):
+    url: str = "http://tika:9998"
+
 
 class CosConfig(BaseModel):
     llm: LLMConfig
@@ -47,6 +58,7 @@ class CosConfig(BaseModel):
     channels: list[str]
     connectors: list[str]
     database: DatabaseConfig
+    tika: TikaConfig = TikaConfig()
 
     @classmethod
     def load(cls, path: str | Path = "config.yaml") -> "CosConfig":

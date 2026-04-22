@@ -24,3 +24,6 @@ database:
   user: postgres
   password: postgres
   dbname: cos
+
+tika:
+  url: http://tika:9998

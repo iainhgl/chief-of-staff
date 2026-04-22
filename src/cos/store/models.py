@@ -5,8 +5,11 @@ from datetime import datetime, timezone
 @dataclass
 class DocumentRecord:
     id: str = ""
-    source_uri: str = ""
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    source_path: str = ""
+    file_hash: str = ""
+    ingested_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    current_version: int = 1
+    status: str = "active"
 
 
 @dataclass
@@ -15,6 +18,7 @@ class ChunkRecord:
     document_id: str = ""
     content: str = ""
     chunk_index: int = 0
+    token_count: int = 0
 
 
 @dataclass
@@ -22,6 +26,8 @@ class EmbeddingRecord:
     id: str = ""
     chunk_id: str = ""
     vector: list[float] = field(default_factory=list)
+    model: str = ""
+    provider: str = ""
 
 
 @dataclass
@@ -30,8 +36,11 @@ class DocumentVersion:
     document_id: str = ""
     version: int = 0
     content_hash: str = ""
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+# ProvenanceRecord is not a database table — provenance is captured in document_versions.
+# Retained as a future abstraction placeholder.
 @dataclass
 class ProvenanceRecord:
     id: str = ""
