@@ -11,7 +11,7 @@ async def get_status() -> str:
     if config is None:
         return json.dumps({"status": "error", "error": "Server not initialized", "detail": "config not loaded yet"})
     health = HealthService(db_dsn=config.database.libpq_dsn, tika_url=config.tika.url)
-    components = await health.check_all()
+    components = [{"name": "cos", "healthy": True}] + await health.check_all()
     ready = bool(components) and all(c["healthy"] for c in components)
     return json.dumps({"status": "ok", "data": {"components": components, "ready": ready}, "citations": []})
 
