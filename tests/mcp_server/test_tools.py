@@ -30,9 +30,10 @@ async def test_get_status_all_components_present(monkeypatch):
         result = json.loads(await get_status())
 
     components = result["data"]["components"]
-    names = [c["name"] for c in components]
-    assert "postgres" in names
-    assert "tika" in names
+    assert len(components) == 3
+    assert components[0] == {"name": "cos", "healthy": True}
+    assert components[1]["name"] == "postgres"
+    assert components[2]["name"] == "tika"
 
 
 async def test_get_status_ready_false_when_unhealthy(monkeypatch):
