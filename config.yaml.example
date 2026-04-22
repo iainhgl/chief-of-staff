@@ -1,23 +1,76 @@
+# CoS Platform Configuration
+#
+# Copy this file to config.yaml and fill in the required values.
+# config.yaml is git-ignored and never committed.
+#
+# All keys listed here correspond to the CosConfig Pydantic model in src/cos/config.py.
+# The platform will validate config at startup and print human-readable errors for any
+# missing or invalid values.
+
+# ─────────────────────────────────────────────
+# LLM Provider
+# Controls which language model is used for synthesis and reasoning.
+# provider: the LLM provider name (currently only "anthropic" is implemented)
+# model: the specific model to use (e.g. "claude-sonnet-4-6", "claude-opus-4-7")
+# api_key: your Anthropic API key (required)
+# ─────────────────────────────────────────────
 llm:
   provider: anthropic
   model: claude-sonnet-4-6
   api_key: YOUR_API_KEY_HERE
 
+# ─────────────────────────────────────────────
+# Embedding Provider
+# Controls which embedding model is used when indexing documents.
+# provider: the embedding provider name (e.g. "anthropic" for Voyage models)
+# model: the specific embedding model (e.g. "voyage-3")
+# api_key: only set this if your embedding provider uses a DIFFERENT API key than llm.api_key.
+#   Leave as null (or omit) when both providers share the same key.
+# ─────────────────────────────────────────────
 embedding:
   provider: anthropic
   model: voyage-3
-  # api_key: only required if your embedding provider uses a different key than llm.api_key
-  # Leave as null (or omit) when both providers share the same key.
   api_key: null
 
+# ─────────────────────────────────────────────
+# Role Pack
+# Points to the YAML file that defines the active role identity (goals, tone, stakeholder map).
+# path: relative path from the cos/ directory to the role pack file.
+#
+# NOTE: role_packs/chro.yaml does not exist yet. The role pack loader is a stub in Epic 1.
+# The server will log "role pack: stub loaded" without reading this file.
+# The actual role pack file and loader are implemented in Epic 4.
+# ─────────────────────────────────────────────
 role_pack:
   path: role_packs/chro.yaml
 
+# ─────────────────────────────────────────────
+# Output Channels
+# Lists the output channels the platform is permitted to deliver responses through.
+# "local" means MCP tool responses (the only channel available in Epic 1).
+# Additional channels (telegram, email) are added in later epics.
+# ─────────────────────────────────────────────
 channels:
   - local
 
+# ─────────────────────────────────────────────
+# Connectors
+# Lists the external data connectors to activate (e.g. gmail, google_calendar).
+# Leave empty in Epic 1 — connectors are implemented in Epic 6.
+# ─────────────────────────────────────────────
 connectors: []
 
+# ─────────────────────────────────────────────
+# Database
+# Connection settings for the Postgres instance managed by Docker Compose.
+# host: use "postgres" (the Docker Compose service name) when running inside Docker.
+#   Use "localhost" only when connecting from outside the container network.
+# port: Postgres default (5432)
+# user/dbname: match the values in docker-compose.yml (default: postgres / cos)
+# password: MUST match the POSTGRES_PASSWORD environment variable in docker-compose.yml.
+#   The default in docker-compose.yml is "postgres". If you change it here, you must
+#   also update docker-compose.yml — the two are not linked automatically.
+# ─────────────────────────────────────────────
 database:
   host: postgres
   port: 5432
@@ -25,5 +78,12 @@ database:
   password: postgres
   dbname: cos
 
+# ─────────────────────────────────────────────
+# Tika
+# Connection settings for the Apache Tika document extraction service.
+# url: the Tika server base URL. Use "http://tika:9998" (the Docker Compose service name)
+#   when running inside Docker. The platform uses Tika to extract text from PDFs, Word
+#   documents, and other file formats. This service is started automatically by Docker Compose.
+# ─────────────────────────────────────────────
 tika:
   url: http://tika:9998
