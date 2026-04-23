@@ -180,20 +180,20 @@ async def test_store_document_reingest_increments_version(
     assert version_rows == [(1, "hash-v1"), (2, "hash-v2")]
 
 
-async def test_store_document_reingest_preserves_old_chunks(
+async def test_store_document_reingest_replaces_old_chunks(
     migrated_db: None,
 ) -> None:
     async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
         document_id = await store_document(
             conn,
-            source_path="docs/preserve.md",
+            source_path="docs/replace.md",
             file_hash="hash-a",
             chunks=[_make_chunk(0), _make_chunk(1)],
             embeddings=[_make_embedding(0), _make_embedding(1)],
         )
         await store_document(
             conn,
-            source_path="docs/preserve.md",
+            source_path="docs/replace.md",
             file_hash="hash-b",
             chunks=[_make_chunk(2)],
             embeddings=[_make_embedding(2)],
@@ -220,13 +220,9 @@ async def test_store_document_reingest_preserves_old_chunks(
         )
         embedding_count_row = await embedding_result.fetchone()
 
-    assert index_rows == [(0,), (1,), (2,)]
-    assert content_rows == [
-        (0, "chunk 0", 10),
-        (1, "chunk 1", 10),
-        (2, "chunk 2", 10),
-    ]
-    assert embedding_count_row == (3,)
+    assert index_rows == [(2,)]
+    assert content_rows == [(2, "chunk 2", 10)]
+    assert embedding_count_row == (1,)
 
 
 async def test_store_document_atomicity_on_failure(migrated_db: None) -> None:
