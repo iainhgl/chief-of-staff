@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from cos.config import CosConfig
@@ -107,3 +109,10 @@ def test_tika_config_defaults(tmp_path):
     cfg_file = _write_config(tmp_path, VALID_CONFIG_YAML)
     config = CosConfig.load(cfg_file)
     assert config.tika.url == "http://tika:9998"
+
+
+def test_storage_config_defaults(tmp_path):
+    cfg_file = _write_config(tmp_path, VALID_CONFIG_YAML)
+    config = CosConfig.load(cfg_file)
+    assert config.storage.originals_dir == Path("/data/originals")
+    assert config.storage.markdown_dir == Path("/data/markdown")
