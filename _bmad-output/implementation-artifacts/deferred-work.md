@@ -56,6 +56,11 @@
 - No assertion that `len(result.embeddings) == len(chunks)` — Voyage API guarantees ordering/count correspondence, but a length mismatch would silently return wrong results [src/cos/ingestion/embedder.py:46]
 - `ChunkingConfig` has no Pydantic validator for `chunk_overlap >= chunk_size` — invalid combinations are caught at runtime in `chunk()` but a startup-time validator would give earlier, clearer feedback [src/cos/config.py]
 
+## Deferred from: code review of 2-3-provenance-storage-and-transactional-writes (2026-04-23)
+
+- Missing UNIQUE constraint on `documents.source_path` — concurrent ingests with the same path can silently create duplicate rows instead of incrementing the version; adding the constraint requires a new migration; pre-existing schema gap, not introduced by Story 2.3 [src/cos/store/migrations/001_initial.sql]
+- Chunks have no version-linking column — after multiple ingests, `chunks` rows from all versions are stored together with no link to `document_versions`; a retrieval query cannot scope chunks to a specific version; intentional for Phase 1, address in the retrieval layer (Story 3.x) [src/cos/store/db.py]
+
 ## Deferred from: code review of 1-3-database-schema-and-migration-runner (2026-04-21)
 
 - No migration tracking table — every `run_migrations()` call re-executes all SQL files; safe now because all DDL is idempotent, but any future DML or non-idempotent migration will corrupt the database; add a `schema_migrations` ledger table when needed

@@ -1,0 +1,25 @@
+from collections.abc import AsyncIterator
+from importlib.util import module_from_spec, spec_from_file_location
+from pathlib import Path
+
+import psycopg
+import pytest
+
+_ROOT_CONFTEST_PATH = Path(__file__).resolve().parents[1] / "conftest.py"
+_ROOT_CONFTEST_SPEC = spec_from_file_location("root_test_conftest", _ROOT_CONFTEST_PATH)
+if _ROOT_CONFTEST_SPEC is None or _ROOT_CONFTEST_SPEC.loader is None:
+    raise RuntimeError(f"Unable to load root conftest from {_ROOT_CONFTEST_PATH}")
+
+_ROOT_CONFTEST_MODULE = module_from_spec(_ROOT_CONFTEST_SPEC)
+_ROOT_CONFTEST_SPEC.loader.exec_module(_ROOT_CONFTEST_MODULE)
+TEST_DSN: str = _ROOT_CONFTEST_MODULE.TEST_DSN
+
+
+@pytest.fixture(autouse=True)
+async def clean_tables(migrated_db: None) -> AsyncIterator[None]:
+    yield
+    async with await psycopg.AsyncConnection.connect(TEST_DSN, autocommit=True) as conn:
+        await conn.execute(
+            "TRUNCATE embeddings, chunks, document_versions, documents "
+            "RESTART IDENTITY CASCADE"
+        )
