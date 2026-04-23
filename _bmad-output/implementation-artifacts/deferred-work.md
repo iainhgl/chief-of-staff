@@ -61,6 +61,13 @@
 - Missing UNIQUE constraint on `documents.source_path` — concurrent ingests with the same path can silently create duplicate rows instead of incrementing the version; adding the constraint requires a new migration; pre-existing schema gap, not introduced by Story 2.3 [src/cos/store/migrations/001_initial.sql]
 - Chunks have no version-linking column — after multiple ingests, `chunks` rows from all versions are stored together with no link to `document_versions`; a retrieval query cannot scope chunks to a specific version; intentional for Phase 1, address in the retrieval layer (Story 3.x) [src/cos/store/db.py]
 
+## Deferred from: code review of 2-4-cli-ingest-command-and-ingestservice (2026-04-23)
+
+- Connection-per-file for CLI ingestion — `IngestService.ingest_file` opens a fresh psycopg3 connection per file; `create_pool` is unused by the CLI path; pool is correctly reserved for the MCP server retrieval path (Epic 3); sequential CLI use does not risk AC4 performance target [src/cos/services/ingestion.py]
+- Old chunks not deleted on re-ingest — retrieval will return chunks from all document versions simultaneously; version-linking column deferred to Phase 1 retrieval layer; already captured in deferred-work.md from Story 2.3 [src/cos/store/db.py]
+- File read twice (hash + extraction) — `hashlib.sha256(source_path.read_bytes())` and `shutil.copy2()` inside `extract()` read the file independently; fixing requires returning raw bytes from the extractor; pre-existing design [src/cos/ingestion/pipeline.py]
+- Logging double-encodes JSON — `logging.info(json.dumps(...))` is pre-existing pattern from Story 2.3 migration logging; structured logger migration is a separate cross-cutting concern [src/cos/ingestion/pipeline.py, src/cos/store/db.py]
+
 ## Deferred from: code review of 1-3-database-schema-and-migration-runner (2026-04-21)
 
 - No migration tracking table — every `run_migrations()` call re-executes all SQL files; safe now because all DDL is idempotent, but any future DML or non-idempotent migration will corrupt the database; add a `schema_migrations` ledger table when needed
