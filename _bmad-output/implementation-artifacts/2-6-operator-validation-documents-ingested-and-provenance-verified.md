@@ -1,6 +1,6 @@
 # Story 2.6: Operator Validation — Documents Ingested & Provenance Verified
 
-Status: review
+Status: done
 
 ## Story
 
@@ -50,6 +50,14 @@ So that I can confirm documents are correctly extracted, stored, and retrievable
 
 - [x] Task 3: Update the "Running all live tests" quick-script in `docs/manual-testing.md` (AC: #1–2)
   - [x] Extend the quick-script to include: `cos ingest /test-docs/` and `cos docs` verification step
+
+### Review Findings
+
+- [x] [Review][Decision] `src/cos/cli.py` modified despite explicit "no src/ changes" constraint — the summary echo string in `_ingest_folder()` was changed to match AC1's expected output format; the change is correct and minimal but violates the story's architecture constraint. Decision: accept this out-of-scope deviation, or require it be formally documented? [`src/cos/cli.py:91`]
+- [x] [Review][Decision] Quick-script "Running all live tests" omits the machine-verifiable JSON assertion — Dev Notes specified a Python pipe assertion (`assert len(docs) >= 3 and all(d['chunk_count'] > 0 for d in docs)`) for the step-14 quick-script entry; the implemented Section 11 ends at bare `cos docs --json` with no assertion. Decision: add the assertion or keep the simpler form? [`docs/manual-testing.md`]
+- [x] [Review][Patch] TRUNCATE command in story doc uses `RESTART IDENTITY` which fails on UUID PK tables — `TRUNCATE documents, document_versions, chunks, embeddings RESTART IDENTITY CASCADE;` will raise a PostgreSQL error because none of the four tables have `SERIAL`/`BIGSERIAL`; all PKs are `UUID DEFAULT gen_random_uuid()`. Fix: remove `RESTART IDENTITY`. [`_bmad-output/implementation-artifacts/2-6-...md:534`]
+- [x] [Review][Patch] No `.gitattributes` — binary fixture files unprotected from CRLF corruption — without `*.pdf binary` and `*.docx binary` entries, `git checkout` on Windows with `core.autocrlf=true` will corrupt the PDF xref table and the DOCX ZIP structure, causing Tika extraction failures. Fix: add `.gitattributes`. [repo root]
+- [x] [Review][Defer] `_ingest_folder` exits with code 0 when all files fail to ingest [`src/cos/cli.py`] — deferred, pre-existing
 
 ## Dev Notes
 
@@ -531,7 +539,7 @@ This test verifies transactional integrity. Run two terminal windows.
 **Terminal 1 — start a fresh ingest (clear DB first):**
 ```bash
 # Optional: clear documents to get a clean baseline
-docker compose exec postgres psql -U postgres -d cos -c "TRUNCATE documents, document_versions, chunks, embeddings RESTART IDENTITY CASCADE;"
+docker compose exec postgres psql -U postgres -d cos -c "TRUNCATE documents, document_versions, chunks, embeddings CASCADE;"
 
 # Start ingest — the PDF goes through Tika which adds a small delay
 docker compose exec cos cos ingest /test-docs/sample-report.pdf

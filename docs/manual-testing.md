@@ -397,10 +397,15 @@ docker compose up -d
 docker compose ps
 docker compose run --rm -v "$(pwd)/test-docs:/test-docs" cos cos ingest /test-docs/
 docker compose run --rm cos cos docs
-docker compose run --rm cos cos docs --json
+docker compose run --rm cos cos docs --json | uv run python -c "
+import sys, json
+docs = json.load(sys.stdin)
+assert len(docs) >= 3 and all(d['chunk_count'] > 0 for d in docs)
+print(f'cos docs ok: {len(docs)} documents, all indexed')
+"
 ```
 
-**Expected:** Services are healthy, all three test documents ingest successfully, and both `cos docs` commands return the expected provenance data.
+**Expected:** Services are healthy, all three test documents ingest successfully, `cos docs` shows correct provenance metadata, and the JSON assertion prints `cos docs ok: 3 documents, all indexed`.
 
 ---
 

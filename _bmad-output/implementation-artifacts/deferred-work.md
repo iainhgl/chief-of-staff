@@ -73,6 +73,10 @@
 - `_docs_versions` exits code 0 on unknown document ID — spec explicitly says no error handling; misleading for scripts; revisit if a scripting AC is added [src/cos/cli.py]
 - `ingested_at` None from DB would crash in `.isoformat()` — NOT NULL constraint in schema makes this theoretical; no handling required at this stage; address if schema relaxed [src/cos/store/models.py]
 
+## Deferred from: code review of 2-6-operator-validation-documents-ingested-and-provenance-verified (2026-04-23)
+
+- `_ingest_folder` exits with code 0 when all files fail to ingest — when every file in a folder fails, the folder ingest prints individual `Error:` lines then prints "No supported files found" and exits 0; a total-failure should arguably exit non-zero; pre-existing design, not introduced by Story 2.6 [`src/cos/cli.py`]
+
 ## Deferred from: code review of 1-3-database-schema-and-migration-runner (2026-04-21)
 
 - No migration tracking table — every `run_migrations()` call re-executes all SQL files; safe now because all DDL is idempotent, but any future DML or non-idempotent migration will corrupt the database; add a `schema_migrations` ledger table when needed
