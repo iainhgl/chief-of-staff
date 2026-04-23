@@ -63,6 +63,11 @@ class StorageConfig(BaseModel):
     markdown_dir: Path = Path("/data/markdown")
 
 
+class ChunkingConfig(BaseModel):
+    chunk_size: int = 1024
+    chunk_overlap: int = 100
+
+
 class CosConfig(BaseModel):
     llm: LLMConfig
     embedding: EmbeddingConfig
@@ -72,6 +77,7 @@ class CosConfig(BaseModel):
     database: DatabaseConfig
     tika: TikaConfig = TikaConfig()
     storage: StorageConfig = StorageConfig()
+    chunking: ChunkingConfig = ChunkingConfig()
 
     @classmethod
     def load(cls, path: str | Path = "config.yaml") -> "CosConfig":

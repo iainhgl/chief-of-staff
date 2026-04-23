@@ -116,3 +116,10 @@ def test_storage_config_defaults(tmp_path):
     config = CosConfig.load(cfg_file)
     assert config.storage.originals_dir == Path("/data/originals")
     assert config.storage.markdown_dir == Path("/data/markdown")
+
+
+def test_chunking_config_defaults(tmp_path):
+    cfg_file = _write_config(tmp_path, VALID_CONFIG_YAML)
+    config = CosConfig.load(cfg_file)
+    assert config.chunking.chunk_size == 1024
+    assert config.chunking.chunk_overlap == 100

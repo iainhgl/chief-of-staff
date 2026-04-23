@@ -99,3 +99,14 @@ tika:
 storage:
   originals_dir: /data/originals
   markdown_dir: /data/markdown
+
+# ─────────────────────────────────────────────
+# Chunking
+# Controls how extracted document text is split before embedding.
+# chunk_size: target token count per chunk (default: 1024)
+# chunk_overlap: token overlap between adjacent chunks for context continuity (default: 100)
+# Changing chunk_size requires re-embedding all existing documents.
+# ─────────────────────────────────────────────
+chunking:
+  chunk_size: 1024
+  chunk_overlap: 100
