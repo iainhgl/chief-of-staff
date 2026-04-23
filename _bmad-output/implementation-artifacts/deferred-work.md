@@ -68,6 +68,11 @@
 - File read twice (hash + extraction) — `hashlib.sha256(source_path.read_bytes())` and `shutil.copy2()` inside `extract()` read the file independently; fixing requires returning raw bytes from the extractor; pre-existing design [src/cos/ingestion/pipeline.py]
 - Logging double-encodes JSON — `logging.info(json.dumps(...))` is pre-existing pattern from Story 2.3 migration logging; structured logger migration is a separate cross-cutting concern [src/cos/ingestion/pipeline.py, src/cos/store/db.py]
 
+## Deferred from: code review of 2-5-document-provenance-listing (2026-04-23)
+
+- `_docs_versions` exits code 0 on unknown document ID — spec explicitly says no error handling; misleading for scripts; revisit if a scripting AC is added [src/cos/cli.py]
+- `ingested_at` None from DB would crash in `.isoformat()` — NOT NULL constraint in schema makes this theoretical; no handling required at this stage; address if schema relaxed [src/cos/store/models.py]
+
 ## Deferred from: code review of 1-3-database-schema-and-migration-runner (2026-04-21)
 
 - No migration tracking table — every `run_migrations()` call re-executes all SQL files; safe now because all DDL is idempotent, but any future DML or non-idempotent migration will corrupt the database; add a `schema_migrations` ledger table when needed
