@@ -1,6 +1,6 @@
 # Manual Testing Guide
 
-Reflects the platform as built at the end of **Epic 1: Runnable Platform Foundation**. Run these tests to verify the platform is healthy and behaving correctly.
+Reflects the platform as built at the end of **Epic 2: Document Knowledge Base**. Run these tests to verify the platform is healthy and the ingestion pipeline is working correctly.
 
 This guide is rewritten at the end of each epic to reflect current platform state — it does not accumulate historical tests.
 
@@ -17,16 +17,18 @@ This guide is rewritten at the end of each epic to reflect current platform stat
 
 ---
 
-## What Epic 1 delivers
+## What Epic 2 delivers
 
-- Three-container platform (`postgres`, `tika`, `cos`) started with `docker compose up -d`
-- Config validation at startup — human-readable errors for bad config
-- Database schema applied automatically on every startup (idempotent)
-- MCP server accessible via `docker compose exec` stdio transport
-- **`get_status`** tool — returns JSON health of all three components and a `ready` flag
-- **`retrieve`, `get_role_context`, `list_documents`** — registered but return "Not yet implemented" error envelopes
+- Full document ingestion pipeline: PDF, Word (`.docx`), Markdown, and plain text
+- `cos ingest <path>` — ingest a single file or folder from the CLI
+- `cos docs` — list all ingested documents with provenance metadata
+- `cos docs --versions <id>` — show version history for a document
+- `cos docs --json` — machine-readable JSON output
+- Originals stored byte-for-byte in `./data/originals/`; Markdown copies in `./data/markdown/`
+- All four MCP tools registered: `get_status`, `retrieve`, `get_role_context`, `list_documents`
+- `retrieve`, `get_role_context`, and `list_documents` MCP tools still return "Not yet implemented" error envelopes
 
-CLI commands (`cos status`, `cos logs`, etc.) are stubs and not available.
+Other CLI commands such as `cos status`, `cos logs`, and `cos restart` remain stubs.
 
 ---
 
@@ -263,7 +265,151 @@ Follow up with test 2 (startup logs) to confirm clean restart.
 
 ---
 
-## 11 — Automated test suite
+## Epic 2: Document Ingestion & Provenance
+
+**Prerequisites:**
+
+- Platform running: `docker compose up -d` with all three services healthy
+- `test-docs/` directory exists with `sample-brief.md`, `sample-report.pdf`, `sample-memo.docx`
+- Working directory: `cos/`
+
+### T2.6.1 — Ingest `test-docs/` folder: all 3 files ingested [LIVE]
+
+```bash
+docker compose run --rm -v "$(pwd)/test-docs:/test-docs" cos cos ingest /test-docs/
+```
+
+**Expected output (order may vary):**
+
+```text
+Ingested sample-brief.md -> N chunks indexed
+Ingested sample-report.pdf -> N chunks indexed
+Ingested sample-memo.docx -> N chunks indexed
+Ingested 3 files -> N total chunks indexed
+```
+
+All three file names appear. Chunk counts are at least 1. No error lines appear.
+
+**Fail signal:** Any `Error:` line, a file listed as skipped unexpectedly, or a chunk count of `0` for any file.
+
+### T2.6.2 — `cos docs` shows 3 documents with correct metadata [LIVE]
+
+```bash
+docker compose run --rm cos cos docs
+```
+
+**Expected:** A table with 3 rows, one per test document.
+
+Each row must have:
+
+- `SOURCE PATH` ending in `/test-docs/sample-brief.md`, `/test-docs/sample-report.pdf`, or `/test-docs/sample-memo.docx`
+- `INGESTED AT` showing a recent timestamp
+- `VER` = `1` for each document on first ingest
+- `CHUNKS` >= `1` for each document
+
+**Fail signal:** Fewer than 3 rows, `CHUNKS = 0`, `VER` not equal to `1`, or source paths that do not match the test files.
+
+### T2.6.3 — Re-ingest and version history [LIVE]
+
+First capture the document ID for `sample-brief.md`:
+
+```bash
+docker compose run --rm cos cos docs --json
+```
+
+Find the entry whose `source_path` ends with `sample-brief.md` and copy its `id`.
+
+Re-ingest the same file:
+
+```bash
+docker compose run --rm -v "$(pwd)/test-docs:/test-docs" cos cos ingest /test-docs/sample-brief.md
+```
+
+Check version history:
+
+```bash
+docker compose run --rm cos cos docs --versions "<document-id>"
+```
+
+**Expected:** Two rows are shown with version numbers `1` and `2`. The timestamps should be distinct and the file hashes may either match or differ depending on whether the file changed.
+
+**Fail signal:** Only one version row appears, or the CLI prints `No versions found for document ID`.
+
+### T2.6.4 — Originals are preserved byte-for-byte [LIVE]
+
+```bash
+ls -la data/originals/
+diff test-docs/sample-brief.md data/originals/sample-brief.md && echo "sample-brief.md: identical"
+diff test-docs/sample-report.pdf data/originals/sample-report.pdf && echo "sample-report.pdf: identical"
+diff test-docs/sample-memo.docx data/originals/sample-memo.docx && echo "sample-memo.docx: identical"
+```
+
+**Expected:** All three comparison commands print `<name>: identical` and the three files are present in `data/originals/`.
+
+**Fail signal:** Any `diff` output, any missing file, or a size mismatch between a source file and its stored original.
+
+### T2.6.5 — Crash recovery leaves no partial document rows [LIVE]
+
+Use `exec` rather than `run` for this test so the ingest process runs inside the existing `cos` container and can be killed predictably. First copy the fixtures into the running container:
+
+```bash
+docker compose cp test-docs/. cos:/tmp/test-docs
+docker compose exec cos cos ingest /tmp/test-docs
+```
+
+While ingestion is running, in a second terminal:
+
+```bash
+docker compose kill cos
+docker compose up -d cos
+sleep 10
+docker compose run --rm cos cos docs
+```
+
+**Expected:** After restart, `cos docs` shows only fully indexed documents. No row should appear with a missing chunk count or partially written state. A document is either present with a valid chunk count or absent.
+
+**Fail signal:** Any partial record appears after restart, such as a document row with `CHUNKS = 0` caused by the interrupted ingest.
+
+### T2.6.6 — `cos docs --json` returns valid JSON with all fields [LIVE]
+
+```bash
+docker compose run --rm cos cos docs --json
+```
+
+**Expected:** A JSON array. Each item includes:
+
+- `id`
+- `source_path`
+- `ingested_at`
+- `current_version`
+- `chunk_count`
+
+**Fail signal:** Invalid JSON, missing fields, or an empty array after successful ingestion.
+
+---
+
+## 11 — Running all live tests
+
+Use this sequence for a concise end-to-end operator pass:
+
+```bash
+docker compose up -d
+docker compose ps
+docker compose run --rm -v "$(pwd)/test-docs:/test-docs" cos cos ingest /test-docs/
+docker compose run --rm cos cos docs
+docker compose run --rm cos cos docs --json | uv run python -c "
+import sys, json
+docs = json.load(sys.stdin)
+assert len(docs) >= 3 and all(d['chunk_count'] > 0 for d in docs)
+print(f'cos docs ok: {len(docs)} documents, all indexed')
+"
+```
+
+**Expected:** Services are healthy, all three test documents ingest successfully, `cos docs` shows correct provenance metadata, and the JSON assertion prints `cos docs ok: 3 documents, all indexed`.
+
+---
+
+## 12 — Automated test suite
 
 ```bash
 uv run pytest tests/ -v
@@ -273,7 +419,7 @@ uv run pytest tests/ -v
 
 ---
 
-## 12 — Bad config produces a clear error
+## 13 — Bad config produces a clear error
 
 ```bash
 cp config.yaml /tmp/config_backup.yaml
