@@ -1,5 +1,5 @@
 # generated: 2026-04-17
-# last_updated: 2026-04-23  # 2-2-text-chunking-and-embedding-pipeline → review
+# last_updated: 2026-04-23  # 2-3-provenance-storage-and-transactional-writes → done
 # project: CoS
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-17
-last_updated: 2026-04-23
+last_updated: 2026-04-23  # 2-3-provenance-storage-and-transactional-writes → done
 project: CoS
 project_key: NOKEY
 tracking_system: file-system
@@ -63,7 +63,7 @@ development_status:
   epic-2: in-progress
   2-1-document-extraction-and-markdown-normalisation: done
   2-2-text-chunking-and-embedding-pipeline: done
-  2-3-provenance-storage-and-transactional-writes: backlog
+  2-3-provenance-storage-and-transactional-writes: done
   2-4-cli-ingest-command-and-ingestservice: backlog
   2-5-document-provenance-listing: backlog
   2-6-operator-validation-documents-ingested-and-provenance-verified: backlog
