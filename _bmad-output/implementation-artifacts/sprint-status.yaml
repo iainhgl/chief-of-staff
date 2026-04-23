@@ -1,0 +1,140 @@
+# generated: 2026-04-17
+# last_updated: 2026-04-23  # 2-1-document-extraction-and-markdown-normalisation → review
+# project: CoS
+# project_key: NOKEY
+# tracking_system: file-system
+# story_location: _bmad-output/implementation-artifacts
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+#
+# Epic Status Transitions:
+#   - backlog → in-progress: Automatically when first story is created (via create-story)
+#   - in-progress → done: Manually when all stories reach 'done' status
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created in stories folder
+#   - in-progress: Developer actively working on implementation
+#   - review: Ready for code review (via Dev's code-review workflow)
+#   - done: Story completed
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+#
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when first story is created
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates next story after previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+
+generated: 2026-04-17
+last_updated: 2026-04-23
+project: CoS
+project_key: NOKEY
+tracking_system: file-system
+story_location: _bmad-output/implementation-artifacts
+
+development_status:
+
+  # ─────────────────────────────────────────────
+  # Epic 1: Runnable Platform Foundation
+  # Operator can stand up a fully healthy CoS instance from scratch with a single command
+  # ─────────────────────────────────────────────
+  epic-1: in-progress
+  1-1-project-scaffold-containerised-services-and-core-interfaces: done
+  1-2-configuration-loader: done
+  1-3-database-schema-and-migration-runner: done
+  1-4-mcp-server-foundation: done
+  1-5-operator-validation-platform-boots-end-to-end: done
+  1-6-documentation-and-housekeeping: done
+  epic-1-retrospective: optional
+
+  # ─────────────────────────────────────────────
+  # Epic 2: Document Knowledge Base
+  # Operator can load documents of any common format into the knowledge base
+  # ─────────────────────────────────────────────
+  epic-2: in-progress
+  2-1-document-extraction-and-markdown-normalisation: review
+  2-2-text-chunking-and-embedding-pipeline: backlog
+  2-3-provenance-storage-and-transactional-writes: backlog
+  2-4-cli-ingest-command-and-ingestservice: backlog
+  2-5-document-provenance-listing: backlog
+  2-6-operator-validation-documents-ingested-and-provenance-verified: backlog
+  2-7-documentation-and-housekeeping: backlog
+  epic-2-retrospective: optional
+
+  # ─────────────────────────────────────────────
+  # Epic 3: Knowledge Retrieval & Cited Q&A
+  # User can ask natural language questions and receive grounded answers with citations
+  # ─────────────────────────────────────────────
+  epic-3: backlog
+  3-1-hybrid-search-engine-and-citation-formatting: backlog
+  3-2-outputrouter-and-egress-enforcement: backlog
+  3-3-llm-synthesis-and-retrievalservice: backlog
+  3-4-mcp-retrieve-and-list-documents-tools: backlog
+  3-5-operator-validation-end-to-end-qa-with-citations: backlog
+  3-6-documentation-and-housekeeping: backlog
+  epic-3-retrospective: optional
+
+  # ─────────────────────────────────────────────
+  # Epic 4: Role Identity & Configuration
+  # Operator can define a complete role identity in a YAML file and activate without code changes
+  # ─────────────────────────────────────────────
+  epic-4: backlog
+  4-1-role-pack-schema-and-chro-configuration-file: backlog
+  4-2-role-pack-loader-and-startup-integration: backlog
+  4-3-role-pack-applied-to-retrieval-and-synthesis: backlog
+  4-4-role-pack-and-provider-portability: backlog
+  4-5-operator-validation-chro-role-active-and-switchable: backlog
+  4-6-documentation-and-housekeeping: backlog
+  epic-4-retrospective: optional
+
+  # ─────────────────────────────────────────────
+  # Epic 5: Platform Operations & Resilience
+  # Operator and non-technical users can monitor, diagnose, and recover the platform via CLI
+  # ─────────────────────────────────────────────
+  epic-5: backlog
+  5-1-health-check-system: backlog
+  5-2-platform-restart-and-recovery: backlog
+  5-3-diagnostic-log-export: backlog
+  5-4-secrets-and-security-audit: backlog
+  5-5-operator-validation-recovery-scenario: backlog
+  5-6-documentation-and-housekeeping: backlog
+  epic-5-retrospective: optional
+
+  # ─────────────────────────────────────────────
+  # Epic 6: Connected Knowledge Sources (Growth)
+  # Platform automatically ingests live content from Gmail and Google Calendar
+  # ─────────────────────────────────────────────
+  epic-6: backlog
+  6-1-oauth-authentication-setup: backlog
+  6-2-near-duplicate-detection-on-ingest: backlog
+  6-3-jobs-queue-and-background-ingestion-worker: backlog
+  6-4-gmail-connector: backlog
+  6-5-google-calendar-connector: backlog
+  6-6-ingest-document-mcp-tool: backlog
+  6-7-operator-validation-connected-sources-live: backlog
+  6-8-documentation-and-housekeeping: backlog
+  epic-6-retrospective: optional
+
+  # ─────────────────────────────────────────────
+  # Epic 7: Ambient Messaging Intelligence (Growth)
+  # Users interact via Telegram — questions, notes, morning briefs, web search
+  # ─────────────────────────────────────────────
+  epic-7: backlog
+  7-1-telegram-bot-setup-and-output-channel: backlog
+  7-2-telegram-inbound-qa: backlog
+  7-3-telegram-note-capture: backlog
+  7-4-web-search-mcp-tool: backlog
+  7-5-scheduler-infrastructure-and-morning-brief: backlog
+  7-6-meeting-prep-from-calendar-events: backlog
+  7-7-operator-validation-ambient-intelligence-live: backlog
+  7-8-documentation-and-housekeeping: backlog
+  epic-7-retrospective: optional

@@ -18,3 +18,12 @@ tokens/
 
 # Optional pyenv pin
 # .python-version
+
+# Claude Code local settings (machine-specific permissions)
+.claude/settings.local.json
+
+# Runtime document storage (created by cos ingest)
+data/
+
+# macOS metadata
+.DS_Store
