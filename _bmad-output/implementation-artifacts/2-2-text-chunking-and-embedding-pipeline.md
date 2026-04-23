@@ -1,6 +1,6 @@
 # Story 2.2: Text Chunking & Embedding Pipeline
 
-Status: review
+Status: done
 
 ## Story
 
@@ -340,3 +340,10 @@ claude-sonnet-4-6
 - Added configurable chunking defaults and documented them in the example configuration.
 - Implemented production chunking and embedding modules with explicit metadata contracts for later DB persistence stories.
 - Added focused automated coverage and validated the story with pytest, Ruff, and targeted mypy checks.
+
+### Review Findings
+
+- [x] [Review][Patch] voyageai version pin too loose — `voyageai>=0.3.0` allows unverified older versions; minimum working version is `0.3.7` [pyproject.toml:22]
+- [x] [Review][Defer] Result list construction outside try-except — if `result.embeddings` has unexpected structure, raw exceptions escape instead of `EmbeddingError` [embedder.py:46-53] — deferred, defensive hardening
+- [x] [Review][Defer] No assertion that `len(result.embeddings) == len(chunks)` — Voyage API guarantees ordering but silent mismatch possible [embedder.py:46] — deferred, Voyage API is trusted
+- [x] [Review][Defer] `ChunkingConfig` has no Pydantic validator for `chunk_overlap >= chunk_size` — caught at runtime in `chunk()` but a startup-time validator would give earlier feedback [config.py] — deferred, out of scope for this story

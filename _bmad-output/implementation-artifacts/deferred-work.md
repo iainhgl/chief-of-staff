@@ -50,6 +50,12 @@
 - `author` field may receive `list[str]` from tika-client multi-value metadata — `response.data.get(DublinCoreKey.Creator)` behaviour with multiple creators unverified; requires tika-client investigation [src/cos/ingestion/extractor.py]
 - Integration test missing assertions for AC 1 metadata fields — `test_extract_pdf_via_tika` does not assert `result.content_type`, `result.title`, or `result.author`; depends on Tika response for minimal PDF fixture [tests/ingestion/test_extractor.py]
 
+## Deferred from: code review of 2-2-text-chunking-and-embedding-pipeline (2026-04-23)
+
+- Result list construction outside try-except in `_embed_via_voyage` — if `result.embeddings` has unexpected structure, raw exceptions escape instead of `EmbeddingError`; Voyage API structure is trusted for now [src/cos/ingestion/embedder.py:46-53]
+- No assertion that `len(result.embeddings) == len(chunks)` — Voyage API guarantees ordering/count correspondence, but a length mismatch would silently return wrong results [src/cos/ingestion/embedder.py:46]
+- `ChunkingConfig` has no Pydantic validator for `chunk_overlap >= chunk_size` — invalid combinations are caught at runtime in `chunk()` but a startup-time validator would give earlier, clearer feedback [src/cos/config.py]
+
 ## Deferred from: code review of 1-3-database-schema-and-migration-runner (2026-04-21)
 
 - No migration tracking table — every `run_migrations()` call re-executes all SQL files; safe now because all DDL is idempotent, but any future DML or non-idempotent migration will corrupt the database; add a `schema_migrations` ledger table when needed
