@@ -22,6 +22,9 @@ tokens/
 # Claude Code local settings (machine-specific permissions)
 .claude/settings.local.json
 
+# Codex agent skills (tooling infrastructure, not project code)
+.agents/
+
 # Runtime document storage (created by cos ingest)
 data/
 
