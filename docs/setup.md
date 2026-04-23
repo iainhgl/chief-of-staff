@@ -91,6 +91,45 @@ docker compose ps
 
 No manual intervention is needed between steps.
 
+## Ingest Documents
+
+Load documents into the knowledge base using the `cos ingest` command, run inside the `cos` container.
+
+### Ingest a single file
+
+```bash
+docker compose run --rm cos uv run cos ingest /path/to/document.pdf
+```
+
+Supported formats: `.pdf`, `.docx`, `.md`, `.txt`
+
+On success the command prints a plain-language summary:
+
+```
+Ingested strategy.pdf → 24 chunks indexed
+```
+
+### Ingest a folder
+
+```bash
+docker compose run --rm cos uv run cos ingest /path/to/docs/
+```
+
+All supported files are ingested **recursively** — subdirectories are walked automatically. Each file reports its own progress line and a final summary is printed:
+
+```
+Ingested overview.md → 3 chunks indexed
+Ingested reports/q3.pdf → 18 chunks indexed
+Skipped spreadsheet.xlsx — unsupported format
+Done: 2 file(s) ingested, 21 total chunks indexed
+```
+
+Unsupported file types are skipped with a notice and do not cause the command to fail.
+
+### If a file fails
+
+A plain-language error is shown for the failed file. In folder mode, ingestion continues for the remaining files. The error message identifies the file and the reason — no stack trace is shown.
+
 ## View Logs
 
 ```bash
