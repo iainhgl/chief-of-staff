@@ -1,4 +1,4 @@
-"""Database helpers — migration runner and connection pool stub."""
+"""Database helpers — migration runner and connection pool support."""
 import json
 import logging
 from pathlib import Path
@@ -6,6 +6,7 @@ from typing import Any
 
 import psycopg
 from pgvector.psycopg import register_vector_async  # type: ignore[import-untyped]
+from psycopg_pool import AsyncConnectionPool
 
 from cos.store.models import ChunkRecord, EmbeddingRecord
 
@@ -102,5 +103,7 @@ async def store_document(
     return str(document_id)
 
 
-async def create_pool(dsn: str) -> Any:
-    raise NotImplementedError
+async def create_pool(dsn: str) -> AsyncConnectionPool:
+    pool = AsyncConnectionPool(dsn, open=False)
+    await pool.open(wait=True, timeout=30.0)
+    return pool
