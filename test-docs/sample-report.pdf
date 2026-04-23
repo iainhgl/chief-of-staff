@@ -1,0 +1,57 @@
+%PDF-1.4
+1 0 obj
+<</Type/Catalog/Pages 2 0 R>>
+endobj
+2 0 obj
+<</Type/Pages/Kids[3 0 R]/Count 1>>
+endobj
+3 0 obj
+<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>
+endobj
+4 0 obj
+<</Length 1425>>
+stream
+BT /F1 10 Tf 50 750 Td
+(CoS Platform Test Report) Tj 0 -14 Td
+() Tj 0 -14 Td
+(This document is a test fixture for the CoS ingestion pipeline.) Tj 0 -14 Td
+(It contains structured content to verify PDF extraction via Apache Tika.) Tj 0 -14 Td
+() Tj 0 -14 Td
+(Section 1: Platform Overview) Tj 0 -14 Td
+(The Chief of Staff AI platform ingests documents of many formats.) Tj 0 -14 Td
+(Each document is extracted to Markdown, chunked by token count,) Tj 0 -14 Td
+(embedded with a vector model, and stored transactionally in Postgres.) Tj 0 -14 Td
+() Tj 0 -14 Td
+(Section 2: Ingestion Pipeline) Tj 0 -14 Td
+(The ingestion pipeline runs: extract to markdown, chunk, embed, and store.) Tj 0 -14 Td
+(Documents flow through the pipeline in a single atomic transaction.) Tj 0 -14 Td
+(On failure the transaction is rolled back and no partial records remain.) Tj 0 -14 Td
+() Tj 0 -14 Td
+(Section 3: Provenance Tracking) Tj 0 -14 Td
+(Every document version is recorded with file hash and ingested timestamp.) Tj 0 -14 Td
+(Re-ingesting the same source path creates a new version record.) Tj 0 -14 Td
+(The originals directory stores byte-for-byte copies of every source file.) Tj 0 -14 Td
+() Tj 0 -14 Td
+(Section 4: Retrieval Readiness) Tj 0 -14 Td
+(Once ingested, documents are available for keyword and semantic search.) Tj 0 -14 Td
+(Each stored chunk preserves the source document id, path, and chunk index.) Tj 0 -14 Td
+() Tj 0 -14 Td
+ET
+endstream
+endobj
+5 0 obj
+<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000054 00000 n 
+0000000105 00000 n 
+0000000217 00000 n 
+0000001692 00000 n 
+trailer
+<</Size 6/Root 1 0 R>>
+startxref
+1755
+%%EOF

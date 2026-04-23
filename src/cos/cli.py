@@ -88,9 +88,7 @@ async def _ingest_folder(target: Path, service: IngestService) -> None:
     if total_files == 0:
         typer.echo(f"No supported files found in {target}")
     else:
-        typer.echo(
-            f"Done: {total_files} file(s) ingested, {total_chunks} total chunks indexed"
-        )
+        typer.echo(f"Ingested {total_files} files -> {total_chunks} total chunks indexed")
 
 
 @app.command()
