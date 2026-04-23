@@ -6,7 +6,14 @@ import yaml
 from pydantic import BaseModel, Field, SecretStr, ValidationError
 
 LogComponent = Literal[
-    "ingestion", "retrieval", "mcp_server", "cli", "scheduler", "connector", "output", "config"
+    "ingestion",
+    "retrieval",
+    "mcp_server",
+    "cli",
+    "scheduler",
+    "connector",
+    "output",
+    "config",
 ]
 
 
@@ -51,6 +58,11 @@ class TikaConfig(BaseModel):
     url: str = "http://tika:9998"
 
 
+class StorageConfig(BaseModel):
+    originals_dir: Path = Path("/data/originals")
+    markdown_dir: Path = Path("/data/markdown")
+
+
 class CosConfig(BaseModel):
     llm: LLMConfig
     embedding: EmbeddingConfig
@@ -59,6 +71,7 @@ class CosConfig(BaseModel):
     connectors: list[str]
     database: DatabaseConfig
     tika: TikaConfig = TikaConfig()
+    storage: StorageConfig = StorageConfig()
 
     @classmethod
     def load(cls, path: str | Path = "config.yaml") -> "CosConfig":
@@ -67,8 +80,10 @@ class CosConfig(BaseModel):
                 data = yaml.safe_load(f)
             if not isinstance(data, dict):
                 raise SystemExit(
-                    f"Invalid config.yaml: expected a YAML mapping, got {type(data).__name__}.\n"
-                    "Check that the file is not empty and contains valid key: value pairs."
+                    "Invalid config.yaml: expected a YAML mapping, got "
+                    f"{type(data).__name__}.\n"
+                    "Check that the file is not empty and contains valid "
+                    "key: value pairs."
                 )
             return cls.model_validate(data)
         except FileNotFoundError:

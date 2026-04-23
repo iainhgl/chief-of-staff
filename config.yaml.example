@@ -87,3 +87,15 @@ database:
 # ─────────────────────────────────────────────
 tika:
   url: http://tika:9998
+
+# ─────────────────────────────────────────────
+# Storage
+# Directories where the ingestion pipeline writes files inside the container.
+# These paths map to the host via the Docker Compose volume mount: ./data:/data
+# originals_dir: byte-for-byte copy of every source file; never modified after write
+# markdown_dir: extracted plain-text working copy of each document; used for chunking
+# Both directories are created automatically on first ingest if they do not exist.
+# ─────────────────────────────────────────────
+storage:
+  originals_dir: /data/originals
+  markdown_dir: /data/markdown
