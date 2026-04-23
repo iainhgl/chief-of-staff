@@ -1,6 +1,6 @@
 # Story 2.1: Document Extraction & Markdown Normalisation
 
-Status: review
+Status: done
 
 ## Story
 
@@ -446,7 +446,19 @@ GPT-5 Codex
 - _bmad-output/implementation-artifacts/2-1-document-extraction-and-markdown-normalisation.md
 - _bmad-output/implementation-artifacts/sprint-status.yaml
 
+### Review Findings
+
+- [x] [Review][Patch] `content_type` type unsafety — `response.type` may be `None` but return type declares `str`; no guard before assignment [src/cos/ingestion/extractor.py]
+- [x] [Review][Patch] `UnicodeDecodeError` not wrapped as `ExtractionError` for non-UTF-8 `.md`/`.txt` files — unhandled exception escapes extractor [src/cos/ingestion/extractor.py]
+- [x] [Review][Patch] Tika-failure path in `extract()` untested — no test verifying `ExtractionError` propagates out of `extract()` (not just `_extract_via_tika`) and that no blank markdown copy is written [tests/ingestion/test_extractor.py]
+- [x] [Review][Patch] `test_unsupported_format_raises` only asserts `originals_dir` is empty — missing assertion that `markdown_dir` is also empty [tests/ingestion/test_extractor.py]
+- [x] [Review][Patch] No `.docx` routing test through `extract()` — AC 2 names `.docx` explicitly but no test confirms it routes via Tika rather than direct read [tests/ingestion/test_extractor.py]
+- [x] [Review][Defer] Filename/stem collision for same-named files from different source directories — `originals_dir / source_path.name` and `markdown_dir / stem.md` silently overwrite [src/cos/ingestion/extractor.py] — deferred, pre-existing; re-ingest conflict detection is Story 2.3 scope
+- [x] [Review][Defer] `author` field may receive `list[str]` from tika-client multi-value metadata — `response.data.get(DublinCoreKey.Creator)` behaviour with multiple creators unverified [src/cos/ingestion/extractor.py] — deferred, pre-existing; requires tika-client investigation
+- [x] [Review][Defer] Integration test missing assertions for AC 1 metadata fields — `test_extract_pdf_via_tika` does not assert `result.content_type`, `result.title`, or `result.author` [tests/ingestion/test_extractor.py] — deferred, pre-existing; depends on Tika response for minimal PDF fixture
+
 ## Change Log
 
 - 2026-04-23: Story created
 - 2026-04-23: Implemented document extraction, markdown normalisation, storage config defaults, and extractor test coverage; advanced story to review.
+- 2026-04-23: Code review complete — 5 patches, 3 deferred, 10 dismissed.

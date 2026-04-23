@@ -59,6 +59,7 @@ async def test_unsupported_format_raises(tmp_path: Path) -> None:
         await extract(src, "http://unused", originals_dir, tmp_path / "md")
 
     assert not list(originals_dir.iterdir())
+    assert not list((tmp_path / "md").iterdir())
 
 
 async def test_tika_unavailable_raises(tmp_path: Path) -> None:
@@ -67,6 +68,25 @@ async def test_tika_unavailable_raises(tmp_path: Path) -> None:
 
     with pytest.raises(ExtractionError, match="Tika unavailable"):
         await _extract_via_tika(src, "http://localhost:19998")
+
+
+async def test_extract_pdf_tika_failure_no_markdown_written(tmp_path: Path) -> None:
+    src = tmp_path / "doc.pdf"
+    src.write_bytes(b"%PDF-1.4 fake")
+    markdown_dir = tmp_path / "md"
+
+    with pytest.raises(ExtractionError, match="Tika unavailable"):
+        await extract(src, "http://localhost:19998", tmp_path / "orig", markdown_dir)
+
+    assert not list(markdown_dir.iterdir())
+
+
+async def test_extract_docx_routes_via_tika(tmp_path: Path) -> None:
+    src = tmp_path / "report.docx"
+    src.write_bytes(b"PK fake docx")
+
+    with pytest.raises(ExtractionError, match="Tika unavailable"):
+        await extract(src, "http://localhost:19998", tmp_path / "orig", tmp_path / "md")
 
 
 @pytest.mark.integration

@@ -44,6 +44,12 @@
 - Role pack path references `role_packs/chro.yaml` which doesn't exist — pre-existing, intentional, documented in comment; Epic 4 implements the role pack [config.yaml.example]
 - `cd cos` in clone step assumes repo cloned to default directory name — minor; any competent operator would infer; spec did not call for handling [docs/setup.md]
 
+## Deferred from: code review of 2-1-document-extraction-and-markdown-normalisation (2026-04-23)
+
+- Filename/stem collision for same-named files from different source directories — `originals_dir / source_path.name` and `markdown_dir / stem.md` silently overwrite; re-ingest conflict detection is Story 2.3 scope [src/cos/ingestion/extractor.py]
+- `author` field may receive `list[str]` from tika-client multi-value metadata — `response.data.get(DublinCoreKey.Creator)` behaviour with multiple creators unverified; requires tika-client investigation [src/cos/ingestion/extractor.py]
+- Integration test missing assertions for AC 1 metadata fields — `test_extract_pdf_via_tika` does not assert `result.content_type`, `result.title`, or `result.author`; depends on Tika response for minimal PDF fixture [tests/ingestion/test_extractor.py]
+
 ## Deferred from: code review of 1-3-database-schema-and-migration-runner (2026-04-21)
 
 - No migration tracking table — every `run_migrations()` call re-executes all SQL files; safe now because all DDL is idempotent, but any future DML or non-idempotent migration will corrupt the database; add a `schema_migrations` ledger table when needed

@@ -44,7 +44,7 @@ async def _extract_via_tika(
 
     title = response.title
     author = response.data.get(DublinCoreKey.Creator)
-    content_type = response.type
+    content_type = response.type or "application/octet-stream"
 
     return text, title, author, content_type
 
@@ -67,7 +67,12 @@ async def extract(
     shutil.copy2(source_path, original_dest)
 
     if suffix in SUPPORTED_DIRECT_SUFFIXES:
-        text = source_path.read_text(encoding="utf-8")
+        try:
+            text = source_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            raise ExtractionError(
+                f"Cannot decode {source_path.name} as UTF-8: {exc}"
+            ) from exc
         title = None
         author = None
         content_type = "text/markdown" if suffix == ".md" else "text/plain"
