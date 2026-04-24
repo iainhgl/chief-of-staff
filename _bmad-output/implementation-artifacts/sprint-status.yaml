@@ -1,5 +1,5 @@
 # generated: 2026-04-17
-# last_updated: 2026-04-23  # 2-6-operator-validation-documents-ingested-and-provenance-verified -> done
+# last_updated: 2026-04-24  # 2-7-documentation-and-housekeeping -> done
 # project: CoS
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-17
-last_updated: 2026-04-23  # 2-6-operator-validation-documents-ingested-and-provenance-verified -> done
+last_updated: 2026-04-24  # 2-7-documentation-and-housekeeping -> done
 project: CoS
 project_key: NOKEY
 tracking_system: file-system
@@ -67,7 +67,7 @@ development_status:
   2-4-cli-ingest-command-and-ingestservice: done
   2-5-document-provenance-listing: done
   2-6-operator-validation-documents-ingested-and-provenance-verified: done
-  2-7-documentation-and-housekeeping: backlog
+  2-7-documentation-and-housekeeping: done
   epic-2-retrospective: optional
 
   # ─────────────────────────────────────────────
