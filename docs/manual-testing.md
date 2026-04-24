@@ -11,7 +11,7 @@ This guide is rewritten at the end of each epic to reflect current platform stat
 - Docker Desktop (or Rancher Desktop) running
 - `uv` installed
 - Working directory: `cos/`
-- A valid `config.yaml` present (copy from `config.yaml.example` and fill in `llm.api_key`)
+- A valid `config.yaml` present (copy from `config.yaml.example` and fill in `llm.api_key` and `embedding.api_key` — both are required; `embedding.api_key` is needed for document ingestion to generate embeddings)
 
 **Always use `uv run python`** (not `python3`) for any command that imports project code.
 
@@ -276,7 +276,7 @@ Follow up with test 2 (startup logs) to confirm clean restart.
 ### T2.6.1 — Ingest `test-docs/` folder: all 3 files ingested [LIVE]
 
 ```bash
-docker compose run --rm -v "$(pwd)/test-docs:/test-docs" cos cos ingest /test-docs/
+docker compose run --rm -v "$(pwd)/test-docs:/test-docs" cos uv run cos ingest /test-docs/
 ```
 
 **Expected output (order may vary):**
@@ -295,13 +295,14 @@ All three file names appear. Chunk counts are at least 1. No error lines appear.
 ### T2.6.2 — `cos docs` shows 3 documents with correct metadata [LIVE]
 
 ```bash
-docker compose run --rm cos cos docs
+docker compose run --rm cos uv run cos docs
 ```
 
 **Expected:** A table with 3 rows, one per test document.
 
 Each row must have:
 
+- `ID` — a UUID for the document (copy this value when using `--versions`)
 - `SOURCE PATH` ending in `/test-docs/sample-brief.md`, `/test-docs/sample-report.pdf`, or `/test-docs/sample-memo.docx`
 - `INGESTED AT` showing a recent timestamp
 - `VER` = `1` for each document on first ingest
@@ -314,21 +315,21 @@ Each row must have:
 First capture the document ID for `sample-brief.md`:
 
 ```bash
-docker compose run --rm cos cos docs --json
+docker compose run --rm cos uv run cos docs
 ```
 
-Find the entry whose `source_path` ends with `sample-brief.md` and copy its `id`.
+Copy the UUID from the `ID` column in the row for `sample-brief.md`.
 
 Re-ingest the same file:
 
 ```bash
-docker compose run --rm -v "$(pwd)/test-docs:/test-docs" cos cos ingest /test-docs/sample-brief.md
+docker compose run --rm -v "$(pwd)/test-docs:/test-docs" cos uv run cos ingest /test-docs/sample-brief.md
 ```
 
 Check version history:
 
 ```bash
-docker compose run --rm cos cos docs --versions "<document-id>"
+docker compose run --rm cos uv run cos docs --versions "<document-id>"
 ```
 
 **Expected:** Two rows are shown with version numbers `1` and `2`. The timestamps should be distinct and the file hashes may either match or differ depending on whether the file changed.
@@ -354,7 +355,7 @@ Use `exec` rather than `run` for this test so the ingest process runs inside the
 
 ```bash
 docker compose cp test-docs/. cos:/tmp/test-docs
-docker compose exec cos cos ingest /tmp/test-docs
+docker compose exec cos uv run cos ingest /tmp/test-docs
 ```
 
 While ingestion is running, in a second terminal:
@@ -363,7 +364,7 @@ While ingestion is running, in a second terminal:
 docker compose kill cos
 docker compose up -d cos
 sleep 10
-docker compose run --rm cos cos docs
+docker compose run --rm cos uv run cos docs
 ```
 
 **Expected:** After restart, `cos docs` shows only fully indexed documents. No row should appear with a missing chunk count or partially written state. A document is either present with a valid chunk count or absent.
@@ -373,7 +374,7 @@ docker compose run --rm cos cos docs
 ### T2.6.6 — `cos docs --json` returns valid JSON with all fields [LIVE]
 
 ```bash
-docker compose run --rm cos cos docs --json
+docker compose run --rm cos uv run cos docs --json
 ```
 
 **Expected:** A JSON array. Each item includes:
@@ -395,9 +396,9 @@ Use this sequence for a concise end-to-end operator pass:
 ```bash
 docker compose up -d
 docker compose ps
-docker compose run --rm -v "$(pwd)/test-docs:/test-docs" cos cos ingest /test-docs/
-docker compose run --rm cos cos docs
-docker compose run --rm cos cos docs --json | uv run python -c "
+docker compose run --rm -v "$(pwd)/test-docs:/test-docs" cos uv run cos ingest /test-docs/
+docker compose run --rm cos uv run cos docs
+docker compose run --rm cos uv run cos docs --json | uv run python -c "
 import sys, json
 docs = json.load(sys.stdin)
 assert len(docs) >= 3 and all(d['chunk_count'] > 0 for d in docs)

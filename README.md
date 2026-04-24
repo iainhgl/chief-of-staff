@@ -2,18 +2,23 @@
 
 A personal AI platform that acts as a Chief of Staff for a specific role — retaining knowledge in a structured store and reasoning over it to answer questions grounded in source material.
 
-## Current Capabilities (Epic 1)
+## Current Capabilities (Epic 2)
 
-This is the platform foundation. What is working today:
+What is working today:
 
 - **Three-container platform** (postgres/pgvector, Tika, cos) that starts with `docker compose up -d`
 - **Config validation at startup** — human-readable errors for missing or invalid config values
 - **Database schema applied automatically** — idempotent migrations run on every startup
 - **MCP server** accessible via `docker compose exec` stdio transport (Claude Code and Claude Desktop)
 - **`get_status` tool** — returns JSON with health of all three components (cos, postgres, tika) and a `ready` flag
-- **`retrieve`, `get_role_context`, `list_documents`** — registered tools that return "Not yet implemented" error envelopes; will be wired in later epics
+- **`cos ingest <path>`** — ingest a single file or folder of documents (PDF, .docx, .md, .txt); per-file progress and final summary printed
+- **`cos docs`** — list all ingested documents with provenance metadata (source path, ingested timestamp, version, chunk count)
+- **`cos docs --versions <id>`** — show version history for a specific document
+- **`cos docs --json`** — machine-readable JSON output
+- **Originals preserved** — every ingested file is stored byte-for-byte in `/data/originals/` (in-container path); Markdown working copies in `/data/markdown/`
+- **`retrieve`, `get_role_context`, `list_documents`** — registered MCP tools that return "Not yet implemented" error envelopes; will be wired in later epics
 
-Document ingestion, knowledge retrieval, role pack loading, CLI commands, and connected sources (email, calendar) are not yet available. They are planned for later epics.
+Knowledge retrieval, role pack loading, and connected sources (email, calendar) are not yet available. They are planned for later epics.
 
 ## How it Works
 

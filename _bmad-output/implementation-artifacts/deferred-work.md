@@ -77,6 +77,13 @@
 
 - `_ingest_folder` exits with code 0 when all files fail to ingest — when every file in a folder fails, the folder ingest prints individual `Error:` lines then prints "No supported files found" and exits 0; a total-failure should arguably exit non-zero; pre-existing design, not introduced by Story 2.6 [`src/cos/cli.py`]
 
+## Deferred from: code review of 2-7-documentation-and-housekeeping (2026-04-24)
+
+- `--versions` + `--json` combination works but is undocumented — `cos docs --versions <id> --json` returns machine-readable version records; not mentioned in setup.md [`src/cos/cli.py`]
+- Invalid UUID to `--versions` silently returns empty result — `ProvenanceService` catches `ValueError` from UUID parsing and returns `[]`; same message as valid UUID with no records; operator gets no indication of malformed input [`src/cos/services/provenance.py`]
+- "What to do if a file is skipped" guidance not actionable in setup.md — existing content says unsupported types are "skipped with a notice" but gives no operator next-step guidance; pre-existing from Story 2.4 [`docs/setup.md`]
+- Voyage AI naming collision: `provider: "anthropic"` routes to `voyageai.AsyncClient` — acknowledged in architecture.md Epic 2 deviation #2 but the name collision risk for a future true Anthropic embedding provider is not flagged [`_bmad-output/planning-artifacts/architecture.md`]
+
 ## Deferred from: code review of 1-3-database-schema-and-migration-runner (2026-04-21)
 
 - No migration tracking table — every `run_migrations()` call re-executes all SQL files; safe now because all DDL is idempotent, but any future DML or non-idempotent migration will corrupt the database; add a `schema_migrations` ledger table when needed

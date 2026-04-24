@@ -130,6 +130,46 @@ Unsupported file types are skipped with a notice and do not cause the command to
 
 A plain-language error is shown for the failed file. In folder mode, ingestion continues for the remaining files. The error message identifies the file and the reason — no stack trace is shown.
 
+## Verify Ingestion
+
+After ingesting documents, confirm they are indexed using the `cos docs` command.
+
+### List all ingested documents
+
+```bash
+docker compose run --rm cos uv run cos docs
+```
+
+Prints a table with one row per document:
+
+| Column | Description |
+|--------|-------------|
+| `ID` | UUID for the document — use this with `--versions` |
+| `SOURCE PATH` | The in-container path where the file was ingested from |
+| `INGESTED AT` | ISO 8601 timestamp of the most recent ingest |
+| `VER` | Current version number (1 on first ingest; increments on re-ingest) |
+| `CHUNKS` | Number of text chunks indexed for this document |
+
+If no documents have been ingested yet: `No documents ingested yet. Run: cos ingest <path>`
+
+### View version history for a document
+
+```bash
+docker compose run --rm cos uv run cos docs --versions <document-id>
+```
+
+Copy the document ID from the `ID` column in the `cos docs` table output. Each row shows the version number, ingest timestamp, and file hash.
+
+### Machine-readable JSON output
+
+```bash
+docker compose run --rm cos uv run cos docs --json
+```
+
+Returns a JSON array. Each object has: `id`, `source_path`, `ingested_at`, `current_version`, `chunk_count`.
+
+> **Note:** The `source_path` stored in the database is the **in-container** absolute path. When using `docker compose run --rm -v "$(pwd)/test-docs:/test-docs" cos ...`, the stored path will be `/test-docs/report.pdf` (the container path), not the host path. This is expected behaviour.
+
 ## View Logs
 
 ```bash
