@@ -8,15 +8,21 @@ import psycopg
 from mcp.server.fastmcp import FastMCP
 
 from cos.config import CosConfig, LogComponent
+from cos.output.router import OutputRouter
 from cos.store.db import run_migrations
 
 mcp = FastMCP("cos")
 
 _config: CosConfig | None = None
+_output_router: OutputRouter | None = None
 
 
 def get_config() -> CosConfig | None:
     return _config
+
+
+def get_output_router() -> OutputRouter | None:
+    return _output_router
 
 
 def _emit(component: LogComponent, level: str, message: str, **extra: object) -> None:
@@ -50,6 +56,7 @@ async def _check_tika(url: str) -> bool:
 
 
 async def _startup_sequence(config: CosConfig) -> None:
+    global _output_router
     component: LogComponent = "mcp_server"
     pg_ok = await _check_postgres(config.database.libpq_dsn)
     _emit(component, "INFO", "Postgres: healthy" if pg_ok else "Postgres: unhealthy")
@@ -59,6 +66,8 @@ async def _startup_sequence(config: CosConfig) -> None:
     await run_migrations(config.database.libpq_dsn)
     _emit(component, "INFO", "migrations applied")
     _emit(component, "INFO", "role pack: stub loaded")
+    _output_router = OutputRouter(configured_channels=config.channels)
+    _emit(component, "INFO", "output router: initialised", channels=config.channels)
     _emit(component, "INFO", "MCP server: listening")
 
 
