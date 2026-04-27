@@ -107,3 +107,7 @@
 
 - Server starts despite unhealthy Postgres/Tika — unhealthy health checks only emit a log; server proceeds regardless; pre-existing design, not introduced by this story [`src/cos/mcp_server/server.py`]
 - `OutputRouter` swallows handler exceptions — errors inside `local.py` or future handlers are caught and logged as JSON but not re-raised; pre-existing router behaviour [`src/cos/output/router.py`]
+
+## Deferred from: code review of 3-3-llm-synthesis-and-retrievalservice (2026-04-27)
+
+- No test for `RuntimeError` path when `message.content` contains no text block — `AnthropicAdapter.complete()` raises `RuntimeError` if all content blocks lack a `text` attribute (e.g. tool_use-only response); not in spec scope, low-probability scenario [`tests/llm/test_anthropic_adapter.py`]

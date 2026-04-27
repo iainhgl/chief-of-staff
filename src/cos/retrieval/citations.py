@@ -19,6 +19,12 @@ class CitedChunk:
 CitedResults = list[CitedChunk]
 
 
+@dataclass
+class CitedResponse:
+    answer: str | None
+    citations: CitedResults
+
+
 def format_citations(results: CitedResults) -> str:
     return "\n".join(
         f"[{index}] {chunk.source_path} "
