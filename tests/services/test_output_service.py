@@ -26,6 +26,7 @@ async def test_output_service_send_valid_channel_delegates_to_router(
 
 @pytest.mark.asyncio
 async def test_output_service_send_invalid_channel_suppresses(
+    capsys: pytest.CaptureFixture[str],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     router = OutputRouter(configured_channels=["local"])
@@ -34,6 +35,7 @@ async def test_output_service_send_invalid_channel_suppresses(
     with caplog.at_level(logging.ERROR):
         await service.send("unknown", "should be suppressed")
 
+    assert "should be suppressed" not in capsys.readouterr().out
     assert any("unknown output channel" in record.message for record in caplog.records)
 
 

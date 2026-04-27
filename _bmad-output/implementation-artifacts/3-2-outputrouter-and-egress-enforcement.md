@@ -1,6 +1,6 @@
 # Story 3.2: OutputRouter & Egress Enforcement
 
-Status: review
+Status: done
 
 ## Story
 
@@ -220,3 +220,13 @@ gpt-5.4
 - 2026-04-27: Implemented OutputService routing, server startup wiring, test coverage, and operator doc command cleanup.
 
 ### Review Findings
+
+Note: review was performed against `origin/main` (true PR base). Local `main` was 2 commits stale (Epic 2 bugfix already merged); extractor/embedder/cli findings were out of scope.
+
+- [x] [Review][Patch] test_startup_sequence_initialises_output_router missing @pytest.mark.asyncio — fixed: added decorator; also refactored to shared helpers [tests/mcp_server/test_server.py]
+- [x] [Review][Patch] Test asserts on private router._channels — fixed: replaced with `router.send("local", "probe")` + capsys stdout assertion [tests/mcp_server/test_server.py]
+- [x] [Review][Patch] test_output_service_send_invalid_channel_suppresses does not assert suppression — fixed: added capsys + `"should be suppressed" not in out` assertion [tests/services/test_output_service.py]
+- [x] [Review][Patch] Test missing: empty channels list in server startup — fixed: added test_startup_sequence_with_empty_channels_router_created [tests/mcp_server/test_server.py]
+
+- [x] [Review][Defer] Server starts despite unhealthy Postgres/Tika — unhealthy checks only emit a log; pre-existing design, not introduced by this story [src/cos/mcp_server/server.py] — deferred, pre-existing
+- [x] [Review][Defer] OutputRouter swallows handler exceptions — handler errors are caught and logged as JSON but not re-raised; pre-existing router behaviour not modified here [src/cos/output/router.py] — deferred, pre-existing
