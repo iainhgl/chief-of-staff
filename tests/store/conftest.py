@@ -13,6 +13,7 @@ if _ROOT_CONFTEST_SPEC is None or _ROOT_CONFTEST_SPEC.loader is None:
 _ROOT_CONFTEST_MODULE = module_from_spec(_ROOT_CONFTEST_SPEC)
 _ROOT_CONFTEST_SPEC.loader.exec_module(_ROOT_CONFTEST_MODULE)
 TEST_DSN: str = _ROOT_CONFTEST_MODULE.TEST_DSN
+make_test_config = _ROOT_CONFTEST_MODULE.make_test_config
 
 
 @pytest.fixture(autouse=True)

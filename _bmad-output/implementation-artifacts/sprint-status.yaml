@@ -1,5 +1,5 @@
 # generated: 2026-04-17
-# last_updated: 2026-04-24  # 2-7-documentation-and-housekeeping -> done
+# last_updated: 2026-04-27  # 3-1-hybrid-search-engine-and-citation-formatting -> done
 # project: CoS
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-17
-last_updated: 2026-04-24  # 2-7-documentation-and-housekeeping -> done
+last_updated: 2026-04-27  # 3-1-hybrid-search-engine-and-citation-formatting -> review
 project: CoS
 project_key: NOKEY
 tracking_system: file-system
@@ -74,8 +74,8 @@ development_status:
   # Epic 3: Knowledge Retrieval & Cited Q&A
   # User can ask natural language questions and receive grounded answers with citations
   # ─────────────────────────────────────────────
-  epic-3: backlog
-  3-1-hybrid-search-engine-and-citation-formatting: backlog
+  epic-3: in-progress
+  3-1-hybrid-search-engine-and-citation-formatting: done
   3-2-outputrouter-and-egress-enforcement: backlog
   3-3-llm-synthesis-and-retrievalservice: backlog
   3-4-mcp-retrieve-and-list-documents-tools: backlog

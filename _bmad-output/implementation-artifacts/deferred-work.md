@@ -84,6 +84,18 @@
 - "What to do if a file is skipped" guidance not actionable in setup.md — existing content says unsupported types are "skipped with a notice" but gives no operator next-step guidance; pre-existing from Story 2.4 [`docs/setup.md`]
 - Voyage AI naming collision: `provider: "anthropic"` routes to `voyageai.AsyncClient` — acknowledged in architecture.md Epic 2 deviation #2 but the name collision risk for a future true Anthropic embedding provider is not flagged [`_bmad-output/planning-artifacts/architecture.md`]
 
+## Deferred from: code review of 3-1-hybrid-search-engine-and-citation-formatting (2026-04-27)
+
+- Semantic search full table scan — no WHERE predicate on the `embeddings` query; full sequential scan per call. ANN index (IVFFlat/HNSW) needed at scale; acceptable for Phase 1 up-to-10k-doc scope [`src/cos/retrieval/search.py`]
+- `register_vector_async` called on every `hybrid_search` invocation — redundant re-registration on already-registered connections; matches `db.py:56` pattern; optimize to register once per connection acquisition in a future story [`src/cos/retrieval/search.py:52`]
+- `_coerce_priority_weight` prefix match has no path boundary guard — `/reports` would match `/reports-archive/`; Phase 4 concern; `RolePackConfig` empty in Phase 1 [`src/cos/retrieval/search.py:_coerce_priority_weight`]
+- `embed()` failure propagates as IndexError — empty API response raises `IndexError` with no context; retry/circuit-breaker logic belongs in a future infrastructure story [`src/cos/retrieval/search.py:68`]
+- Orphaned chunks silently dropped from results — missing `source_paths` lookup silently discards results; data integrity edge case for a future story [`src/cos/retrieval/search.py:162`]
+- RRF merge ordering and `top_k` truncation not tested — spec task list did not require these tests; cover when role pack weighting is added in Story 4.3 [`tests/retrieval/test_search.py`]
+- Semantic score `> 0.0` filter is silent — zero/negative similarity results dropped without logging; logging deferred to a future observability story [`src/cos/retrieval/search.py:121`]
+- Role pack weighting path untested — `RolePackConfig` is empty in Phase 1; test coverage deferred to Story 4.3 [`src/cos/retrieval/search.py`]
+- Priority weight silent fallback on misconfigured or negative weights — `_coerce_priority_weight` returns `1.0` on no match and accepts negative floats without validation; Phase 4 concern [`src/cos/retrieval/search.py:_coerce_priority_weight`]
+
 ## Deferred from: code review of 1-3-database-schema-and-migration-runner (2026-04-21)
 
 - No migration tracking table — every `run_migrations()` call re-executes all SQL files; safe now because all DDL is idempotent, but any future DML or non-idempotent migration will corrupt the database; add a `schema_migrations` ledger table when needed
