@@ -66,6 +66,7 @@ async def _ingest_file(target: Path, service: IngestService) -> None:
 async def _ingest_folder(target: Path, service: IngestService) -> None:
     total_files = 0
     total_chunks = 0
+    supported_files = 0
 
     for file_path in sorted(target.rglob("*")):
         if not file_path.is_file():
@@ -74,6 +75,7 @@ async def _ingest_folder(target: Path, service: IngestService) -> None:
         if file_path.suffix.lower() not in SUPPORTED_SUFFIXES:
             typer.echo(f"Skipped {file_path.name} — unsupported format")
             continue
+        supported_files += 1
 
         try:
             result = await service.ingest_file(str(file_path))
@@ -85,8 +87,10 @@ async def _ingest_folder(target: Path, service: IngestService) -> None:
         total_files += 1
         total_chunks += result.chunk_count
 
-    if total_files == 0:
+    if supported_files == 0:
         typer.echo(f"No supported files found in {target}")
+    elif total_files == 0:
+        typer.echo(f"No files were ingested successfully from {target}")
     else:
         typer.echo(f"Ingested {total_files} files -> {total_chunks} total chunks indexed")
 

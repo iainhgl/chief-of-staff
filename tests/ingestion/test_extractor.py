@@ -1,9 +1,16 @@
 import filecmp
+from types import SimpleNamespace
 from pathlib import Path
+from zipfile import ZipFile
 
 import pytest
 
-from cos.ingestion.extractor import ExtractionError, _extract_via_tika, extract
+from cos.ingestion.extractor import (
+    ExtractionError,
+    _extract_docx_xml,
+    _extract_via_tika,
+    extract,
+)
 
 
 async def test_extract_markdown_direct(tmp_path: Path) -> None:
@@ -87,6 +94,81 @@ async def test_extract_docx_routes_via_tika(tmp_path: Path) -> None:
 
     with pytest.raises(ExtractionError, match="Tika unavailable"):
         await extract(src, "http://localhost:19998", tmp_path / "orig", tmp_path / "md")
+
+
+def test_extract_docx_xml_fallback_reads_text(tmp_path: Path) -> None:
+    src = tmp_path / "report.docx"
+    document_xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        "<w:body>"
+        "<w:p><w:r><w:t>CoS Platform Test Memo</w:t></w:r></w:p>"
+        "<w:p><w:r><w:t>Fallback extraction works.</w:t></w:r></w:p>"
+        "</w:body>"
+        "</w:document>"
+    )
+    with ZipFile(src, "w") as archive:
+        archive.writestr("[Content_Types].xml", "<Types/>")
+        archive.writestr("word/document.xml", document_xml)
+
+    text = _extract_docx_xml(src)
+
+    assert text == "CoS Platform Test Memo\n\nFallback extraction works."
+
+
+async def test_extract_via_tika_docx_falls_back_when_content_empty(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    src = tmp_path / "report.docx"
+    document_xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        "<w:body>"
+        "<w:p><w:r><w:t>Word fallback content</w:t></w:r></w:p>"
+        "</w:body>"
+        "</w:document>"
+    )
+    with ZipFile(src, "w") as archive:
+        archive.writestr("[Content_Types].xml", "<Types/>")
+        archive.writestr("word/document.xml", document_xml)
+
+    response = SimpleNamespace(
+        content="",
+        title="Report",
+        data={},
+        type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+
+    class _FakeTikaContext:
+        async def __aenter__(self) -> "_FakeTikaContext":
+            self.tika = SimpleNamespace(
+                as_text=SimpleNamespace(
+                    from_file=self._from_file,
+                )
+            )
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        async def _from_file(self, _: Path) -> SimpleNamespace:
+            return response
+
+    monkeypatch.setattr(
+        "cos.ingestion.extractor.AsyncTikaClient",
+        lambda _: _FakeTikaContext(),
+    )
+
+    text, title, author, content_type = await _extract_via_tika(src, "http://unused")
+
+    assert text == "Word fallback content"
+    assert title == "Report"
+    assert author is None
+    assert (
+        content_type
+        == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
 
 
 @pytest.mark.integration
