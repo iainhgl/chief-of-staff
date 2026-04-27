@@ -21,6 +21,7 @@ dependencies = [
     "typer>=0.24.1",
     "voyageai>=0.3.7",
     "psycopg-pool>=3.3.0",
+    "anthropic>=0.97.0",
 ]
 
 [project.scripts]
