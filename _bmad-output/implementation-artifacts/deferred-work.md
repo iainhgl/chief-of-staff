@@ -102,3 +102,8 @@
 - `_has_executable_sql()` doesn't detect `/* */` block comments — current migrations use only `--` line comments; add block comment support before any migration uses `/* */`
 - `db.py` logs with hardcoded `"mcp_server"` component string — should use a `"store"` or `"db"` component value; low priority refactor
 - `test_run_migrations_is_idempotent` makes only a "no exception" assertion — a stronger assertion (e.g. schema unchanged, no extra tables) would give more confidence; acceptable for Phase 1
+
+## Deferred from: code review of 3-2-outputrouter-and-egress-enforcement (2026-04-27)
+
+- Server starts despite unhealthy Postgres/Tika — unhealthy health checks only emit a log; server proceeds regardless; pre-existing design, not introduced by this story [`src/cos/mcp_server/server.py`]
+- `OutputRouter` swallows handler exceptions — errors inside `local.py` or future handlers are caught and logged as JSON but not re-raised; pre-existing router behaviour [`src/cos/output/router.py`]

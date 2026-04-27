@@ -1,5 +1,5 @@
 # generated: 2026-04-17
-# last_updated: 2026-04-27  # 3-1-hybrid-search-engine-and-citation-formatting -> done
+# last_updated: 2026-04-27  # 3-2-outputrouter-and-egress-enforcement -> done
 # project: CoS
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-17
-last_updated: 2026-04-27  # 3-1-hybrid-search-engine-and-citation-formatting -> review
+last_updated: 2026-04-27  # 3-2-outputrouter-and-egress-enforcement -> done
 project: CoS
 project_key: NOKEY
 tracking_system: file-system
@@ -76,7 +76,7 @@ development_status:
   # ─────────────────────────────────────────────
   epic-3: in-progress
   3-1-hybrid-search-engine-and-citation-formatting: done
-  3-2-outputrouter-and-egress-enforcement: backlog
+  3-2-outputrouter-and-egress-enforcement: done
   3-3-llm-synthesis-and-retrievalservice: backlog
   3-4-mcp-retrieve-and-list-documents-tools: backlog
   3-5-operator-validation-end-to-end-qa-with-citations: backlog

@@ -98,7 +98,7 @@ Load documents into the knowledge base using the `cos ingest` command, run insid
 ### Ingest a single file
 
 ```bash
-docker compose run --rm --entrypoint uv cos run cos ingest /path/to/document.pdf
+docker compose run --rm --entrypoint /app/.venv/bin/cos cos ingest /path/to/document.pdf
 ```
 
 Supported formats: `.pdf`, `.docx`, `.md`, `.txt`
@@ -112,7 +112,7 @@ Ingested strategy.pdf -> 24 chunks indexed
 ### Ingest a folder
 
 ```bash
-docker compose run --rm --entrypoint uv cos run cos ingest /path/to/docs/
+docker compose run --rm --entrypoint /app/.venv/bin/cos cos ingest /path/to/docs/
 ```
 
 All supported files are ingested **recursively** — subdirectories are walked automatically. Each file reports its own progress line and a final summary is printed:
@@ -137,7 +137,7 @@ After ingesting documents, confirm they are indexed using the `cos docs` command
 ### List all ingested documents
 
 ```bash
-docker compose run --rm --entrypoint uv cos run cos docs
+docker compose run --rm --entrypoint /app/.venv/bin/cos cos docs
 ```
 
 Prints a table with one row per document:
@@ -155,7 +155,7 @@ If no documents have been ingested yet: `No documents ingested yet. Run: cos ing
 ### View version history for a document
 
 ```bash
-docker compose run --rm --entrypoint uv cos run cos docs --versions <document-id>
+docker compose run --rm --entrypoint /app/.venv/bin/cos cos docs --versions <document-id>
 ```
 
 Copy the document ID from the `ID` column in the `cos docs` table output. Each row shows the version number, ingest timestamp, and file hash.
@@ -163,12 +163,12 @@ Copy the document ID from the `ID` column in the `cos docs` table output. Each r
 ### Machine-readable JSON output
 
 ```bash
-docker compose run --rm --entrypoint uv cos run cos docs --json
+docker compose run --rm --entrypoint /app/.venv/bin/cos cos docs --json
 ```
 
 Returns a JSON array. Each object has: `id`, `source_path`, `ingested_at`, `current_version`, `chunk_count`.
 
-> **Note:** The `source_path` stored in the database is the **in-container** absolute path. When using `docker compose run --rm --entrypoint uv -v "$(pwd)/test-docs:/test-docs" cos ...`, the stored path will be `/test-docs/report.pdf` (the container path), not the host path. This is expected behaviour.
+> **Note:** The `source_path` stored in the database is the **in-container** absolute path. When using `docker compose run --rm --entrypoint /app/.venv/bin/cos -v "$(pwd)/test-docs:/test-docs" cos ...`, the stored path will be `/test-docs/report.pdf` (the container path), not the host path. This is expected behaviour.
 
 ## View Logs
 
