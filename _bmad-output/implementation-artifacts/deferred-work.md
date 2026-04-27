@@ -111,3 +111,13 @@
 ## Deferred from: code review of 3-3-llm-synthesis-and-retrievalservice (2026-04-27)
 
 - No test for `RuntimeError` path when `message.content` contains no text block — `AnthropicAdapter.complete()` raises `RuntimeError` if all content blocks lack a `text` attribute (e.g. tool_use-only response); not in spec scope, low-probability scenario [`tests/llm/test_anthropic_adapter.py`]
+
+## Deferred from: code review of 3-4-mcp-retrieve-and-list-documents-tools (2026-04-27)
+
+- Startup partial init leaves pool open if RetrievalService construction raises — if `RetrievalService(...)` raises after `_pool` is assigned, the pool is never closed; no try/finally or cleanup path; Epic 5 hardening scope [`src/cos/mcp_server/server.py`]
+- No pool teardown on server shutdown — `_pool` is opened at startup but no shutdown hook closes it; FastMCP lifecycle hooks are not wired; Epic 5 scope [`src/cos/mcp_server/server.py`]
+- `output_service.send("local", ...)` hardcodes channel name — if configured channels change, the send silently fails; Phase 1 assumption that "local" is always present; revisit when multi-channel routing is added [`src/cos/mcp_server/tools.py:73`]
+- `ProvenanceService` opens a raw psycopg connection per call rather than using the shared `_pool` — ProvenanceService was designed in Story 2.5 before the pool was introduced; spec prohibits modifying it in this story; connection is short-lived but bypasses pooling [`src/cos/mcp_server/tools.py:109`]
+- Empty query string not validated in `retrieve()` — empty/whitespace queries flow through to the service and return a "no content" response; not specified as a requirement; add validation if client bugs surface [`src/cos/mcp_server/tools.py:38`]
+- `list_documents` returns all rows with no pagination — unbounded query; acceptable for Phase 1 document volumes; add limit/offset when doc counts grow [`src/cos/mcp_server/tools.py:112`]
+- No initialization guard preventing tool calls before `_startup_sequence` completes — tools guard on `get_retrieval_service() is None` returning error envelopes, but there is no mechanism to queue or block concurrent startup calls; pre-existing design [`src/cos/mcp_server/server.py`]

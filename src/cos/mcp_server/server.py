@@ -6,15 +6,22 @@ from datetime import datetime, timezone
 import httpx
 import psycopg
 from mcp.server.fastmcp import FastMCP
+from psycopg_pool import AsyncConnectionPool
 
 from cos.config import CosConfig, LogComponent
+from cos.llm.anthropic import AnthropicAdapter
 from cos.output.router import OutputRouter
-from cos.store.db import run_migrations
+from cos.services.output import OutputService
+from cos.services.retrieval import RetrievalService
+from cos.store.db import create_pool, run_migrations
 
 mcp = FastMCP("cos")
 
 _config: CosConfig | None = None
 _output_router: OutputRouter | None = None
+_pool: AsyncConnectionPool | None = None
+_retrieval_service: RetrievalService | None = None
+_output_service: OutputService | None = None
 
 
 def get_config() -> CosConfig | None:
@@ -23,6 +30,18 @@ def get_config() -> CosConfig | None:
 
 def get_output_router() -> OutputRouter | None:
     return _output_router
+
+
+def get_pool() -> AsyncConnectionPool | None:
+    return _pool
+
+
+def get_retrieval_service() -> RetrievalService | None:
+    return _retrieval_service
+
+
+def get_output_service() -> OutputService | None:
+    return _output_service
 
 
 def _emit(component: LogComponent, level: str, message: str, **extra: object) -> None:
@@ -56,7 +75,7 @@ async def _check_tika(url: str) -> bool:
 
 
 async def _startup_sequence(config: CosConfig) -> None:
-    global _output_router
+    global _output_router, _pool, _retrieval_service, _output_service
     component: LogComponent = "mcp_server"
     pg_ok = await _check_postgres(config.database.libpq_dsn)
     _emit(component, "INFO", "Postgres: healthy" if pg_ok else "Postgres: unhealthy")
@@ -65,9 +84,22 @@ async def _startup_sequence(config: CosConfig) -> None:
     _emit(component, "INFO", "config loaded", role_pack_path=config.role_pack.path)
     await run_migrations(config.database.libpq_dsn)
     _emit(component, "INFO", "migrations applied")
+    _pool = await create_pool(config.database.libpq_dsn)
+    _emit(component, "INFO", "connection pool: open")
     _emit(component, "INFO", "role pack: stub loaded")
     _output_router = OutputRouter(configured_channels=config.channels)
+    _output_service = OutputService(router=_output_router)
     _emit(component, "INFO", "output router: initialised", channels=config.channels)
+    adapter = AnthropicAdapter(
+        model=config.llm.model,
+        api_key=config.llm.api_key.get_secret_value(),
+    )
+    _retrieval_service = RetrievalService(
+        config=config,
+        pool=_pool,
+        llm_adapter=adapter,
+    )
+    _emit(component, "INFO", "retrieval service: initialised")
     _emit(component, "INFO", "MCP server: listening")
 
 
