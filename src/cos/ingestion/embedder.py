@@ -41,7 +41,8 @@ async def _embed_via_voyage(
         client: Any = client_factory(api_key=api_key)
         result = await client.embed(chunks, model=model)
     except Exception as exc:
-        raise EmbeddingError(f"Voyage embedding failed: {exc}") from exc
+        detail = _format_exception_chain(exc)
+        raise EmbeddingError(f"Voyage embedding failed: {detail}") from exc
 
     return [
         EmbeddingResult(
@@ -51,3 +52,16 @@ async def _embed_via_voyage(
         )
         for vector in result.embeddings
     ]
+
+
+def _format_exception_chain(exc: BaseException) -> str:
+    messages: list[str] = []
+    current: BaseException | None = exc
+
+    while current is not None:
+        message = str(current).strip()
+        if message and message not in messages:
+            messages.append(message)
+        current = current.__cause__
+
+    return " <- ".join(messages) if messages else exc.__class__.__name__

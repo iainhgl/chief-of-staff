@@ -1,8 +1,10 @@
 """Document extraction via Tika and direct file reads."""
 
 import shutil
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
+from zipfile import BadZipFile, ZipFile
 
 from tika_client import AsyncTikaClient
 from tika_client.data_models import DublinCoreKey
@@ -25,6 +27,51 @@ class ExtractionResult:
 
 SUPPORTED_DIRECT_SUFFIXES: frozenset[str] = frozenset({".md", ".txt"})
 SUPPORTED_TIKA_SUFFIXES: frozenset[str] = frozenset({".pdf", ".docx"})
+WORDPROCESSINGML_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+
+def _extract_docx_xml(source_path: Path) -> str:
+    """Extract plain text directly from a DOCX package as a fallback."""
+    try:
+        with ZipFile(source_path) as archive:
+            document_xml = archive.read("word/document.xml")
+    except (BadZipFile, KeyError, OSError) as exc:
+        raise ExtractionError(
+            f"DOCX fallback extraction failed for {source_path.name}: {exc}"
+        ) from exc
+
+    try:
+        root = ET.fromstring(document_xml)
+    except ET.ParseError as exc:
+        raise ExtractionError(
+            f"DOCX fallback extraction failed for {source_path.name}: {exc}"
+        ) from exc
+
+    namespace = {"w": WORDPROCESSINGML_NS}
+    paragraphs: list[str] = []
+
+    for paragraph in root.findall(".//w:body/w:p", namespace):
+        parts: list[str] = []
+        for node in paragraph.iter():
+            if node.tag == f"{{{WORDPROCESSINGML_NS}}}t":
+                parts.append(node.text or "")
+            elif node.tag == f"{{{WORDPROCESSINGML_NS}}}tab":
+                parts.append("\t")
+            elif node.tag in {
+                f"{{{WORDPROCESSINGML_NS}}}br",
+                f"{{{WORDPROCESSINGML_NS}}}cr",
+            }:
+                parts.append("\n")
+
+        paragraph_text = "".join(parts).strip()
+        if paragraph_text:
+            paragraphs.append(paragraph_text)
+
+    text = "\n\n".join(paragraphs).strip()
+    if not text:
+        raise ExtractionError(f"DOCX fallback returned no content for {source_path.name}")
+
+    return text
 
 
 async def _extract_via_tika(
@@ -40,7 +87,10 @@ async def _extract_via_tika(
 
     text = response.content
     if not text or not text.strip():
-        raise ExtractionError(f"Tika returned no content for {source_path.name}")
+        if source_path.suffix.lower() == ".docx":
+            text = _extract_docx_xml(source_path)
+        else:
+            raise ExtractionError(f"Tika returned no content for {source_path.name}")
 
     title = response.title
     author = response.data.get(DublinCoreKey.Creator)
