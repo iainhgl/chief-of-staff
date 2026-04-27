@@ -46,4 +46,4 @@ def mock_embed(monkeypatch: pytest.MonkeyPatch) -> None:
             for _ in chunks
         ]
 
-    monkeypatch.setattr("cos.ingestion.pipeline.embed", _fake_embed)
+    monkeypatch.setattr("cos.retrieval.search.embed", _fake_embed)

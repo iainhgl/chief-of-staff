@@ -64,6 +64,20 @@ Each role pack contains: role goals, knowledge taxonomy, tone/style rules, stake
 - **Role behavior lives in configuration (role pack), not code.**
 - Do not introduce multi-model arbitration, recursive LLMs, or advanced agent systems until Phase 1–4 is working and useful.
 
+## Development Conventions
+
+### Database Migrations
+
+Migration files live in `src/cos/store/migrations/`. The runner (`db.py:run_migrations`) executes every `.sql` file in lexicographic order on every startup — there is no tracking table, so all migrations must be idempotent (`IF NOT EXISTS`).
+
+**Naming rule:** Always use the next sequential integer prefix. Before creating a new migration, check the highest existing number:
+
+```bash
+ls src/cos/store/migrations/
+```
+
+If the highest is `003_search_indexes.sql`, the next file must be `004_<description>.sql`. Never reuse a prefix — two files sharing a numeric prefix run in unpredictable order relative to each other.
+
 ## Git Workflow
 
 This is a git repository. Planning artifacts (`_bmad-output/`, `initial_docs/`) and implementation code (`src/`, `tests/`) are both tracked here.
