@@ -2,7 +2,7 @@
 
 A personal AI platform that acts as a Chief of Staff for a specific role — retaining knowledge in a structured store and reasoning over it to answer questions grounded in source material.
 
-## Current Capabilities (Epic 2)
+## Current Capabilities (Epic 3)
 
 What is working today:
 
@@ -10,15 +10,17 @@ What is working today:
 - **Config validation at startup** — human-readable errors for missing or invalid config values
 - **Database schema applied automatically** — idempotent migrations run on every startup
 - **MCP server** accessible via `docker compose exec` stdio transport (Claude Code and Claude Desktop)
-- **`get_status` tool** — returns JSON with health of all three components (cos, postgres, tika) and a `ready` flag
 - **`cos ingest <path>`** — ingest a single file or folder of documents (PDF, .docx, .md, .txt); per-file progress and final summary printed
 - **`cos docs`** — list all ingested documents with provenance metadata (source path, ingested timestamp, version, chunk count)
 - **`cos docs --versions <id>`** — show version history for a specific document
 - **`cos docs --json`** — machine-readable JSON output
 - **Originals preserved** — every ingested file is stored byte-for-byte in `/data/originals/` (in-container path); Markdown working copies in `/data/markdown/`
-- **`retrieve`, `get_role_context`, `list_documents`** — registered MCP tools that return "Not yet implemented" error envelopes; will be wired in later epics
+- **`retrieve`** — ask questions about ingested documents; returns a synthesised answer grounded in source material with citations in both `data.citations` and top-level `citations` (`source_path`, `chunk_index`, `score` per citation); handles the no-content case without fabrication
+- **`list_documents`** — returns a JSON envelope with `data.documents`, where each document includes `id`, `source_path`, `ingested_at`, `current_version`, and `chunk_count`; the document rows match `cos docs --json`
+- **`get_role_context`** — returns stub role context: `default — role pack not yet configured`; role-specific tone and retrieval weighting arrive in Epic 4
+- **`get_status`** — returns a JSON envelope with health of all three components (cos, postgres, tika) and a `ready` flag
 
-Knowledge retrieval, role pack loading, and connected sources (email, calendar) are not yet available. They are planned for later epics.
+Knowledge retrieval and Q&A with citations are now working. Role pack loading (tone, retrieval weighting, stakeholder context) is planned for Epic 4. Connected sources (email, calendar) are planned for Epic 6.
 
 ## How it Works
 
@@ -36,7 +38,7 @@ The model layer is kept behind an interface so the underlying LLM can be changed
 ## Get Started
 
 See [docs/setup.md](docs/setup.md) for step-by-step provisioning instructions:
-prerequisites, configuration, starting the platform, connecting Claude, and the restart procedure.
+prerequisites, configuration, starting the platform, connecting Claude, querying the knowledge base, and the restart procedure.
 
 ## Stack
 
@@ -50,7 +52,8 @@ cos/
 ├── docker-compose.yml        # postgres, tika, cos services
 ├── Dockerfile                # cos container image
 ├── docs/
-│   └── setup.md              # setup and operations guide
+│   ├── setup.md              # setup, operations, and querying guide
+│   └── manual-testing.md     # end-to-end operator validation tests
 ├── src/
 │   └── cos/
 │       ├── cli.py            # `cos` CLI entry point (stub commands)

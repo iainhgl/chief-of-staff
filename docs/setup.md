@@ -1,4 +1,4 @@
-# CoS Platform Setup
+# CoS Platform — Setup, Operations, and Querying Guide
 
 ## Prerequisites
 
@@ -169,6 +169,48 @@ docker compose run --rm --entrypoint /app/.venv/bin/cos cos docs --json
 Returns a JSON array. Each object has: `id`, `source_path`, `ingested_at`, `current_version`, `chunk_count`.
 
 > **Note:** The `source_path` stored in the database is the **in-container** absolute path. When using `docker compose run --rm --entrypoint /app/.venv/bin/cos -v "$(pwd)/test-docs:/test-docs" cos ...`, the stored path will be `/test-docs/report.pdf` (the container path), not the host path. This is expected behaviour.
+
+## Query the Knowledge Base
+
+Once documents are ingested, ask questions using the `retrieve` tool from any connected MCP client (Claude Code or Claude Desktop).
+
+### Ask a question
+
+Open a Claude session and ask any question about your documents:
+
+```text
+What frameworks do I have for workforce segmentation?
+```
+
+Claude calls `retrieve`, searches the knowledge base using hybrid keyword and semantic search, synthesises a grounded answer, and returns a JSON envelope with:
+
+- `status: "ok"`
+- `data.answer` containing the answer text
+- `data.citations` and top-level `citations`, each listing the sources used
+
+### Understanding citations
+
+Every successful `retrieve` response includes a `citations` field. When relevant content is found, each citation has:
+
+| Field | Description |
+|-------|-------------|
+| `source_path` | In-container path of the document the answer draws from |
+| `chunk_index` | Which chunk within that document was used |
+| `score` | Relevance score — higher is a closer match |
+
+The `source_path` values match what `cos docs` shows in the `SOURCE PATH` column.
+
+If no relevant content exists in the knowledge base, the answer says `No relevant content found in the knowledge base.` This is not an error. In that case, both `data.citations` and top-level `citations` are empty lists.
+
+### Browse the knowledge base
+
+To see all ingested documents, type this prompt into your Claude session:
+
+```text
+Call list_documents and show me the raw JSON response.
+```
+
+This returns a standard JSON envelope. The document rows live in `data.documents` and match the output of `cos docs --json`. Each document includes `id`, `source_path`, `ingested_at`, `current_version`, and `chunk_count`.
 
 ## View Logs
 

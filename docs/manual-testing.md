@@ -202,6 +202,8 @@ asyncio.run(main())
 
 ## 8 — Connect Claude Code and call tools live
 
+**Prerequisite:** Documents must be ingested before testing `retrieve`. Run T2.6.1 (ingest `test-docs/`) if you have not already done so — the live `retrieve` query in this section requires at least one document in the knowledge base.
+
 If not already configured, run from the `cos/` directory:
 
 ```bash
@@ -572,6 +574,49 @@ docker compose run --rm --entrypoint /app/.venv/bin/cos cos docs --json
 
 ---
 
+### T3.5.6 — `get_role_context` returns stub envelope [LIVE]
+
+```bash
+docker compose exec -i cos uv run python -c "
+import asyncio, json
+import cos.mcp_server.server as srv
+from cos.config import CosConfig
+from cos.mcp_server.tools import get_role_context
+
+async def main():
+    config = CosConfig.load('/app/config.yaml')
+    await srv._startup_sequence(config)
+    result = json.loads(await get_role_context())
+    print(json.dumps(result, indent=2))
+    assert result['status'] == 'ok', f'unexpected status: {result}'
+    assert result['data']['role'] == 'default — role pack not yet configured', f'unexpected role: {result}'
+    assert result['citations'] == [], f'expected empty citations: {result}'
+    print('get_role_context ok')
+
+asyncio.run(main())
+"
+```
+
+**Expected:**
+
+```json
+{
+  "status": "ok",
+  "data": {
+    "role": "default — role pack not yet configured"
+  },
+  "citations": []
+}
+```
+
+- `status` is `"ok"`
+- `data.role` is exactly `default — role pack not yet configured` (not an error envelope)
+- `citations` is an empty list
+
+**Fail signal:** `status != "ok"`, `data.role` contains an error message, or an exception is raised.
+
+---
+
 ### T3.5.5 — OutputRouter fail-closed: unrecognised channel suppresses output [LIVE]
 
 ```bash
@@ -664,7 +709,7 @@ router = OutputRouter(configured_channels=['local'])
 router.send('nonexistent_channel', 'this must be suppressed')
 print('output suppressed — ok')
 "
-docker compose logs cos --tail=5 | grep '"component": "output"' | grep nonexistent || echo 'WARN: no output_router log found — check logs manually'
+docker compose logs cos --tail=50 | grep '"component": "output"' | grep nonexistent || echo 'WARN: no output_router log found — check logs manually'
 ```
 
 **Expected:** Services are healthy, all three test documents ingest successfully, `cos docs` shows correct provenance metadata, the retrieval step returns a cited answer, the MCP document listing reports the same ingested corpus, and the OutputRouter suppresses output for an unrecognised channel.

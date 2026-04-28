@@ -119,6 +119,12 @@
 - T3.5.3 no-results query uses domain-specific physics phrase — may match future KB content if science docs are ingested; acceptable for current test-docs corpus [`docs/manual-testing.md`]
 - `list_documents` does not filter by document status — "all ingested documents" claim technically includes inactive docs; pre-existing implementation gap [`src/cos/mcp_server/tools.py`]
 
+## Deferred from: code review of 3-6-documentation-and-housekeeping (2026-04-28)
+
+- `cli.py` "stub commands" comment in README project structure tree is stale — `ingest` and `docs` are fully implemented; only `status`/`logs`/`restart` remain stubs; pre-existing, not introduced by this diff [README.md]
+- `manual-testing.md` grep `--tail=5` for OutputRouter log verification is fragile — the log line may scroll past in 5 lines of recent output, silently masking a test failure; pre-existing, explicitly out of scope for Story 3.6 [docs/manual-testing.md]
+- `retrieve` error cases undocumented in `setup.md` — the new "Query the Knowledge Base" section documents only the happy path; server-not-initialized, retrieval-failed, and synthesis-failed error envelopes are not described; valid coverage gap, beyond Story 3.6 AC scope [docs/setup.md]
+
 ## Deferred from: code review of 3-4-mcp-retrieve-and-list-documents-tools (2026-04-27)
 
 - Startup partial init leaves pool open if RetrievalService construction raises — if `RetrievalService(...)` raises after `_pool` is assigned, the pool is never closed; no try/finally or cleanup path; Epic 5 hardening scope [`src/cos/mcp_server/server.py`]
