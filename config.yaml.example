@@ -34,12 +34,11 @@ embedding:
 
 # ─────────────────────────────────────────────
 # Role Pack
-# Points to the YAML file that defines the active role identity (goals, tone, stakeholder map).
-# path: relative path from the cos/ directory to the role pack file.
-#
-# NOTE: role_packs/chro.yaml does not exist yet. The role pack loader is a stub in Epic 1.
-# The server will log "role pack: stub loaded" without reading this file.
-# The actual role pack file and loader are implemented in Epic 4.
+# Points to the YAML file that defines the active role identity.
+# The role pack controls: role_name, goals, tone, knowledge_taxonomy,
+# stakeholder_map, retrieval_priorities, active_workflows, output_channels.
+# path: path relative to the cos/ directory to the role pack YAML file.
+# Example: role_packs/chro.yaml is the CHRO role pack provided with the platform.
 # ─────────────────────────────────────────────
 role_pack:
   path: role_packs/chro.yaml
