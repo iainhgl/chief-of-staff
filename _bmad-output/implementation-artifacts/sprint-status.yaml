@@ -1,5 +1,5 @@
 # generated: 2026-04-17
-# last_updated: 2026-04-27  # 3-4-mcp-retrieve-and-list-documents-tools -> done
+# last_updated: 2026-04-28  # 3-5-operator-validation-end-to-end-qa-with-citations -> done
 # project: CoS
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-17
-last_updated: 2026-04-27  # 3-4-mcp-retrieve-and-list-documents-tools -> done
+last_updated: 2026-04-28  # 3-5-operator-validation-end-to-end-qa-with-citations -> done
 project: CoS
 project_key: NOKEY
 tracking_system: file-system
@@ -79,7 +79,7 @@ development_status:
   3-2-outputrouter-and-egress-enforcement: done
   3-3-llm-synthesis-and-retrievalservice: done
   3-4-mcp-retrieve-and-list-documents-tools: done
-  3-5-operator-validation-end-to-end-qa-with-citations: backlog
+  3-5-operator-validation-end-to-end-qa-with-citations: done
   3-6-documentation-and-housekeeping: backlog
   epic-3-retrospective: optional
 

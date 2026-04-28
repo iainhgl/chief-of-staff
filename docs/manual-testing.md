@@ -1,6 +1,6 @@
 # Manual Testing Guide
 
-Reflects the platform as built at the end of **Epic 2: Document Knowledge Base**. Run these tests to verify the platform is healthy and the ingestion pipeline is working correctly.
+Reflects the platform as built at the end of **Epic 3: Knowledge Retrieval & Cited Q&A**. Run these tests to verify the platform is healthy, documents are ingested, and questions are answered with grounded citations.
 
 This guide is rewritten at the end of each epic to reflect current platform state — it does not accumulate historical tests.
 
@@ -17,16 +17,19 @@ This guide is rewritten at the end of each epic to reflect current platform stat
 
 ---
 
-## What Epic 2 delivers
+## What Epic 3 delivers
 
-- Full document ingestion pipeline: PDF, Word (`.docx`), Markdown, and plain text
+- Full document ingestion pipeline: PDF, Word (`.docx`), Markdown, and plain text (from Epic 2)
 - `cos ingest <path>` — ingest a single file or folder from the CLI
 - `cos docs` — list all ingested documents with provenance metadata
 - `cos docs --versions <id>` — show version history for a document
 - `cos docs --json` — machine-readable JSON output
-- Originals stored byte-for-byte in `./data/originals/`; Markdown copies in `./data/markdown/`
-- All four MCP tools registered: `get_status`, `retrieve`, `get_role_context`, `list_documents`
-- `retrieve`, `get_role_context`, and `list_documents` MCP tools still return "Not yet implemented" error envelopes
+- All four MCP tools working end-to-end:
+  - `get_status` — platform health and component status
+  - `retrieve` — hybrid search + LLM synthesis; returns grounded answer with citations
+  - `list_documents` — returns all ingested documents with `id`, `source_path`, `ingested_at`, `current_version`, `chunk_count`
+  - `get_role_context` — returns stub: `default — role pack not yet configured` (role identity arrives in Epic 4)
+- OutputRouter enforces fail-closed egress: unrecognised channels suppress output and log a structured error
 
 Other CLI commands such as `cos status`, `cos logs`, and `cos restart` remain stubs.
 
@@ -69,7 +72,10 @@ docker compose logs cos --tail=20
 - `"message": "Tika: healthy"`
 - `"message": "config loaded"`
 - `"message": "migrations applied"`
+- `"message": "connection pool: open"`
 - `"message": "role pack: stub loaded"`
+- `"message": "output router: initialised"`
+- `"message": "retrieval service: initialised"`
 - `"message": "MCP server: listening"`
 
 **Fail signal:** Any plain-text log line, missing entries, or traceback.
@@ -160,28 +166,37 @@ print(json.dumps(result['data']['components'], indent=2))
 
 ---
 
-## 7 — Verify stub tools return error envelopes
+## 7 — Verify tools return valid envelopes
 
 ```bash
 docker compose exec -i cos uv run python -c "
 import asyncio, json
-from cos.mcp_server.tools import retrieve, get_role_context, list_documents
+import cos.mcp_server.server as srv
+from cos.config import CosConfig
+from cos.mcp_server.tools import get_role_context, get_status
 
-for coro, kwargs in [
-    (retrieve, {'query': 'test'}),
-    (get_role_context, {}),
-    (list_documents, {}),
-]:
-    result = json.loads(asyncio.run(coro(**kwargs)))
-    assert result['status'] == 'error', f'Expected error envelope: {result}'
-    assert 'Not yet implemented' in result['error'], f'Wrong error: {result}'
-    print(coro.__name__, '— error envelope: ok')
+async def main():
+    config = CosConfig.load('/app/config.yaml')
+    await srv._startup_sequence(config)
+
+    # get_status
+    result = json.loads(await get_status())
+    assert result['status'] == 'ok', f'get_status failed: {result}'
+    print('get_status — ok')
+
+    # get_role_context
+    result = json.loads(await get_role_context())
+    assert result['status'] == 'ok', f'get_role_context failed: {result}'
+    assert 'role' in result['data'], f'Missing role field: {result}'
+    print('get_role_context — ok, role:', result['data']['role'])
+
+asyncio.run(main())
 "
 ```
 
-**Expected:** Each tool prints `— error envelope: ok`. No exceptions raised.
+**Expected:** Both tools print `ok`. `get_role_context` reports `default — role pack not yet configured`.
 
-**Fail signal:** Any exception, or `status` not equal to `"error"`.
+**Fail signal:** `status != "ok"` for either tool, or any exception.
 
 ---
 
@@ -212,10 +227,26 @@ Call get_status and show me the raw JSON response.
 Then ask:
 
 ```
-Call list_documents.
+Use retrieve to answer: What frameworks do I have for workforce segmentation?
 ```
 
-**Expected:** An error envelope with `"Not yet implemented"` — not an exception or Claude error.
+**Expected:** `status: "ok"`, `data.answer` is a grounded summary, and `citations` contains at least one source from the ingested knowledge base.
+
+Then ask:
+
+```
+Call list_documents and show me the raw JSON response.
+```
+
+**Expected:** `status: "ok"`, `data.documents` is a list (may be empty if no documents ingested yet; see Epic 3 tests for ingestion).
+
+Then ask:
+
+```
+Call get_role_context.
+```
+
+**Expected:** `status: "ok"`, `data.role` contains `default — role pack not yet configured` — not an error envelope.
 
 ---
 
@@ -389,24 +420,254 @@ docker compose run --rm --entrypoint /app/.venv/bin/cos cos docs --json
 
 ---
 
+## Epic 3: Knowledge Retrieval & Cited Q&A
+
+**Prerequisites:**
+
+- Platform running: `docker compose up -d` (all three services healthy)
+- `test-docs/` directory exists with `sample-brief.md`, `sample-report.pdf`, `sample-memo.docx`
+- Documents ingested (run T2.6.1 if not already done)
+- `config.yaml` has a valid `llm.api_key` — synthesis requires a live Claude API call
+- Working directory: `cos/`
+
+---
+
+### T3.5.1 — `retrieve` returns a synthesised answer with citations [LIVE]
+
+```bash
+docker compose exec -i cos uv run python -c "
+import asyncio, json
+import cos.mcp_server.server as srv
+from cos.config import CosConfig
+from cos.mcp_server.tools import retrieve
+
+async def main():
+    config = CosConfig.load('/app/config.yaml')
+    await srv._startup_sequence(config)
+    result = json.loads(await retrieve(query='What frameworks do I have for workforce segmentation?'))
+    print(json.dumps(result, indent=2))
+
+asyncio.run(main())
+"
+```
+
+**Expected:**
+
+```json
+{
+  "status": "ok",
+  "data": {
+    "answer": "<synthesised answer referencing ingested content>",
+    "citations": [
+      {
+        "source_path": "/test-docs/sample-brief.md",
+        "chunk_index": 0,
+        "score": 0.91
+      }
+    ]
+  },
+  "citations": [
+    {
+      "source_path": "/test-docs/sample-brief.md",
+      "chunk_index": 0,
+      "score": 0.91
+    }
+  ]
+}
+```
+
+Note: `citations` appears at both the top level and inside `data` — this is the standard tool envelope. Both fields contain identical data; the top-level `citations` field is consistent across all four tools.
+
+- `status` is `"ok"`
+- `data.answer` is a non-empty string
+- `data.citations` contains at least one item
+- Each citation has `source_path`, `chunk_index` (integer), and `score` (float)
+- `source_path` is a path to one of the ingested test documents
+
+**Fail signal:** `status != "ok"`, empty `data.citations`, or `data.answer` is null.
+
+---
+
+### T3.5.2 — Citations correspond to actual ingested documents [LIVE]
+
+Run the `retrieve` tool (T3.5.1 above) and collect the `source_path` values from citations.
+
+Then verify each appears in `cos docs` output:
+
+```bash
+docker compose run --rm --entrypoint /app/.venv/bin/cos cos docs
+```
+
+**Expected:** Every `source_path` returned in the `retrieve` response appears as a `SOURCE PATH` row in `cos docs` output. No citation points to a file that is not in the knowledge base.
+
+To verify `chunk_index` validity: note the `CHUNKS` count for each cited document in `cos docs` output. Every `chunk_index` must be >= 0 and strictly less than that document's `CHUNKS` count.
+
+**Fail signal:** A citation `source_path` not listed in `cos docs`, or a `chunk_index` that is negative or >= the `CHUNKS` count for that document.
+
+---
+
+### T3.5.3 — No-content query returns graceful no-results answer [LIVE]
+
+```bash
+docker compose exec -i cos uv run python -c "
+import asyncio, json
+import cos.mcp_server.server as srv
+from cos.config import CosConfig
+from cos.mcp_server.tools import retrieve
+
+async def main():
+    config = CosConfig.load('/app/config.yaml')
+    await srv._startup_sequence(config)
+    result = json.loads(await retrieve(query='quantum entanglement theory and photon spin states'))
+    print(json.dumps(result, indent=2))
+
+asyncio.run(main())
+"
+```
+
+**Expected:**
+
+- `status` is `"ok"`
+- `data.answer` clearly states no relevant content was found — wording similar to `"No relevant content found in the knowledge base."`
+- `data.citations` is an empty list `[]`
+- No invented source paths or fabricated chunk references
+
+**Fail signal:** `status == "error"`, fabricated citations, or an answer that invents content not present in any ingested document.
+
+---
+
+### T3.5.4 — `list_documents` MCP tool matches `cos docs` CLI [LIVE]
+
+Run both and compare:
+
+```bash
+# MCP tool output
+docker compose exec -i cos uv run python -c "
+import asyncio, json
+import cos.mcp_server.server as srv
+from cos.config import CosConfig
+from cos.mcp_server.tools import list_documents
+
+async def main():
+    config = CosConfig.load('/app/config.yaml')
+    await srv._startup_sequence(config)
+    result = json.loads(await list_documents())
+    print(json.dumps(result, indent=2))
+
+asyncio.run(main())
+"
+
+# CLI output (for comparison)
+docker compose run --rm --entrypoint /app/.venv/bin/cos cos docs --json
+```
+
+**Expected:**
+
+- `list_documents` returns `status: "ok"`, `data.documents` is a list
+- Each item in `data.documents` has: `id`, `source_path`, `ingested_at`, `current_version`, `chunk_count`
+- The set of `source_path` values matches between `list_documents` and `cos docs --json`
+- Document count is the same in both outputs
+
+**Fail signal:** Mismatched document counts, missing fields in MCP response, or `status != "ok"`.
+
+---
+
+### T3.5.5 — OutputRouter fail-closed: unrecognised channel suppresses output [LIVE]
+
+```bash
+docker compose exec -i cos uv run python -c "
+from cos.output.router import OutputRouter
+router = OutputRouter(configured_channels=['local'])
+router.send('nonexistent_channel', 'this content must be suppressed')
+print('no exception raised — output suppressed')
+"
+```
+
+**Expected:** `no exception raised — output suppressed` is printed. No content is delivered.
+
+Then verify the structured error appears in logs:
+
+```bash
+docker compose logs cos --tail=10
+```
+
+**Expected:** A JSON log line with `"component": "output"` and the `"nonexistent_channel"` value — confirming the error was logged. No content reaches any output.
+
+**Fail signal:** An exception is raised, `"output"` does not appear in recent logs, or the channel test content is delivered anywhere.
+
+---
+
 ## 11 — Running all live tests
 
 Use this sequence for a concise end-to-end operator pass:
 
 ```bash
+# 1. Start services
 docker compose up -d
 docker compose ps
+
+# 2. Ingest test fixtures
 docker compose run --rm --entrypoint /app/.venv/bin/cos -v "$(pwd)/test-docs:/test-docs" cos ingest /test-docs/
+
+# 3. Check provenance table output
 docker compose run --rm --entrypoint /app/.venv/bin/cos cos docs
+
+# 4. Validate JSON docs output
 docker compose run --rm --entrypoint /app/.venv/bin/cos cos docs --json | uv run python -c "
 import sys, json
 docs = json.load(sys.stdin)
 assert len(docs) >= 3 and all(d['chunk_count'] > 0 for d in docs)
 print(f'cos docs ok: {len(docs)} documents, all indexed')
 "
+
+# 5. Retrieve with citations (requires live LLM API — may take up to 5 seconds)
+docker compose exec -i cos uv run python -c "
+import asyncio, json
+import cos.mcp_server.server as srv
+from cos.config import CosConfig
+from cos.mcp_server.tools import retrieve
+
+async def main():
+    config = CosConfig.load('/app/config.yaml')
+    await srv._startup_sequence(config)
+    result = json.loads(await retrieve(query='What frameworks do I have for workforce segmentation?'))
+    assert result['status'] == 'ok', f'retrieve failed: {result}'
+    assert len(result['data']['citations']) > 0, 'No citations returned'
+    print(f'retrieve ok: {len(result[\"data\"][\"citations\"])} citations, answer length {len(result[\"data\"][\"answer\"])} chars')
+
+asyncio.run(main())
+"
+
+# 6. List documents via MCP tool
+docker compose exec -i cos uv run python -c "
+import asyncio, json
+import cos.mcp_server.server as srv
+from cos.config import CosConfig
+from cos.mcp_server.tools import list_documents
+
+async def main():
+    config = CosConfig.load('/app/config.yaml')
+    await srv._startup_sequence(config)
+    result = json.loads(await list_documents())
+    assert result['status'] == 'ok', f'list_documents failed: {result}'
+    docs = result['data']['documents']
+    assert len(docs) >= 3, f'Expected >= 3 docs, got {len(docs)}'
+    print(f'list_documents ok: {len(docs)} documents')
+
+asyncio.run(main())
+"
+
+# 7. OutputRouter fail-closed (no API key needed)
+docker compose exec -i cos uv run python -c "
+from cos.output.router import OutputRouter
+router = OutputRouter(configured_channels=['local'])
+router.send('nonexistent_channel', 'this must be suppressed')
+print('output suppressed — ok')
+"
+docker compose logs cos --tail=5 | grep '"component": "output"' | grep nonexistent || echo 'WARN: no output_router log found — check logs manually'
 ```
 
-**Expected:** Services are healthy, all three test documents ingest successfully, `cos docs` shows correct provenance metadata, and the JSON assertion prints `cos docs ok: 3 documents, all indexed`.
+**Expected:** Services are healthy, all three test documents ingest successfully, `cos docs` shows correct provenance metadata, the retrieval step returns a cited answer, the MCP document listing reports the same ingested corpus, and the OutputRouter suppresses output for an unrecognised channel.
 
 ---
 
