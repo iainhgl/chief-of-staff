@@ -75,7 +75,8 @@ async def _check_tika(url: str) -> bool:
 
 
 async def _startup_sequence(config: CosConfig) -> None:
-    global _output_router, _pool, _retrieval_service, _output_service
+    global _config, _output_router, _pool, _retrieval_service, _output_service
+    _config = config
     component: LogComponent = "mcp_server"
     pg_ok = await _check_postgres(config.database.libpq_dsn)
     _emit(component, "INFO", "Postgres: healthy" if pg_ok else "Postgres: unhealthy")

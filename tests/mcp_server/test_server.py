@@ -50,6 +50,7 @@ def _patch_server(
         emitted.append((component, level, message, extra))
 
     monkeypatch.setattr(server, "_output_router", None)
+    monkeypatch.setattr(server, "_config", None, raising=False)
     monkeypatch.setattr(server, "_pool", None, raising=False)
     monkeypatch.setattr(server, "_retrieval_service", None, raising=False)
     monkeypatch.setattr(server, "_output_service", None, raising=False)
@@ -111,6 +112,18 @@ async def test_startup_sequence_initialises_retrieval_service(
     await server._startup_sequence(_make_config(["local"]))
 
     assert server.get_retrieval_service() is not None
+
+
+@pytest.mark.asyncio
+async def test_startup_sequence_sets_global_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_server(monkeypatch)
+    config = _make_config(["local"])
+
+    await server._startup_sequence(config)
+
+    assert server.get_config() is config
 
 
 @pytest.mark.asyncio
