@@ -1,9 +1,16 @@
 import os
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import voyageai
 
-from cos.ingestion.embedder import EmbeddingError, EmbeddingResult, embed
+from cos.ingestion.embedder import (
+    EmbeddingError,
+    EmbeddingResult,
+    VoyageTransportConfig,
+    embed,
+)
 
 
 async def test_embed_empty_chunks_raises() -> None:
@@ -76,6 +83,57 @@ async def test_embed_result_count_matches_input() -> None:
         )
 
     assert len(results) == 2
+
+
+async def test_embed_uses_custom_voyage_session_for_proxy_and_trust_env() -> None:
+    mock_result = MagicMock()
+    mock_result.embeddings = [[0.1, 0.2, 0.3]]
+    original_proxy = voyageai.proxy
+
+    fake_session = MagicMock()
+    fake_session.close = AsyncMock()
+
+    async def _assert_transport(*args, **kwargs):
+        del args, kwargs
+        assert voyageai.aiosession.get() is fake_session
+        assert voyageai.proxy == "http://proxy.internal:8080"
+        return mock_result
+
+    mock_client = AsyncMock()
+    mock_client.embed = AsyncMock(side_effect=_assert_transport)
+
+    with (
+        patch("cos.ingestion.embedder.aiohttp.ClientSession", return_value=fake_session),
+        patch("cos.ingestion.embedder.voyageai.AsyncClient", return_value=mock_client),
+    ):
+        results = await embed(
+            ["hello"],
+            provider="anthropic",
+            model="voyage-3",
+            api_key="test-key",
+            transport=VoyageTransportConfig(
+                proxy_url="http://proxy.internal:8080",
+                trust_env=True,
+            ),
+        )
+
+    assert len(results) == 1
+    fake_session.close.assert_awaited_once()
+    assert voyageai.aiosession.get() is None
+    assert voyageai.proxy == original_proxy
+
+
+async def test_embed_missing_ca_bundle_raises() -> None:
+    with pytest.raises(EmbeddingError, match="embedding.ca_bundle_path not found"):
+        await embed(
+            ["hello"],
+            provider="anthropic",
+            model="voyage-3",
+            api_key="test-key",
+            transport=VoyageTransportConfig(
+                ca_bundle_path=Path("/definitely/missing/zscaler.pem")
+            ),
+        )
 
 
 @pytest.mark.integration

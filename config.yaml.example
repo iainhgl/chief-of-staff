@@ -26,11 +26,21 @@ llm:
 # model: the specific embedding model (e.g. "voyage-3")
 # api_key: only set this if your embedding provider uses a DIFFERENT API key than llm.api_key.
 #   Leave as null (or omit) when both providers share the same key.
+# ca_bundle_path: optional PEM file for a corporate TLS root/intercept certificate (for example Zscaler).
+#   When running in Docker, place the PEM in ./local/certs/ so it is visible inside the
+#   container at /certs/<filename>. Example: ./local/certs/zscaler-root.pem -> /certs/zscaler-root.pem
+# proxy_url: optional explicit HTTP/HTTPS proxy for Voyage requests.
+# trust_env: set to true if the host/container should honor HTTPS_PROXY / HTTP_PROXY / NO_PROXY.
 # ─────────────────────────────────────────────
 embedding:
   provider: anthropic
   model: voyage-3
   api_key: null
+  # Example when using a corporate TLS root mounted from ./local/certs:
+  # ca_bundle_path: /certs/zscaler-root.pem
+  ca_bundle_path: null
+  proxy_url: null
+  trust_env: false
 
 # ─────────────────────────────────────────────
 # Role Pack
