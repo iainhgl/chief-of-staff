@@ -17,6 +17,14 @@ def _make_config(channels: list[str]) -> SimpleNamespace:
         llm=SimpleNamespace(
             model="claude-3-haiku-20240307",
             api_key=SimpleNamespace(get_secret_value=lambda: "test-key"),
+            ca_bundle_path=None,
+            proxy_url=None,
+            trust_env=None,
+        ),
+        embedding=SimpleNamespace(
+            ca_bundle_path=None,
+            proxy_url=None,
+            trust_env=False,
         ),
     )
 
