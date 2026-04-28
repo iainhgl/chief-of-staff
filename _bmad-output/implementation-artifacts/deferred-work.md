@@ -112,6 +112,13 @@
 
 - No test for `RuntimeError` path when `message.content` contains no text block — `AnthropicAdapter.complete()` raises `RuntimeError` if all content blocks lack a `text` attribute (e.g. tool_use-only response); not in spec scope, low-probability scenario [`tests/llm/test_anthropic_adapter.py`]
 
+## Deferred from: code review of 3-5-operator-validation-end-to-end-qa-with-citations (2026-04-28)
+
+- Quick-script steps assert `len(docs) >= 3` with no prerequisite guard — design concern; prerequisites section references T2.6.1 ingest step; not a doc error [`docs/manual-testing.md`]
+- `_startup_sequence` called directly as a private API in all test snippets — fragile if renamed; established documented pattern; not introduced by this story [`docs/manual-testing.md`]
+- T3.5.3 no-results query uses domain-specific physics phrase — may match future KB content if science docs are ingested; acceptable for current test-docs corpus [`docs/manual-testing.md`]
+- `list_documents` does not filter by document status — "all ingested documents" claim technically includes inactive docs; pre-existing implementation gap [`src/cos/mcp_server/tools.py`]
+
 ## Deferred from: code review of 3-4-mcp-retrieve-and-list-documents-tools (2026-04-27)
 
 - Startup partial init leaves pool open if RetrievalService construction raises — if `RetrievalService(...)` raises after `_pool` is assigned, the pool is never closed; no try/finally or cleanup path; Epic 5 hardening scope [`src/cos/mcp_server/server.py`]
