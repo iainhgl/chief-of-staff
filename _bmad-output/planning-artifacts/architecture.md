@@ -767,3 +767,19 @@ The following deviations from the architecture spec occurred during Epic 2. Futu
 | 3 | **`docs/setup.md` updated incrementally during Epic 2** | The architecture spec placed documentation updates in the housekeeping story (2.7). In practice, `setup.md` was updated during Stories 2.4 and 2.5 as the ingestion and docs commands were implemented. The housekeeping story (2.7) added only the missing `cos docs` verification section. |
 | 4 | **Deferred: Missing UNIQUE constraint on `documents.source_path`** | Identified in Story 2.3 review. Concurrent ingests of the same source path can silently create duplicate document records. Pre-existing; deferred to a future schema migration. Tracked in `deferred-work.md`; not yet fixed. |
 | 5 | **Deferred: Chunks have no version-linking column** | Identified in Story 2.3 review. All chunk rows across all version records of a document are stored without a `document_version_id` FK — chunks from version 1 and version 2 of the same document are indistinguishable at the chunk level. Deferred as intentional Phase 1 design; the retrieval layer (Epic 3) returns the most recent chunks by default. |
+
+## Epic 3 Implementation Notes
+
+The following deviations from the architecture spec occurred during Epic 3. Future agents should treat these as the actual state of the codebase.
+
+| # | Deviation | Detail |
+|---|-----------|--------|
+| 1 | **`OutputRouter` log component is `"output"` not `"output_router"`** | Story 3.2 acceptance criteria expected `component: "output_router"` in the structured error log. The implementation logs `"component": "output"`. This is consistent with the valid component names in the architecture spec (`component` is one of `ingestion`, `retrieval`, `mcp_server`, `cli`, `scheduler`, `connector`, `output`). Manual testing and code review in Story 3.5 confirmed and corrected the expected value. Use `"output"` when searching logs for OutputRouter errors. |
+| 2 | **`OutputRouter.send()` is a synchronous method** | The architecture async discipline says all DB calls and external I/O must be async. `OutputRouter.send()` is defined as `def send(self, channel, content) -> None` and remains synchronous. This is correct for the current implementation: with only the `local` channel handler implemented, `OutputRouter` itself performs no DB calls or external I/O. Do not add `await` when calling `router.send()`. Note: if a future channel handler (e.g. email, Slack) performs network I/O, `send()` will need to become async at that point. |
+| 3 | **`retrieve` tool response has `citations` at both top-level and inside `data`** | The standard response envelope is `{"status": "ok", "data": {...}, "citations": [...]}`. For the `retrieve` tool, the same citations list appears at both levels: `data.citations` and the top-level `citations`. This is the working contract at the end of Epic 3 and is what operators should expect from grounded Q&A responses. |
+
+For clarity, the Epic 3 MCP envelopes in the running implementation are:
+- `retrieve` → `{"status": "ok", "data": {"answer": "...", "citations": [...]}, "citations": [...]}`
+- `list_documents` → `{"status": "ok", "data": {"documents": [...]}, "citations": []}`
+- `get_role_context` → `{"status": "ok", "data": {"role": "default — role pack not yet configured"}, "citations": []}`
+- `get_status` → `{"status": "ok", "data": {"components": [...], "ready": true}, "citations": []}`
