@@ -125,6 +125,19 @@
 - `manual-testing.md` grep `--tail=5` for OutputRouter log verification is fragile — the log line may scroll past in 5 lines of recent output, silently masking a test failure; pre-existing, explicitly out of scope for Story 3.6 [docs/manual-testing.md]
 - `retrieve` error cases undocumented in `setup.md` — the new "Query the Knowledge Base" section documents only the happy path; server-not-initialized, retrieval-failed, and synthesis-failed error envelopes are not described; valid coverage gap, beyond Story 3.6 AC scope [docs/setup.md]
 
+## Deferred from: code review of 4-1-role-pack-schema-and-chro-configuration-file (2026-04-28)
+
+- Empty file → `yaml.safe_load` returns `None` → confusing Pydantic `ValidationError`; Story 4.2 startup sequence will translate errors to human-readable messages [`src/cos/rolepack/loader.py:20-21`]
+- Non-dict YAML (list/bare string) passes YAML parse then raises confusing `ValidationError`; Story 4.2 handles error translation [`src/cos/rolepack/loader.py:21`]
+- Empty lists accepted for all required `list[str]` fields (`goals: []`, `active_workflows: []`) — add `min_length=1` constraint in a future story
+- Empty strings accepted for `role_name` and `tone` — add Pydantic `min_length=1` constraint when validation is hardened
+- `active_workflows` and `output_channels` accept arbitrary strings with no enum or slug validation — enforce when workflow registry is defined
+- No `model_config = ConfigDict(extra="forbid")` — typo'd YAML keys silently ignored; add when role pack schema is considered stable
+- Relative `role_pack.path` resolved against process cwd — Story 4.2 startup sequence should resolve relative to the config file's base directory
+- No schema version field in role pack YAML — add when a breaking schema change requires a migration path
+- `stakeholder_map: dict[str, str]` silently coerces non-string YAML values (int/bool/null) to strings — acceptable for operator config; tighten with `strict=True` if needed
+- `retrieval_priorities` ordering contract (high-to-low weight) not documented in any user-facing comment — add a comment to `config.yaml.example` or `chro.yaml` explaining the ordering semantics
+
 ## Deferred from: code review of 3-4-mcp-retrieve-and-list-documents-tools (2026-04-27)
 
 - Startup partial init leaves pool open if RetrievalService construction raises — if `RetrievalService(...)` raises after `_pool` is assigned, the pool is never closed; no try/finally or cleanup path; Epic 5 hardening scope [`src/cos/mcp_server/server.py`]

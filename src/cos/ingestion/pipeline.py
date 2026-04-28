@@ -12,7 +12,7 @@ import psycopg
 
 from cos.config import CosConfig
 from cos.ingestion.chunker import chunk
-from cos.ingestion.embedder import embed
+from cos.ingestion.embedder import VoyageTransportConfig, embed
 from cos.ingestion.extractor import extract
 from cos.store.db import store_document
 from cos.store.models import ChunkRecord, EmbeddingRecord
@@ -69,6 +69,11 @@ async def run_pipeline(
         provider=config.embedding.provider,
         model=config.embedding.model,
         api_key=api_key,
+        transport=VoyageTransportConfig(
+            ca_bundle_path=config.embedding.ca_bundle_path,
+            proxy_url=config.embedding.proxy_url,
+            trust_env=config.embedding.trust_env,
+        ),
     )
 
     chunk_records = [

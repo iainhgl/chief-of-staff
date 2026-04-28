@@ -35,8 +35,9 @@ def mock_embed(monkeypatch: pytest.MonkeyPatch) -> None:
         provider: str,
         model: str,
         api_key: str,
+        transport=None,
     ) -> list[EmbeddingResult]:
-        del api_key
+        del api_key, transport
         return [
             EmbeddingResult(
                 vector=[float(index) / 100 for index in range(1024)],

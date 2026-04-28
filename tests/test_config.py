@@ -46,6 +46,9 @@ def test_valid_config_loads(tmp_path):
     assert config.llm.model == "claude-sonnet-4-6"
     assert config.embedding.provider == "anthropic"
     assert config.embedding.api_key is None
+    assert config.embedding.ca_bundle_path is None
+    assert config.embedding.proxy_url is None
+    assert config.embedding.trust_env is False
     assert config.role_pack.path == "role_packs/chro.yaml"
     assert config.channels == ["local"]
     assert config.connectors == []
@@ -71,6 +74,24 @@ def test_missing_nested_required_field_raises_system_exit(tmp_path):
     with pytest.raises(SystemExit) as exc_info:
         CosConfig.load(cfg_file)
     assert "api_key" in str(exc_info.value)
+
+
+def test_embedding_network_overrides_load(tmp_path):
+    cfg_file = _write_config(
+        tmp_path,
+        VALID_CONFIG_YAML.replace(
+            "  api_key: null\n",
+            "  api_key: null\n"
+            "  ca_bundle_path: /tmp/zscaler-root.pem\n"
+            "  proxy_url: http://proxy.internal:8080\n"
+            "  trust_env: true\n",
+        ),
+    )
+    config = CosConfig.load(cfg_file)
+
+    assert config.embedding.ca_bundle_path == Path("/tmp/zscaler-root.pem")
+    assert config.embedding.proxy_url == "http://proxy.internal:8080"
+    assert config.embedding.trust_env is True
 
 
 def test_secret_str_masking(tmp_path):

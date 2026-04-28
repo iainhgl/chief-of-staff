@@ -8,7 +8,7 @@ from pgvector import Vector  # type: ignore[import-untyped]
 from pgvector.psycopg import register_vector_async  # type: ignore[import-untyped]
 
 from cos.config import CosConfig
-from cos.ingestion.embedder import embed
+from cos.ingestion.embedder import VoyageTransportConfig, embed
 from cos.retrieval.citations import CitedChunk, CitedResults
 from cos.rolepack.loader import RolePackConfig
 
@@ -62,6 +62,11 @@ async def hybrid_search(
             config.embedding.api_key.get_secret_value()
             if config.embedding.api_key
             else ""
+        ),
+        transport=VoyageTransportConfig(
+            ca_bundle_path=config.embedding.ca_bundle_path,
+            proxy_url=config.embedding.proxy_url,
+            trust_env=config.embedding.trust_env,
         ),
     )
     query_vector = Vector(query_embeddings[0].vector)

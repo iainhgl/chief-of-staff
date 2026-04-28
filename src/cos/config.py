@@ -27,6 +27,9 @@ class EmbeddingConfig(BaseModel):
     provider: str
     model: str
     api_key: SecretStr | None = None
+    ca_bundle_path: Path | None = None
+    proxy_url: str | None = None
+    trust_env: bool = False
 
 
 class RolePackRef(BaseModel):

@@ -28,5 +28,9 @@ tokens/
 # Runtime document storage (created by cos ingest)
 data/
 
+# Local certificate mounts for corporate TLS/proxy environments
+local/certs/*
+!local/certs/.gitkeep
+
 # macOS metadata
 .DS_Store

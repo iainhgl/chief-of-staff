@@ -26,6 +26,51 @@ Then open `config.yaml` and fill in the required values — at minimum:
 
 `config.yaml` is git-ignored and never committed. `config.yaml.example` is the safe template that stays in the repo.
 
+### Corporate Proxy / TLS Intercept Networks
+
+If document ingest fails at the embedding step with an error like `Cannot connect to host api.voyageai.com:443 ssl:default`, the Voyage SDK needs explicit network settings. It uses `aiohttp`, so common fixes aimed at `requests` do not apply here.
+
+The standard project setup is:
+
+1. Place your corporate root certificate PEM in `./local/certs/`
+2. Point `embedding.ca_bundle_path` in `config.yaml` at `/certs/<filename>.pem`
+
+`docker-compose.yml` already mounts `./local/certs` into the container as `/certs`, so you should not need to edit the Compose file per laptop.
+
+Set one or more of these under `embedding:` in `config.yaml`:
+
+- `ca_bundle_path` — path to a PEM file containing your corporate root certificate (for example a Zscaler root CA)
+- `proxy_url` — explicit proxy URL if your network requires outbound HTTPS through a proxy
+- `trust_env: true` — tells the Voyage client to honor `HTTPS_PROXY`, `HTTP_PROXY`, and `NO_PROXY`
+
+Example:
+
+```yaml
+embedding:
+  provider: anthropic
+  model: voyage-3
+  api_key: null
+  ca_bundle_path: /certs/zscaler-root.pem
+  proxy_url: null
+  trust_env: true
+```
+
+Example host file layout:
+
+```text
+cos/
+├── config.yaml
+└── local/
+    └── certs/
+        └── zscaler-root.pem
+```
+
+After adding or changing files in `./local/certs`, recreate the `cos` container:
+
+```bash
+docker compose up -d --build --force-recreate cos
+```
+
 ## Start the Platform
 
 ```bash
