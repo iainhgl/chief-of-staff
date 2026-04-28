@@ -43,6 +43,8 @@ Set one or more of these under `embedding:` in `config.yaml`:
 - `proxy_url` — explicit proxy URL if your network requires outbound HTTPS through a proxy
 - `trust_env: true` — tells the Voyage client to honor `HTTPS_PROXY`, `HTTP_PROXY`, and `NO_PROXY`
 
+The same three settings are also available under `llm:` if the Anthropic call path needs different values. If the `llm` transport fields are left unset, the platform falls back to the `embedding` transport settings.
+
 Example:
 
 ```yaml

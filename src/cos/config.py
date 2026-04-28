@@ -21,6 +21,9 @@ class LLMConfig(BaseModel):
     provider: str
     model: str
     api_key: SecretStr
+    ca_bundle_path: Path | None = None
+    proxy_url: str | None = None
+    trust_env: bool | None = None
 
 
 class EmbeddingConfig(BaseModel):

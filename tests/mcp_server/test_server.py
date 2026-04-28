@@ -17,6 +17,14 @@ def _make_config(channels: list[str]) -> SimpleNamespace:
         llm=SimpleNamespace(
             model="claude-3-haiku-20240307",
             api_key=SimpleNamespace(get_secret_value=lambda: "test-key"),
+            ca_bundle_path=None,
+            proxy_url=None,
+            trust_env=None,
+        ),
+        embedding=SimpleNamespace(
+            ca_bundle_path=None,
+            proxy_url=None,
+            trust_env=False,
         ),
     )
 
@@ -42,6 +50,7 @@ def _patch_server(
         emitted.append((component, level, message, extra))
 
     monkeypatch.setattr(server, "_output_router", None)
+    monkeypatch.setattr(server, "_config", None, raising=False)
     monkeypatch.setattr(server, "_pool", None, raising=False)
     monkeypatch.setattr(server, "_retrieval_service", None, raising=False)
     monkeypatch.setattr(server, "_output_service", None, raising=False)
@@ -103,6 +112,18 @@ async def test_startup_sequence_initialises_retrieval_service(
     await server._startup_sequence(_make_config(["local"]))
 
     assert server.get_retrieval_service() is not None
+
+
+@pytest.mark.asyncio
+async def test_startup_sequence_sets_global_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_server(monkeypatch)
+    config = _make_config(["local"])
+
+    await server._startup_sequence(config)
+
+    assert server.get_config() is config
 
 
 @pytest.mark.asyncio

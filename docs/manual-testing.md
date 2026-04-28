@@ -488,6 +488,41 @@ Note: `citations` appears at both the top level and inside `data` — this is th
 
 **Fail signal:** `status != "ok"`, empty `data.citations`, or `data.answer` is null.
 
+#### Retrieval Sequence
+
+The live `retrieve` path in T3.5.1 performs one query embedding call to Voyage, then one synthesis call to Anthropic. Claude does not perform any additional search or tool use during answer generation; it only receives the retrieved chunk text plus the user query.
+
+```mermaid
+sequenceDiagram
+    participant Operator
+    participant Tool as "retrieve() tool"
+    participant Service as "RetrievalService"
+    participant PG as "Postgres/pgvector"
+    participant Voyage as "Voyage embeddings API"
+    participant Claude as "Anthropic Claude API"
+
+    Operator->>Tool: Query: "What frameworks do I have for workforce segmentation?"
+    Tool->>Service: query(text, role_pack=None)
+    Service->>Voyage: Embed the query text
+    Voyage-->>Service: Query vector
+    Service->>PG: Keyword search on chunks.content_tsv
+    Service->>PG: Semantic vector search on embeddings.vector
+    PG-->>Service: Top matching chunks + source paths
+    Service->>Claude: System prompt + user query + retrieved chunk text
+    Note over Claude: No extra search or tool calls
+    Claude-->>Service: Synthesised answer text
+    Service-->>Tool: answer + citations
+    Tool-->>Operator: JSON envelope with status, answer, citations
+```
+
+**What Claude actually sees**
+
+- The original user question
+- A fixed system prompt instructing grounded answering
+- The retrieved chunk contents as numbered context blocks
+
+Claude does not see the full original documents unless those document contents are present in the retrieved chunks, and it does not independently query the database, Voyage, Tika, or the web during this Epic 3 flow.
+
 ---
 
 ### T3.5.2 — Citations correspond to actual ingested documents [LIVE]
@@ -621,24 +656,23 @@ asyncio.run(main())
 
 ```bash
 docker compose exec -i cos uv run python -c "
+import logging
 from cos.output.router import OutputRouter
+logging.basicConfig(level=logging.ERROR, format='%(message)s')
 router = OutputRouter(configured_channels=['local'])
 router.send('nonexistent_channel', 'this content must be suppressed')
 print('no exception raised — output suppressed')
 "
 ```
 
-**Expected:** `no exception raised — output suppressed` is printed. No content is delivered.
+**Expected:** Two things appear in the same command output:
 
-Then verify the structured error appears in logs:
+- A JSON error log line with `"component": "output"` and `"channel": "nonexistent_channel"`
+- `no exception raised — output suppressed`
 
-```bash
-docker compose logs cos --tail=10
-```
+The test content itself must not be delivered anywhere. This check runs in a short-lived `docker compose exec` Python process, so the error log is emitted by that exec session rather than the long-running `cos` service process. For that reason, `docker compose logs cos` is not the reliable place to verify this specific error.
 
-**Expected:** A JSON log line with `"component": "output"` and the `"nonexistent_channel"` value — confirming the error was logged. No content reaches any output.
-
-**Fail signal:** An exception is raised, `"output"` does not appear in recent logs, or the channel test content is delivered anywhere.
+**Fail signal:** An exception is raised, no structured `"component": "output"` error appears in the exec command output, or the channel test content is delivered anywhere.
 
 ---
 

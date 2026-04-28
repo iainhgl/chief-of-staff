@@ -9,7 +9,7 @@ from mcp.server.fastmcp import FastMCP
 from psycopg_pool import AsyncConnectionPool
 
 from cos.config import CosConfig, LogComponent
-from cos.llm.anthropic import AnthropicAdapter
+from cos.llm.anthropic import AnthropicAdapter, HttpTransportConfig
 from cos.output.router import OutputRouter
 from cos.services.output import OutputService
 from cos.services.retrieval import RetrievalService
@@ -75,7 +75,8 @@ async def _check_tika(url: str) -> bool:
 
 
 async def _startup_sequence(config: CosConfig) -> None:
-    global _output_router, _pool, _retrieval_service, _output_service
+    global _config, _output_router, _pool, _retrieval_service, _output_service
+    _config = config
     component: LogComponent = "mcp_server"
     pg_ok = await _check_postgres(config.database.libpq_dsn)
     _emit(component, "INFO", "Postgres: healthy" if pg_ok else "Postgres: unhealthy")
@@ -93,6 +94,23 @@ async def _startup_sequence(config: CosConfig) -> None:
     adapter = AnthropicAdapter(
         model=config.llm.model,
         api_key=config.llm.api_key.get_secret_value(),
+        transport=HttpTransportConfig(
+            ca_bundle_path=(
+                config.llm.ca_bundle_path
+                if config.llm.ca_bundle_path is not None
+                else config.embedding.ca_bundle_path
+            ),
+            proxy_url=(
+                config.llm.proxy_url
+                if config.llm.proxy_url is not None
+                else config.embedding.proxy_url
+            ),
+            trust_env=(
+                config.llm.trust_env
+                if config.llm.trust_env is not None
+                else config.embedding.trust_env
+            ),
+        ),
     )
     _retrieval_service = RetrievalService(
         config=config,

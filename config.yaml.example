@@ -13,11 +13,16 @@
 # provider: the LLM provider name (currently only "anthropic" is implemented)
 # model: the specific model to use (e.g. "claude-sonnet-4-6", "claude-opus-4-7")
 # api_key: your Anthropic API key (required)
+# ca_bundle_path / proxy_url / trust_env: optional network overrides for the LLM provider.
+#   If omitted, the runtime will fall back to the embedding transport settings below.
 # ─────────────────────────────────────────────
 llm:
   provider: anthropic
   model: claude-sonnet-4-6
   api_key: YOUR_API_KEY_HERE
+  ca_bundle_path: null
+  proxy_url: null
+  trust_env: null
 
 # ─────────────────────────────────────────────
 # Embedding Provider

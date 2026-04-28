@@ -1,10 +1,11 @@
 import logging
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from cos.llm.adapter import LLMAdapter
-from cos.llm.anthropic import AnthropicAdapter
+from cos.llm.anthropic import AnthropicAdapter, HttpTransportConfig
 
 
 @pytest.mark.asyncio
@@ -64,3 +65,37 @@ async def test_complete_includes_context_chunks_in_user_message() -> None:
     user_message = call_kwargs["messages"][0]["content"]
     assert "first chunk" in user_message
     assert "second chunk" in user_message
+
+
+def test_adapter_builds_http_client_for_transport_overrides(tmp_path: Path) -> None:
+    cert_path = tmp_path / "corp-root.pem"
+    cert_path.write_text("not-a-real-cert", encoding="utf-8")
+
+    with (
+        patch("cos.llm.anthropic.httpx.AsyncClient") as mock_http_client,
+        patch("cos.llm.anthropic.ssl.create_default_context", return_value=MagicMock()),
+        patch("cos.llm.anthropic.anthropic.AsyncAnthropic") as mock_anthropic,
+    ):
+        AnthropicAdapter(
+            model="claude-3-haiku-20240307",
+            api_key="test",
+            transport=HttpTransportConfig(
+                ca_bundle_path=cert_path,
+                proxy_url="http://proxy.internal:8080",
+                trust_env=True,
+            ),
+        )
+
+    mock_http_client.assert_called_once()
+    mock_anthropic.assert_called_once()
+
+
+def test_adapter_missing_ca_bundle_raises() -> None:
+    with pytest.raises(RuntimeError, match="llm.ca_bundle_path not found"):
+        AnthropicAdapter(
+            model="claude-3-haiku-20240307",
+            api_key="test",
+            transport=HttpTransportConfig(
+                ca_bundle_path=Path("/definitely/missing/zscaler.pem")
+            ),
+        )

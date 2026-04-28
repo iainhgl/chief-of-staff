@@ -44,6 +44,9 @@ def test_valid_config_loads(tmp_path):
 
     assert config.llm.provider == "anthropic"
     assert config.llm.model == "claude-sonnet-4-6"
+    assert config.llm.ca_bundle_path is None
+    assert config.llm.proxy_url is None
+    assert config.llm.trust_env is None
     assert config.embedding.provider == "anthropic"
     assert config.embedding.api_key is None
     assert config.embedding.ca_bundle_path is None
@@ -92,6 +95,24 @@ def test_embedding_network_overrides_load(tmp_path):
     assert config.embedding.ca_bundle_path == Path("/tmp/zscaler-root.pem")
     assert config.embedding.proxy_url == "http://proxy.internal:8080"
     assert config.embedding.trust_env is True
+
+
+def test_llm_network_overrides_load(tmp_path):
+    cfg_file = _write_config(
+        tmp_path,
+        VALID_CONFIG_YAML.replace(
+            "  api_key: sk-test-key-1234\n",
+            "  api_key: sk-test-key-1234\n"
+            "  ca_bundle_path: /tmp/anthropic-root.pem\n"
+            "  proxy_url: http://proxy.internal:8080\n"
+            "  trust_env: true\n",
+        ),
+    )
+    config = CosConfig.load(cfg_file)
+
+    assert config.llm.ca_bundle_path == Path("/tmp/anthropic-root.pem")
+    assert config.llm.proxy_url == "http://proxy.internal:8080"
+    assert config.llm.trust_env is True
 
 
 def test_secret_str_masking(tmp_path):
