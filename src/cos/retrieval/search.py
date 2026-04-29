@@ -25,19 +25,34 @@ def _coerce_priority_weight(retrieval_priorities: Any, source_path: str) -> floa
     if isinstance(retrieval_priorities, Iterable) and not isinstance(
         retrieval_priorities, str
     ):
-        for item in retrieval_priorities:
-            if not isinstance(item, dict):
-                continue
-            candidate = (
-                item.get("source_path") or item.get("path") or item.get("source")
-            )
-            weight = item.get("weight")
-            if (
-                isinstance(candidate, str)
-                and source_path.startswith(candidate)
-                and isinstance(weight, int | float)
-            ):
-                return float(weight)
+        priorities_list = list(retrieval_priorities)
+        total_priorities = len(priorities_list)
+        path_lower = source_path.lower()
+
+        for index, item in enumerate(priorities_list):
+            if isinstance(item, dict):
+                candidate = (
+                    item.get("source_path") or item.get("path") or item.get("source")
+                )
+                weight = item.get("weight")
+                if (
+                    isinstance(candidate, str)
+                    and source_path.startswith(candidate)
+                    and isinstance(weight, int | float)
+                ):
+                    return float(weight)
+            elif isinstance(item, str):
+                words = [word.lower() for word in item.split() if len(word) > 2]
+                variants = {
+                    variant
+                    for word in words
+                    for variant in (
+                        word,
+                        word[:-1] if word.endswith("s") and len(word) > 3 else word,
+                    )
+                }
+                if any(variant in path_lower for variant in variants):
+                    return 1.0 + (total_priorities - index) / total_priorities
 
     return 1.0
 
