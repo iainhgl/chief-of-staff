@@ -1,6 +1,6 @@
 # Manual Testing Guide
 
-Reflects the platform as built at the end of **Epic 3: Knowledge Retrieval & Cited Q&A**. Run these tests to verify the platform is healthy, documents are ingested, and questions are answered with grounded citations.
+Reflects the platform as built at the end of **Epic 4: Role Identity & Configuration**. Run these tests to verify the platform is healthy, documents are ingested, questions are answered with grounded citations, and the CHRO role identity is active and switchable.
 
 This guide is rewritten at the end of each epic to reflect current platform state — it does not accumulate historical tests.
 
@@ -17,7 +17,7 @@ This guide is rewritten at the end of each epic to reflect current platform stat
 
 ---
 
-## What Epic 3 delivers
+## What Epic 4 delivers
 
 - Full document ingestion pipeline: PDF, Word (`.docx`), Markdown, and plain text (from Epic 2)
 - `cos ingest <path>` — ingest a single file or folder from the CLI
@@ -26,9 +26,11 @@ This guide is rewritten at the end of each epic to reflect current platform stat
 - `cos docs --json` — machine-readable JSON output
 - All four MCP tools working end-to-end:
   - `get_status` — platform health and component status
-  - `retrieve` — hybrid search + LLM synthesis; returns grounded answer with citations
+  - `retrieve` — hybrid search + LLM synthesis with CHRO tone and retrieval priorities applied
   - `list_documents` — returns all ingested documents with `id`, `source_path`, `ingested_at`, `current_version`, `chunk_count`
-  - `get_role_context` — returns stub: `default — role pack not yet configured` (role identity arrives in Epic 4)
+  - `get_role_context` — returns full CHRO configuration: role name, goals, tone, knowledge taxonomy, active workflows
+- Role pack system: define role identity in `role_packs/chro.yaml`; switch by editing `config.yaml` and restarting — no code change required
+- Two role packs included: `role_packs/chro.yaml` (CHRO) and `role_packs/enterprise_architect.yaml`
 - OutputRouter enforces fail-closed egress: unrecognised channels suppress output and log a structured error
 
 Other CLI commands such as `cos status`, `cos logs`, and `cos restart` remain stubs.
@@ -72,13 +74,15 @@ docker compose logs cos --tail=20
 - `"message": "Tika: healthy"`
 - `"message": "config loaded"`
 - `"message": "migrations applied"`
+- `"message": "Role pack loaded"` — component is `"rolepack"`, includes `"role_name": "CHRO"`
 - `"message": "connection pool: open"`
-- `"message": "role pack: stub loaded"`
 - `"message": "output router: initialised"`
 - `"message": "retrieval service: initialised"`
 - `"message": "MCP server: listening"`
 
-**Fail signal:** Any plain-text log line, missing entries, or traceback.
+**Note:** `"connection pool: open"` now appears after `"Role pack loaded"` — this is intentional (pool creation follows role pack validation).
+
+**Fail signal:** Any plain-text log line, missing entries, `"role pack: stub loaded"` (obsolete stub message), or traceback.
 
 ---
 
@@ -187,14 +191,14 @@ async def main():
     # get_role_context
     result = json.loads(await get_role_context())
     assert result['status'] == 'ok', f'get_role_context failed: {result}'
-    assert 'role' in result['data'], f'Missing role field: {result}'
-    print('get_role_context — ok, role:', result['data']['role'])
+    assert 'role_name' in result['data'], f'Missing role_name field: {result}'
+    print('get_role_context — ok, role:', result['data']['role_name'])
 
 asyncio.run(main())
 "
 ```
 
-**Expected:** Both tools print `ok`. `get_role_context` reports `default — role pack not yet configured`.
+**Expected:** Both tools print `ok`. `get_role_context` reports `CHRO` (not the old stub `"default — role pack not yet configured"`).
 
 **Fail signal:** `status != "ok"` for either tool, or any exception.
 
@@ -248,7 +252,7 @@ Then ask:
 Call get_role_context.
 ```
 
-**Expected:** `status: "ok"`, `data.role` contains `default — role pack not yet configured` — not an error envelope.
+**Expected:** `status: "ok"`, `data.role_name` is `"CHRO"`, `data.goals` is a list, `data.tone` describes the CHRO persona — not the old stub text.
 
 ---
 
@@ -609,49 +613,6 @@ docker compose run --rm --entrypoint /app/.venv/bin/cos cos docs --json
 
 ---
 
-### T3.5.6 — `get_role_context` returns stub envelope [LIVE]
-
-```bash
-docker compose exec -i cos uv run python -c "
-import asyncio, json
-import cos.mcp_server.server as srv
-from cos.config import CosConfig
-from cos.mcp_server.tools import get_role_context
-
-async def main():
-    config = CosConfig.load('/app/config.yaml')
-    await srv._startup_sequence(config)
-    result = json.loads(await get_role_context())
-    print(json.dumps(result, indent=2))
-    assert result['status'] == 'ok', f'unexpected status: {result}'
-    assert result['data']['role'] == 'default — role pack not yet configured', f'unexpected role: {result}'
-    assert result['citations'] == [], f'expected empty citations: {result}'
-    print('get_role_context ok')
-
-asyncio.run(main())
-"
-```
-
-**Expected:**
-
-```json
-{
-  "status": "ok",
-  "data": {
-    "role": "default — role pack not yet configured"
-  },
-  "citations": []
-}
-```
-
-- `status` is `"ok"`
-- `data.role` is exactly `default — role pack not yet configured` (not an error envelope)
-- `citations` is an empty list
-
-**Fail signal:** `status != "ok"`, `data.role` contains an error message, or an exception is raised.
-
----
-
 ### T3.5.5 — OutputRouter fail-closed: unrecognised channel suppresses output [LIVE]
 
 ```bash
@@ -673,6 +634,219 @@ print('no exception raised — output suppressed')
 The test content itself must not be delivered anywhere. This check runs in a short-lived `docker compose exec` Python process, so the error log is emitted by that exec session rather than the long-running `cos` service process. For that reason, `docker compose logs cos` is not the reliable place to verify this specific error.
 
 **Fail signal:** An exception is raised, no structured `"component": "output"` error appears in the exec command output, or the channel test content is delivered anywhere.
+
+---
+
+## Epic 4: Role Identity & Configuration
+
+**Prerequisites:**
+
+- Platform running: `docker compose up -d` (all three services healthy)
+- `config.yaml` has `role_pack.path: role_packs/chro.yaml` (the default)
+- Documents ingested (run T2.6.1 if not already done — the retrieve test requires at least one document)
+- `config.yaml` has valid `llm.api_key` and `embedding.api_key`
+- Working directory: `cos/`
+
+---
+
+### T4.5.1 — `get_role_context` returns CHRO configuration [LIVE]
+
+```bash
+docker compose exec -i cos uv run python -c "
+import asyncio, json
+import cos.mcp_server.server as srv
+from cos.config import CosConfig
+from cos.mcp_server.tools import get_role_context
+
+async def main():
+    config = CosConfig.load('/app/config.yaml')
+    await srv._startup_sequence(config)
+    result = json.loads(await get_role_context())
+    print(json.dumps(result, indent=2))
+    assert result['status'] == 'ok', f'unexpected status: {result}'
+    assert result['data']['role_name'] == 'CHRO', f'unexpected role_name: {result}'
+    assert isinstance(result['data']['goals'], list) and len(result['data']['goals']) > 0
+    assert 'Strategic' in result['data']['tone'], f'unexpected tone: {result}'
+    assert isinstance(result['data']['knowledge_taxonomy'], list)
+    assert isinstance(result['data']['active_workflows'], list)
+    assert result['citations'] == [], f'expected empty citations: {result}'
+    print('get_role_context ok — CHRO role pack active')
+
+asyncio.run(main())
+"
+```
+
+**Expected:**
+
+```json
+{
+  "status": "ok",
+  "data": {
+    "role_name": "CHRO",
+    "goals": ["Drive HR transformation focused on PE value creation levers...", "..."],
+    "tone": "Strategic and evidence-based — translate HR concepts into business and financial impact...",
+    "knowledge_taxonomy": ["HR operating models and transformation frameworks", "..."],
+    "active_workflows": ["hr_diagnostic", "ceo_board_prep", "weekly_prioritisation", "communication_drafting"]
+  },
+  "citations": []
+}
+```
+
+- `status` is `"ok"`
+- `data.role_name` is exactly `"CHRO"`
+- `data.goals` is a non-empty list
+- `data.tone` contains `"Strategic"` — confirms CHRO persona loaded from YAML
+- `data.knowledge_taxonomy` is a non-empty list
+- `data.active_workflows` is a non-empty list
+- `citations` is an empty list
+
+**Fail signal:** `status != "ok"`, `data.role_name` is missing or not `"CHRO"`, `data` contains `"role": "default..."` (old stub), or any exception.
+
+---
+
+### T4.5.2 — `retrieve` applies CHRO tone to synthesised answers [LIVE]
+
+```bash
+docker compose exec -i cos uv run python -c "
+import asyncio, json
+import cos.mcp_server.server as srv
+from cos.config import CosConfig
+from cos.mcp_server.tools import retrieve
+
+async def main():
+    config = CosConfig.load('/app/config.yaml')
+    await srv._startup_sequence(config)
+    result = json.loads(await retrieve(query='What frameworks do I have for workforce segmentation?'))
+    print(json.dumps(result, indent=2))
+
+asyncio.run(main())
+"
+```
+
+**Expected:**
+
+- `status` is `"ok"`
+- `data.answer` is a non-empty string with a commercially-minded, evidence-based tone (not generic or HR-jargon-heavy)
+- `data.citations` contains at least one item (requires ingested test docs)
+
+Observe the answer language: with the CHRO role pack active, the synthesis prompt includes the instruction to be *"direct, concise, and commercially-minded"* and to *"translate HR concepts into business and financial impact"*. The answer should reflect this framing compared to a plain retrieval without role context.
+
+**Fail signal:** `status != "ok"`, empty `data.citations`, `data.answer` is null.
+
+---
+
+### T4.5.3 — Switch to Enterprise Architect role pack [LIVE]
+
+**Step 1:** Edit `config.yaml` on the host (in the `cos/` directory):
+
+```yaml
+role_pack:
+  path: role_packs/enterprise_architect.yaml   # was: role_packs/chro.yaml
+```
+
+**Step 2:** Restart the `cos` container:
+
+```bash
+docker compose restart cos
+```
+
+Wait ~30 seconds, then check startup logs:
+
+```bash
+docker compose logs cos --tail=20
+```
+
+**Expected log entry:** A JSON line with `"message": "Role pack loaded"` and `"role_name": "Enterprise Architect"`.
+
+**Step 3:** Verify `get_role_context` returns Enterprise Architect data:
+
+```bash
+docker compose exec -i cos uv run python -c "
+import asyncio, json
+import cos.mcp_server.server as srv
+from cos.config import CosConfig
+from cos.mcp_server.tools import get_role_context
+
+async def main():
+    config = CosConfig.load('/app/config.yaml')
+    await srv._startup_sequence(config)
+    result = json.loads(await get_role_context())
+    print(json.dumps(result, indent=2))
+    assert result['status'] == 'ok', f'unexpected status: {result}'
+    assert result['data']['role_name'] == 'Enterprise Architect', f'unexpected role_name: {result}'
+    assert 'pragmatic' in result['data']['tone'].lower(), f'unexpected tone: {result}'
+    print('get_role_context ok — Enterprise Architect role pack active')
+
+asyncio.run(main())
+"
+```
+
+**Expected:** `data.role_name` is `"Enterprise Architect"`, `data.tone` reflects architecture/pragmatic framing (different from CHRO strategic/evidence-based).
+
+**Step 4:** Run the same workforce query and observe the different response style:
+
+```bash
+docker compose exec -i cos uv run python -c "
+import asyncio, json
+import cos.mcp_server.server as srv
+from cos.config import CosConfig
+from cos.mcp_server.tools import retrieve
+
+async def main():
+    config = CosConfig.load('/app/config.yaml')
+    await srv._startup_sequence(config)
+    result = json.loads(await retrieve(query='What frameworks do I have for workforce segmentation?'))
+    print(result['data']['answer'])
+
+asyncio.run(main())
+"
+```
+
+**Expected:** Answer reflects the Enterprise Architect tone: structured, pragmatic, with technical/business alignment framing — noticeably different from the CHRO answer in T4.5.2.
+
+**Fail signal:** `data.role_name` is `"CHRO"` (container not restarted), `status != "ok"`, or any exception.
+
+---
+
+### T4.5.4 — Revert to CHRO confirms full reversibility [LIVE]
+
+**Step 1:** Edit `config.yaml` back on the host:
+
+```yaml
+role_pack:
+  path: role_packs/chro.yaml   # restore CHRO
+```
+
+**Step 2:** Restart the `cos` container:
+
+```bash
+docker compose restart cos
+```
+
+Wait ~30 seconds, then verify:
+
+```bash
+docker compose exec -i cos uv run python -c "
+import asyncio, json
+import cos.mcp_server.server as srv
+from cos.config import CosConfig
+from cos.mcp_server.tools import get_role_context
+
+async def main():
+    config = CosConfig.load('/app/config.yaml')
+    await srv._startup_sequence(config)
+    result = json.loads(await get_role_context())
+    assert result['status'] == 'ok', f'unexpected status: {result}'
+    assert result['data']['role_name'] == 'CHRO', f'unexpected role_name: {result}'
+    print('get_role_context ok — CHRO restored')
+
+asyncio.run(main())
+"
+```
+
+**Expected:** `data.role_name` is `"CHRO"` again. The switch is fully reversible with no code changes.
+
+**Fail signal:** `data.role_name` is still `"Enterprise Architect"`, or any exception.
 
 ---
 
@@ -736,7 +910,25 @@ async def main():
 asyncio.run(main())
 "
 
-# 7. OutputRouter fail-closed (no API key needed)
+# 7. Role context check (requires CHRO role pack configured in config.yaml)
+docker compose exec -i cos uv run python -c "
+import asyncio, json
+import cos.mcp_server.server as srv
+from cos.config import CosConfig
+from cos.mcp_server.tools import get_role_context
+
+async def main():
+    config = CosConfig.load('/app/config.yaml')
+    await srv._startup_sequence(config)
+    result = json.loads(await get_role_context())
+    assert result['status'] == 'ok', f'get_role_context failed: {result}'
+    assert result['data']['role_name'] == 'CHRO', f'Expected CHRO, got: {result[\"data\"].get(\"role_name\")}'
+    print(f'get_role_context ok: role={result[\"data\"][\"role_name\"]}')
+
+asyncio.run(main())
+"
+
+# 8. OutputRouter fail-closed (no API key needed)
 docker compose exec -i cos uv run python -c "
 from cos.output.router import OutputRouter
 router = OutputRouter(configured_channels=['local'])
