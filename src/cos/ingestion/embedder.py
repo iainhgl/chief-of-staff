@@ -1,6 +1,7 @@
 """Embedding generation for text chunks."""
 
 import ssl
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,6 +29,12 @@ class VoyageTransportConfig:
     trust_env: bool = False
 
 
+EmbedProvider = Callable[
+    [list[str], str, str, VoyageTransportConfig | None],
+    Awaitable[list[EmbeddingResult]],
+]
+
+
 async def embed(
     chunks: list[str],
     provider: str,
@@ -37,10 +44,10 @@ async def embed(
 ) -> list[EmbeddingResult]:
     if not chunks:
         raise EmbeddingError("Cannot embed an empty chunk list")
-    if provider != "anthropic":
+    fn = _EMBED_PROVIDERS.get(provider)
+    if fn is None:
         raise EmbeddingError(f"Unsupported embedding provider: {provider!r}")
-
-    return await _embed_via_voyage(chunks, model, api_key, transport)
+    return await fn(chunks, model, api_key, transport)  # type: ignore[no-any-return]
 
 
 async def _embed_via_voyage(
@@ -69,10 +76,15 @@ async def _embed_via_voyage(
     ]
 
 
+_EMBED_PROVIDERS: dict[str, Any] = {
+    "anthropic": _embed_via_voyage,
+}
+
+
 @asynccontextmanager
 async def _voyage_session(
     transport: VoyageTransportConfig | None,
-):
+) -> AsyncIterator[None]:
     if transport is None or not _has_transport_overrides(transport):
         yield
         return
@@ -92,15 +104,15 @@ async def _voyage_session(
 
     session = aiohttp.ClientSession(**session_kwargs)
     token = voyageai.aiosession.set(session)
-    original_proxy = voyageai.proxy
+    original_proxy: Any = voyageai.proxy
 
     if transport.proxy_url:
-        voyageai.proxy = transport.proxy_url
+        setattr(voyageai, "proxy", transport.proxy_url)
 
     try:
         yield
     finally:
-        voyageai.proxy = original_proxy
+        setattr(voyageai, "proxy", original_proxy)
         voyageai.aiosession.reset(token)
         await session.close()
 

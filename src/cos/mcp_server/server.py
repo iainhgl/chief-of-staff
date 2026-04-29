@@ -11,7 +11,7 @@ from psycopg_pool import AsyncConnectionPool
 from pydantic import ValidationError
 
 from cos.config import CosConfig, LogComponent
-from cos.llm.anthropic import AnthropicAdapter, HttpTransportConfig
+from cos.llm.factory import make_llm_adapter
 from cos.output.router import OutputRouter
 from cos.rolepack.loader import load as load_role_pack
 from cos.services.output import OutputService
@@ -119,27 +119,7 @@ async def _startup_sequence(config: CosConfig) -> None:
     )
     _output_service = OutputService(router=_output_router)
     _emit(component, "INFO", "output router: initialised", channels=config.channels)
-    adapter = AnthropicAdapter(
-        model=config.llm.model,
-        api_key=config.llm.api_key.get_secret_value(),
-        transport=HttpTransportConfig(
-            ca_bundle_path=(
-                config.llm.ca_bundle_path
-                if config.llm.ca_bundle_path is not None
-                else config.embedding.ca_bundle_path
-            ),
-            proxy_url=(
-                config.llm.proxy_url
-                if config.llm.proxy_url is not None
-                else config.embedding.proxy_url
-            ),
-            trust_env=(
-                config.llm.trust_env
-                if config.llm.trust_env is not None
-                else config.embedding.trust_env
-            ),
-        ),
-    )
+    adapter = make_llm_adapter(config)
     _retrieval_service = RetrievalService(
         config=config,
         pool=_pool,
