@@ -162,3 +162,11 @@
 - Empty query string not validated in `retrieve()` — empty/whitespace queries flow through to the service and return a "no content" response; not specified as a requirement; add validation if client bugs surface [`src/cos/mcp_server/tools.py:38`]
 - `list_documents` returns all rows with no pagination — unbounded query; acceptable for Phase 1 document volumes; add limit/offset when doc counts grow [`src/cos/mcp_server/tools.py:112`]
 - No initialization guard preventing tool calls before `_startup_sequence` completes — tools guard on `get_retrieval_service() is None` returning error envelopes, but there is no mechanism to queue or block concurrent startup calls; pre-existing design [`src/cos/mcp_server/server.py`]
+
+## Deferred from: code review of 4-4-role-pack-and-provider-portability (2026-04-29)
+
+- Silent LLM→embedding transport fallback has no log or comment — when LLM transport fields are None, factory silently falls back to embedding transport values; pre-existing logic moved verbatim from server.py; document or make explicit in config schema [`src/cos/llm/factory.py:13-25`]
+- `enterprise_architect.yaml` `active_workflows` references unregistered identifiers — `architecture_review`, `roadmap_alignment`, etc. have no registry; same gap in chro.yaml; enforce when a workflow registry is defined [`role_packs/enterprise_architect.yaml:39-43`]
+- Provider string not stripped/validated at factory and embedder entry points — leading/trailing whitespace or empty string reaches the comparison check uncaught; Pydantic validation at config load is the correct guard layer; pre-existing for embedder [`src/cos/llm/factory.py:6`, `src/cos/ingestion/embedder.py:47`]
+- Embedder registry doesn't enforce error-handling contract for future provider functions — a registered function that raises a non-`EmbeddingError` will propagate uncaught; document the contract when a second provider is added [`src/cos/ingestion/embedder.py:47-50`]
+- `isinstance(result, LLMAdapter)` checks presence only, not method signature — runtime_checkable Protocol limitation; signature drift in `AnthropicAdapter.complete()` won't be caught by this test [`tests/llm/test_factory.py:31`]

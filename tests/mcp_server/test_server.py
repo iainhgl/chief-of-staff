@@ -73,7 +73,7 @@ def _patch_server(
     monkeypatch.setattr(server, "create_pool", _create_pool, raising=False)
     monkeypatch.setattr(server, "load_role_pack", lambda _path: mock_role_pack)
     monkeypatch.setattr(
-        server, "AnthropicAdapter", MagicMock(return_value=MagicMock()), raising=False
+        server, "make_llm_adapter", MagicMock(return_value=MagicMock())
     )
     monkeypatch.setattr(
         server, "RetrievalService", MagicMock(return_value=MagicMock()), raising=False

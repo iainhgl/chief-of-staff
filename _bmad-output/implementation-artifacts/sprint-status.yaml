@@ -1,5 +1,5 @@
 # generated: 2026-04-17
-# last_updated: 2026-04-29  # 4-3-role-pack-applied-to-retrieval-and-synthesis -> done
+# last_updated: 2026-04-29  # 4-4-role-pack-and-provider-portability -> done
 # project: CoS
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-17
-last_updated: 2026-04-29  # 4-3-role-pack-applied-to-retrieval-and-synthesis -> done
+last_updated: 2026-04-29  # 4-4-role-pack-and-provider-portability -> done
 project: CoS
 project_key: NOKEY
 tracking_system: file-system
@@ -91,7 +91,7 @@ development_status:
   4-1-role-pack-schema-and-chro-configuration-file: done
   4-2-role-pack-loader-and-startup-integration: done
   4-3-role-pack-applied-to-retrieval-and-synthesis: done
-  4-4-role-pack-and-provider-portability: backlog
+  4-4-role-pack-and-provider-portability: done
   4-5-operator-validation-chro-role-active-and-switchable: backlog
   4-6-documentation-and-housekeeping: backlog
   epic-4-retrospective: optional
