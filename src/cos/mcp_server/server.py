@@ -5,14 +5,18 @@ from datetime import datetime, timezone
 
 import httpx
 import psycopg
+import yaml
 from mcp.server.fastmcp import FastMCP
 from psycopg_pool import AsyncConnectionPool
+from pydantic import ValidationError
 
 from cos.config import CosConfig, LogComponent
 from cos.llm.anthropic import AnthropicAdapter, HttpTransportConfig
 from cos.output.router import OutputRouter
+from cos.rolepack.loader import load as load_role_pack
 from cos.services.output import OutputService
 from cos.services.retrieval import RetrievalService
+from cos.services.rolepack import RolePackService
 from cos.store.db import create_pool, run_migrations
 
 mcp = FastMCP("cos")
@@ -22,6 +26,7 @@ _output_router: OutputRouter | None = None
 _pool: AsyncConnectionPool | None = None
 _retrieval_service: RetrievalService | None = None
 _output_service: OutputService | None = None
+_role_pack_service: RolePackService | None = None
 
 
 def get_config() -> CosConfig | None:
@@ -42,6 +47,10 @@ def get_retrieval_service() -> RetrievalService | None:
 
 def get_output_service() -> OutputService | None:
     return _output_service
+
+
+def get_role_pack_service() -> RolePackService | None:
+    return _role_pack_service
 
 
 def _emit(component: LogComponent, level: str, message: str, **extra: object) -> None:
@@ -75,7 +84,8 @@ async def _check_tika(url: str) -> bool:
 
 
 async def _startup_sequence(config: CosConfig) -> None:
-    global _config, _output_router, _pool, _retrieval_service, _output_service
+    global _config, _output_router, _pool, _retrieval_service
+    global _output_service, _role_pack_service
     _config = config
     component: LogComponent = "mcp_server"
     pg_ok = await _check_postgres(config.database.libpq_dsn)
@@ -85,9 +95,25 @@ async def _startup_sequence(config: CosConfig) -> None:
     _emit(component, "INFO", "config loaded", role_pack_path=config.role_pack.path)
     await run_migrations(config.database.libpq_dsn)
     _emit(component, "INFO", "migrations applied")
+    try:
+        _loaded_role_pack = load_role_pack(config.role_pack.path)
+    except FileNotFoundError:
+        raise SystemExit(
+            f"Role pack file not found: {config.role_pack.path}\n"
+            "Check role_pack.path in config.yaml."
+        )
+    except yaml.YAMLError as exc:
+        raise SystemExit(
+            f"Role pack YAML syntax error in {config.role_pack.path}:\n{exc}"
+        )
+    except ValidationError as exc:
+        raise SystemExit(
+            f"Role pack validation error in {config.role_pack.path}:\n{exc}"
+        )
+    _role_pack_service = RolePackService(role_pack=_loaded_role_pack)
+    _emit("rolepack", "INFO", "Role pack loaded", role_name=_loaded_role_pack.role_name)
     _pool = await create_pool(config.database.libpq_dsn)
     _emit(component, "INFO", "connection pool: open")
-    _emit(component, "INFO", "role pack: stub loaded")
     _output_router = OutputRouter(configured_channels=config.channels)
     _output_service = OutputService(router=_output_router)
     _emit(component, "INFO", "output router: initialised", channels=config.channels)

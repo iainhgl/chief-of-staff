@@ -1,6 +1,9 @@
-from typing import Any
+from cos.rolepack.loader import RolePackConfig
 
 
 class RolePackService:
-    def get_active(self) -> Any:
-        raise NotImplementedError
+    def __init__(self, role_pack: RolePackConfig) -> None:
+        self._role_pack = role_pack
+
+    def get_active(self) -> RolePackConfig:
+        return self._role_pack
