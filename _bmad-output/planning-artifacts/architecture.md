@@ -781,5 +781,17 @@ The following deviations from the architecture spec occurred during Epic 3. Futu
 For clarity, the Epic 3 MCP envelopes in the running implementation are:
 - `retrieve` → `{"status": "ok", "data": {"answer": "...", "citations": [...]}, "citations": [...]}`
 - `list_documents` → `{"status": "ok", "data": {"documents": [...]}, "citations": []}`
-- `get_role_context` → `{"status": "ok", "data": {"role": "default — role pack not yet configured"}, "citations": []}`
+- `get_role_context` → `{"status": "ok", "data": {"role": "default — role pack not yet configured"}, "citations": []}` (Epic 3 only — see Epic 4 Implementation Notes for the updated shape)
 - `get_status` → `{"status": "ok", "data": {"components": [...], "ready": true}, "citations": []}`
+
+## Epic 4 Implementation Notes
+
+The following deviations from the architecture spec occurred during Epic 4. Future agents should treat these as the actual state of the codebase.
+
+| # | Deviation | Detail |
+|---|-----------|--------|
+| 1 | **`get_role_context` returns a 5-field active role summary under `data.role_name`, not the old stub `data.role`** | Prior to Epic 4, `get_role_context` returned `{"status": "ok", "data": {"role": "default — role pack not yet configured"}, "citations": []}`. After Epic 4, the real role pack is loaded at startup and `get_role_context` returns a summary of the active role pack with `role_name`, `goals`, `tone`, `knowledge_taxonomy`, and `active_workflows`. The top-level key inside `data` changed from `role` to `role_name`. The full `RolePackConfig` still contains eight required fields; `stakeholder_map`, `retrieval_priorities`, and `output_channels` are used internally but are not exposed by this MCP tool. Any code or tests that check `data.role` must be updated to `data.role_name`. |
+| 2 | **Startup log: `"Role pack loaded"` replaces `"role pack: stub loaded"`; connection pool now opens after role pack** | Before Epic 4 the startup sequence logged `"role pack: stub loaded"` (component: `"mcp_server"`). After Epic 4, a structured log `{"level": "INFO", "component": "rolepack", "message": "Role pack loaded", "role_name": "<name>"}` is emitted when the role pack is successfully read. The connection pool log (`"connection pool: open"`) now appears after the role pack log — startup order changed from Epic 3. |
+| 3 | **`OutputRouter` receives `output_channels` from the loaded role pack, not from `config.channels`** | The architecture spec described `channels` as a top-level config list. In the Epic 4 implementation, `OutputRouter` is initialised with `_loaded_role_pack.output_channels` rather than `config.channels`. For the CHRO role pack both values are `["local"]`, so behaviour is identical; but the authoritative source for permitted output channels is now the role pack, not the top-level config. |
+| 4 | **`make_llm_adapter(config)` factory in `src/cos/llm/factory.py`** | The architecture spec described a provider-agnostic LLM interface without specifying a factory location. Epic 4 introduced `make_llm_adapter(config: CosConfig) -> LLMAdapter` in `src/cos/llm/factory.py`. `server.py` calls this factory at startup and no longer imports `AnthropicAdapter` directly. This is the correct extension point for adding new LLM providers. |
+| 5 | **Embedder provider registry `_EMBED_PROVIDERS` in `src/cos/ingestion/embedder.py`** | The embedder now selects the embedding backend from a module-level registry `_EMBED_PROVIDERS: dict[str, Any]` keyed by provider name string. Adding a new embedding provider requires registering it in this dict; no changes to `CosConfig` or the ingestion pipeline are needed. |

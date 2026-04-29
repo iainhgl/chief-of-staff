@@ -178,3 +178,12 @@
 - `_startup_sequence` called directly inside short-lived `docker compose exec` sessions; opens a transient DB pool per invocation; established pattern from Epic 3 validation [docs/manual-testing.md:all tests]
 - "Wait ~30 seconds" before log inspection is vague; no explicit health-check verification step; consistent with existing pattern throughout the doc [docs/manual-testing.md:T4.5.3, T4.5.4]
 - T4.5.3 has no pre-check that `config.yaml` was saved and is visible inside the container before restart — operator could edit the wrong file silently [docs/manual-testing.md:T4.5.3]
+
+## Deferred from: code review of 4-6-documentation-and-housekeeping (2026-04-29)
+
+- `active_workflows` no authoritative list of valid values — inherent to the field being reserved for future workflow engine use; no registry exists yet [`docs/role-packs.md`]
+- `output_channels` only valid value is `["local"]` — no other channels currently exist; document alternatives when a second channel is implemented [`docs/role-packs.md`]
+- `config.yaml.example` stale `channels` top-level key contradicts architecture Deviation 3 (`OutputRouter` now reads `output_channels` from the role pack, not `config.channels`) — explicitly out of scope per Dev Notes; remove `channels` from `config.yaml.example` in a future housekeeping pass
+- `get_role_context` missing error envelope on unexpected exception — `svc.get_active()` cannot raise today but unguarded path survives; pre-existing code issue not introduced by this story [`src/cos/mcp_server/tools.py`]
+- Startup log at `server.py:121` still logs `config.channels` after switch to role-pack-driven `output_channels` — misleading if the two differ; pre-existing code bug not introduced by this story [`src/cos/mcp_server/server.py:121`]
+- Architecture note 5 (`_EMBED_PROVIDERS`) is only half-accurate for future providers — adding a new provider also requires matching the `VoyageTransportConfig | None` transport interface; document transport contract when a second provider is added [`src/cos/ingestion/embedder.py`]

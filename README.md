@@ -2,7 +2,7 @@
 
 A personal AI platform that acts as a Chief of Staff for a specific role — retaining knowledge in a structured store and reasoning over it to answer questions grounded in source material.
 
-## Current Capabilities (Epic 3)
+## Current Capabilities (Epic 4)
 
 What is working today:
 
@@ -17,10 +17,10 @@ What is working today:
 - **Originals preserved** — every ingested file is stored byte-for-byte in `/data/originals/` (in-container path); Markdown working copies in `/data/markdown/`
 - **`retrieve`** — ask questions about ingested documents; returns a synthesised answer grounded in source material with citations in both `data.citations` and top-level `citations` (`source_path`, `chunk_index`, `score` per citation); handles the no-content case without fabrication
 - **`list_documents`** — returns a JSON envelope with `data.documents`, where each document includes `id`, `source_path`, `ingested_at`, `current_version`, and `chunk_count`; the document rows match `cos docs --json`
-- **`get_role_context`** — returns stub role context: `default — role pack not yet configured`; role-specific tone and retrieval weighting arrive in Epic 4
+- **`get_role_context`** — returns the active role summary from the loaded role pack; `data.role_name` is the role's display name and the response also includes `goals`, `tone`, `knowledge_taxonomy`, and `active_workflows`
 - **`get_status`** — returns a JSON envelope with health of all three components (cos, postgres, tika) and a `ready` flag
 
-Knowledge retrieval and Q&A with citations are now working. Role pack loading (tone, retrieval weighting, stakeholder context) is planned for Epic 4. Connected sources (email, calendar) are planned for Epic 6.
+Knowledge retrieval and Q&A with citations are working. Role identity is configuration-only — author a YAML file and point `config.yaml` at it; no code changes are required. See [docs/role-packs.md](docs/role-packs.md) for the authoring guide. Connected sources (email, calendar) are planned for Epic 6.
 
 ## How it Works
 
@@ -51,8 +51,12 @@ cos/
 ├── config.yaml.example       # config template — copy to config.yaml and fill in
 ├── docker-compose.yml        # postgres, tika, cos services
 ├── Dockerfile                # cos container image
+├── role_packs/               # role pack YAML files — define who the platform serves
+│   ├── chro.yaml             # CHRO example (default)
+│   └── enterprise_architect.yaml  # Enterprise Architect example
 ├── docs/
 │   ├── setup.md              # setup, operations, and querying guide
+│   ├── role-packs.md         # role pack authoring guide and field reference
 │   └── manual-testing.md     # end-to-end operator validation tests
 ├── src/
 │   └── cos/

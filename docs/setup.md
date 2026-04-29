@@ -121,6 +121,17 @@ Replace `/absolute/path/to/cos` with the full path to your `cos/` directory.
 
 The `cos` container runs `cos-mcp` as its persistent process. The MCP client starts a second `cos-mcp` instance inside the same container via `docker compose exec -i` (stdio transport). Both instances share Postgres and config — this is safe and expected.
 
+## Configure the Role Pack
+
+The platform ships with two example role packs: `role_packs/chro.yaml` (CHRO) and `role_packs/enterprise_architect.yaml` (Enterprise Architect). The active role pack is set in `config.yaml`:
+
+```yaml
+role_pack:
+  path: role_packs/chro.yaml
+```
+
+To use a different role or author your own, see [role-packs.md](role-packs.md) for the full authoring guide and field reference.
+
 ## Restart the Platform
 
 Three-step restart procedure:
