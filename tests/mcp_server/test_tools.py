@@ -296,5 +296,5 @@ async def test_retrieve_passes_role_pack_to_service(monkeypatch):
     assert result["status"] == "ok"
     assert (
         retrieval_service.query.call_args.kwargs["role_pack"]
-        is role_pack_service.get_active()
+        == role_pack_service.get_active()
     )

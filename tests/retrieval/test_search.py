@@ -136,7 +136,7 @@ async def test_hybrid_search_no_match_returns_empty_list(
 def test_coerce_priority_weight_list_str_first_item_gets_max_boost() -> None:
     priorities = ["HR frameworks", "General documents"]
 
-    weight = _coerce_priority_weight(priorities, "/docs/hr-framework.md")
+    weight = _coerce_priority_weight(priorities, "/docs/hr-frameworks.md")
 
     assert weight == pytest.approx(2.0)
 
@@ -144,7 +144,7 @@ def test_coerce_priority_weight_list_str_first_item_gets_max_boost() -> None:
 def test_coerce_priority_weight_list_str_higher_rank_beats_lower_rank() -> None:
     priorities = ["HR frameworks", "General documents"]
 
-    hr_weight = _coerce_priority_weight(priorities, "/hr-framework.md")
+    hr_weight = _coerce_priority_weight(priorities, "/hr-frameworks.md")
     general_weight = _coerce_priority_weight(priorities, "/general-notes.md")
 
     assert hr_weight > general_weight
@@ -156,3 +156,11 @@ def test_coerce_priority_weight_list_str_no_match_returns_one() -> None:
     weight = _coerce_priority_weight(priorities, "/docs/zzz-unrelated.md")
 
     assert weight == pytest.approx(1.0)
+
+
+def test_coerce_priority_weight_list_str_first_match_wins() -> None:
+    priorities = ["HR frameworks", "HR documents"]
+
+    weight = _coerce_priority_weight(priorities, "/hr-frameworks-and-documents.md")
+
+    assert weight == pytest.approx(2.0)

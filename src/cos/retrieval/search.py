@@ -43,15 +43,7 @@ def _coerce_priority_weight(retrieval_priorities: Any, source_path: str) -> floa
                     return float(weight)
             elif isinstance(item, str):
                 words = [word.lower() for word in item.split() if len(word) > 2]
-                variants = {
-                    variant
-                    for word in words
-                    for variant in (
-                        word,
-                        word[:-1] if word.endswith("s") and len(word) > 3 else word,
-                    )
-                }
-                if any(variant in path_lower for variant in variants):
+                if any(word in path_lower for word in words):
                     return 1.0 + (total_priorities - index) / total_priorities
 
     return 1.0

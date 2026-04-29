@@ -1,6 +1,6 @@
 # Story 4.3: Role Pack Applied to Retrieval & Synthesis
 
-Status: review
+Status: done
 
 ## Story
 
@@ -262,3 +262,15 @@ GPT-5 Codex
 ### Change Log
 
 - 2026-04-29: Implemented Story 4.3 role pack retrieval/synthesis integration, added regression coverage, and updated story tracking to review.
+
+## Review Findings
+
+- [x] [Review][Patch] Stemming/variants added despite spec prohibiting plain-word-only matching [src/cos/retrieval/search.py — `_coerce_priority_weight` `variants` set]
+- [x] [Review][Patch] `test_retrieve_passes_role_pack_to_service` uses identity check (`is`) instead of equality (`==`) — fragile if `get_active()` ever returns a new object [tests/mcp_server/test_tools.py]
+- [x] [Review][Patch] No test for first-match-wins contract in `list[str]` priorities — no test verifies that a path matching both index-0 and index-1 strings returns the index-0 weight [tests/retrieval/test_search.py]
+- [x] [Review][Defer] Two-letter domain abbreviations (HR, IT, AI) silently filtered by `len(word) > 2` — spec-prescribed filter; CHRO role pack unaffected since priorities contain longer words [src/cos/retrieval/search.py]
+- [x] [Review][Defer] `get_role_context` no guard for `svc.get_active()` returning None — current `RolePackService.__init__` guarantees non-None; only relevant if service contract changes [src/cos/mcp_server/tools.py]
+- [x] [Review][Defer] `test_startup_sequence_uses_role_pack_output_channels` caplog assertion is a weak proxy — asserts log record not absence of output side-effect; acceptable given `OutputRouter.send` contract [tests/mcp_server/test_server.py]
+- [x] [Review][Defer] Dict/string branch case-sensitivity inconsistency in `_coerce_priority_weight` — dict branch uses case-sensitive `startswith`; pre-existing, spec says preserve dict handling unchanged [src/cos/retrieval/search.py]
+- [x] [Review][Defer] Module-level `_role_pack_service` concurrent access has no asyncio lock — pre-existing globals pattern shared by all services; single-threaded startup makes this safe now [src/cos/mcp_server/server.py]
+- [x] [Review][Defer] `_patch_server` `_emit` does not call `logging`; caplog in server tests captures `OutputRouter.send` direct `logger.error` call — subtle but correct; pre-existing test infrastructure [tests/mcp_server/test_server.py]
