@@ -144,6 +144,15 @@
 - `UnicodeDecodeError` not caught — invalid UTF-8 role pack file causes unhandled crash instead of clean `SystemExit`; outside spec scope [`src/cos/mcp_server/server.py:98-112`]
 - Partial startup leaves `_role_pack_service` set while later globals (pool, output_service) remain None if `create_pool` fails — pre-existing globals pattern shared by all services; no transaction semantics on startup [`src/cos/mcp_server/server.py:86-119`]
 
+## Deferred from: code review of 4-3-role-pack-applied-to-retrieval-and-synthesis (2026-04-29)
+
+- Two-letter domain abbreviations (HR, IT, AI) silently filtered by `len(word) > 2` in `_coerce_priority_weight` — spec-prescribed; CHRO role pack unaffected (priorities contain longer words); relevant only if a future role pack uses short-acronym-only priority strings [`src/cos/retrieval/search.py`]
+- `get_role_context` no guard for `svc.get_active()` returning None — current `RolePackService.__init__` always sets `_role_pack`; only becomes a real risk if the service contract changes to allow lazy or partial initialisation [`src/cos/mcp_server/tools.py`]
+- `test_startup_sequence_uses_role_pack_output_channels` caplog assertion is a weak proxy — confirms the router logs "unknown output channel" but does not assert no output side-effect was produced; acceptable for the current `OutputRouter.send` silent-suppression contract [`tests/mcp_server/test_server.py`]
+- Dict/string branch case-sensitivity inconsistency in `_coerce_priority_weight` — dict branch uses case-sensitive `source_path.startswith(candidate)`; string branch uses `path_lower`; pre-existing, spec explicitly says preserve dict handling unchanged [`src/cos/retrieval/search.py`]
+- Module-level `_role_pack_service` singleton has no asyncio lock — `_startup_sequence` writes globals without locking; safe under single-threaded sequential startup; pre-existing pattern shared by all services [`src/cos/mcp_server/server.py`]
+- `_patch_server` `_emit` mock does not call `logging`; server tests that use `caplog` rely on `OutputRouter.send` calling `logger.error` directly — subtle but correct for current implementation; pre-existing test infrastructure [`tests/mcp_server/test_server.py`]
+
 ## Deferred from: code review of 3-4-mcp-retrieve-and-list-documents-tools (2026-04-27)
 
 - Startup partial init leaves pool open if RetrievalService construction raises — if `RetrievalService(...)` raises after `_pool` is assigned, the pool is never closed; no try/finally or cleanup path; Epic 5 hardening scope [`src/cos/mcp_server/server.py`]

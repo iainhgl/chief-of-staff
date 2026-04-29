@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 import httpx
 import psycopg
-import yaml
+import yaml  # type: ignore[import-untyped]
 from mcp.server.fastmcp import FastMCP
 from psycopg_pool import AsyncConnectionPool
 from pydantic import ValidationError
@@ -114,7 +114,9 @@ async def _startup_sequence(config: CosConfig) -> None:
     _emit("rolepack", "INFO", "Role pack loaded", role_name=_loaded_role_pack.role_name)
     _pool = await create_pool(config.database.libpq_dsn)
     _emit(component, "INFO", "connection pool: open")
-    _output_router = OutputRouter(configured_channels=config.channels)
+    _output_router = OutputRouter(
+        configured_channels=_loaded_role_pack.output_channels
+    )
     _output_service = OutputService(router=_output_router)
     _emit(component, "INFO", "output router: initialised", channels=config.channels)
     adapter = AnthropicAdapter(

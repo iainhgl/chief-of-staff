@@ -6,6 +6,8 @@ import cos.mcp_server.server as _server
 import cos.mcp_server.tools  # noqa: F401 — ensure decorators run
 from cos.mcp_server.tools import get_role_context, get_status, list_documents, retrieve
 from cos.retrieval.citations import CitedChunk, CitedResponse
+from cos.rolepack.loader import RolePackConfig
+from cos.services.rolepack import RolePackService
 from cos.store.models import DocumentSummary
 
 
@@ -43,6 +45,20 @@ def _make_mock_output_service() -> AsyncMock:
     svc = AsyncMock()
     svc.send = AsyncMock()
     return svc
+
+
+def _make_role_pack_service() -> RolePackService:
+    role_pack = RolePackConfig(
+        role_name="CHRO",
+        goals=["Drive HR transformation"],
+        tone="Strategic and evidence-based",
+        knowledge_taxonomy=["HR operating models"],
+        stakeholder_map={"CEO": "partner"},
+        retrieval_priorities=["HR frameworks"],
+        active_workflows=["hr_diagnostic"],
+        output_channels=["local"],
+    )
+    return RolePackService(role_pack=role_pack)
 
 
 async def test_get_status_returns_ok_envelope(monkeypatch):
@@ -243,10 +259,42 @@ async def test_list_documents_document_fields_present(monkeypatch):
     assert "chunk_count" in doc
 
 
-async def test_get_role_context_returns_ok_stub():
+async def test_get_role_context_returns_live_role_pack_data(monkeypatch):
+    monkeypatch.setattr(_server, "_role_pack_service", _make_role_pack_service())
+
     result = json.loads(await get_role_context())
 
     assert result["status"] == "ok"
-    assert "role" in result["data"]
-    assert isinstance(result["data"]["role"], str)
+    assert result["data"]["role_name"] == "CHRO"
+    assert result["data"]["goals"] == ["Drive HR transformation"]
+    assert result["data"]["tone"] == "Strategic and evidence-based"
+    assert result["data"]["knowledge_taxonomy"] == ["HR operating models"]
+    assert result["data"]["active_workflows"] == ["hr_diagnostic"]
     assert result["citations"] == []
+
+
+async def test_get_role_context_no_role_pack_service_returns_error(monkeypatch):
+    monkeypatch.setattr(_server, "_role_pack_service", None)
+
+    result = json.loads(await get_role_context())
+
+    assert result["status"] == "error"
+    assert "error" in result
+    assert "detail" in result
+
+
+async def test_retrieve_passes_role_pack_to_service(monkeypatch):
+    role_pack_service = _make_role_pack_service()
+    retrieval_service = _make_mock_retrieval_service()
+    output_service = _make_mock_output_service()
+    monkeypatch.setattr(_server, "_role_pack_service", role_pack_service)
+    monkeypatch.setattr(_server, "_retrieval_service", retrieval_service)
+    monkeypatch.setattr(_server, "_output_service", output_service)
+
+    result = json.loads(await retrieve(query="test"))
+
+    assert result["status"] == "ok"
+    assert (
+        retrieval_service.query.call_args.kwargs["role_pack"]
+        == role_pack_service.get_active()
+    )

@@ -4,6 +4,7 @@ from cos.mcp_server.server import (
     get_config,
     get_output_service,
     get_retrieval_service,
+    get_role_pack_service,
     mcp,
 )
 from cos.services.health import HealthService
@@ -47,8 +48,11 @@ async def retrieve(query: str) -> str:
             }
         )
 
+    role_pack_svc = get_role_pack_service()
+    role_pack = role_pack_svc.get_active() if role_pack_svc is not None else None
+
     try:
-        response = await retrieval_service.query(query, role_pack=None)
+        response = await retrieval_service.query(query, role_pack=role_pack)
     except Exception as exc:
         return json.dumps(
             {
@@ -95,10 +99,27 @@ async def retrieve(query: str) -> str:
 @mcp.tool()
 async def get_role_context() -> str:
     """Return active role pack context."""
+    svc = get_role_pack_service()
+    if svc is None:
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "Server not initialized",
+                "detail": "role pack service not ready",
+            }
+        )
+
+    role_pack = svc.get_active()
     return json.dumps(
         {
             "status": "ok",
-            "data": {"role": "default — role pack not yet configured"},
+            "data": {
+                "role_name": role_pack.role_name,
+                "goals": role_pack.goals,
+                "tone": role_pack.tone,
+                "knowledge_taxonomy": role_pack.knowledge_taxonomy,
+                "active_workflows": role_pack.active_workflows,
+            },
             "citations": [],
         }
     )

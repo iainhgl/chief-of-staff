@@ -102,13 +102,24 @@ async def test_startup_sequence_initialises_output_router(
 
 
 @pytest.mark.asyncio
-async def test_startup_sequence_with_empty_channels_router_created(
+async def test_startup_sequence_uses_role_pack_output_channels(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     _patch_server(monkeypatch)
+    empty_role_pack = RolePackConfig(
+        role_name="Test",
+        goals=["goal"],
+        tone="direct",
+        knowledge_taxonomy=["cat"],
+        stakeholder_map={"CEO": "partner"},
+        retrieval_priorities=["cat"],
+        active_workflows=["wf"],
+        output_channels=[],
+    )
+    monkeypatch.setattr(server, "load_role_pack", lambda _path: empty_role_pack)
 
-    await server._startup_sequence(_make_config([]))
+    await server._startup_sequence(_make_config(["local"]))
 
     router = server.get_output_router()
     assert router is not None
