@@ -14,6 +14,7 @@ LogComponent = Literal[
     "connector",
     "output",
     "config",
+    "rolepack",
 ]
 
 

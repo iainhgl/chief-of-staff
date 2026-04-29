@@ -138,6 +138,12 @@
 - `stakeholder_map: dict[str, str]` silently coerces non-string YAML values (int/bool/null) to strings — acceptable for operator config; tighten with `strict=True` if needed
 - `retrieval_priorities` ordering contract (high-to-low weight) not documented in any user-facing comment — add a comment to `config.yaml.example` or `chro.yaml` explaining the ordering semantics
 
+## Deferred from: code review of 4-2-role-pack-loader-and-startup-integration (2026-04-29)
+
+- `PermissionError`/`IsADirectoryError` not caught in startup — file exists but unreadable/is-a-directory causes unhandled crash instead of clean `SystemExit`; spec only required FileNotFoundError, YAMLError, ValidationError handling [`src/cos/mcp_server/server.py:98-112`]
+- `UnicodeDecodeError` not caught — invalid UTF-8 role pack file causes unhandled crash instead of clean `SystemExit`; outside spec scope [`src/cos/mcp_server/server.py:98-112`]
+- Partial startup leaves `_role_pack_service` set while later globals (pool, output_service) remain None if `create_pool` fails — pre-existing globals pattern shared by all services; no transaction semantics on startup [`src/cos/mcp_server/server.py:86-119`]
+
 ## Deferred from: code review of 3-4-mcp-retrieve-and-list-documents-tools (2026-04-27)
 
 - Startup partial init leaves pool open if RetrievalService construction raises — if `RetrievalService(...)` raises after `_pool` is assigned, the pool is never closed; no try/finally or cleanup path; Epic 5 hardening scope [`src/cos/mcp_server/server.py`]

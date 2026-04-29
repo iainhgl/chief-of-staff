@@ -36,6 +36,7 @@ services:
     volumes:
       - ./data:/data
       - ./config.yaml:/app/config.yaml:ro
+      - ./role_packs:/app/role_packs:ro
       - ./local/certs:/certs:ro
     healthcheck:
       test: ["CMD-SHELL", "/app/.venv/bin/python -c 'import cos' 2>/dev/null && echo ok"]
