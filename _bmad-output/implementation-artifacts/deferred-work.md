@@ -170,3 +170,11 @@
 - Provider string not stripped/validated at factory and embedder entry points — leading/trailing whitespace or empty string reaches the comparison check uncaught; Pydantic validation at config load is the correct guard layer; pre-existing for embedder [`src/cos/llm/factory.py:6`, `src/cos/ingestion/embedder.py:47`]
 - Embedder registry doesn't enforce error-handling contract for future provider functions — a registered function that raises a non-`EmbeddingError` will propagate uncaught; document the contract when a second provider is added [`src/cos/ingestion/embedder.py:47-50`]
 - `isinstance(result, LLMAdapter)` checks presence only, not method signature — runtime_checkable Protocol limitation; signature drift in `AnthropicAdapter.complete()` won't be caught by this test [`tests/llm/test_factory.py:31`]
+
+## Deferred from: code review of 4-5-operator-validation-chro-role-active-and-switchable (2026-04-29)
+
+- T4.5.1 `'Strategic' in result['data']['tone']` is a case-sensitive substring check against CHRO YAML content; fragile if `chro.yaml` tone text changes [docs/manual-testing.md:T4.5.1]
+- Section 11 Step 8 OutputRouter check greps `docker compose logs cos` — T3.5.5 explicitly notes this is not the reliable stream for exec-emitted logs; pre-existing from Epic 3 quick-script [docs/manual-testing.md:Section 11]
+- `_startup_sequence` called directly inside short-lived `docker compose exec` sessions; opens a transient DB pool per invocation; established pattern from Epic 3 validation [docs/manual-testing.md:all tests]
+- "Wait ~30 seconds" before log inspection is vague; no explicit health-check verification step; consistent with existing pattern throughout the doc [docs/manual-testing.md:T4.5.3, T4.5.4]
+- T4.5.3 has no pre-check that `config.yaml` was saved and is visible inside the container before restart — operator could edit the wrong file silently [docs/manual-testing.md:T4.5.3]
