@@ -5,6 +5,7 @@ from pathlib import Path
 import typer
 
 from cos.config import CosConfig
+from cos.services.health import ComponentStatus, HealthService
 from cos.services.ingestion import SUPPORTED_SUFFIXES, IngestService
 from cos.services.provenance import DocumentSummary, ProvenanceService, VersionSummary
 
@@ -14,7 +15,18 @@ app = typer.Typer(name="cos", help="CoS platform CLI")
 @app.command()
 def status() -> None:
     """Show platform health status."""
-    raise NotImplementedError
+    try:
+        config = CosConfig.load()
+        statuses = asyncio.run(_check_status(config))
+        for line in _render_status_report(statuses):
+            typer.echo(line)
+        if any(not status.healthy for status in statuses):
+            raise typer.Exit(code=1)
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        typer.echo(f"Error running status check: {exc}", err=True)
+        raise typer.Exit(code=1)
 
 
 @app.command()
@@ -92,7 +104,9 @@ async def _ingest_folder(target: Path, service: IngestService) -> None:
     elif total_files == 0:
         typer.echo(f"No files were ingested successfully from {target}")
     else:
-        typer.echo(f"Ingested {total_files} files -> {total_chunks} total chunks indexed")
+        typer.echo(
+            f"Ingested {total_files} files -> {total_chunks} total chunks indexed"
+        )
 
 
 @app.command()
@@ -200,3 +214,30 @@ def _print_versions_table(versions: list[VersionSummary]) -> None:
             f"{version.ingested_at.isoformat(timespec='seconds'):<26}  "
             f"{version.file_hash}"
         )
+
+
+async def _check_status(config: CosConfig) -> list[ComponentStatus]:
+    service = HealthService(
+        db_dsn=config.database.libpq_dsn,
+        tika_url=config.tika.url,
+        role_pack_path=config.role_pack.path,
+    )
+    return await service.check_all()
+
+
+def _render_status_report(statuses: list[ComponentStatus]) -> list[str]:
+    lines = ["CoS Platform Status", "-------------------"]
+    for status in statuses:
+        icon = "✓" if status.healthy else "✗"
+        message = _display_status_message(status)
+        line = f"{status.name:<16}{icon} {message}"
+        if not status.healthy and status.recovery_hint:
+            line += f" — {status.recovery_hint}"
+        lines.append(line)
+    return lines
+
+
+def _display_status_message(status: ComponentStatus) -> str:
+    if status.name == "MCP server" and status.healthy:
+        return "healthy"
+    return status.message

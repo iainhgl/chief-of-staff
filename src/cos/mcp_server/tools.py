@@ -1,4 +1,5 @@
 import json
+from dataclasses import asdict
 
 from cos.mcp_server.server import (
     get_config,
@@ -7,7 +8,7 @@ from cos.mcp_server.server import (
     get_role_pack_service,
     mcp,
 )
-from cos.services.health import HealthService
+from cos.services.health import ComponentStatus, HealthService
 from cos.services.provenance import ProvenanceService
 
 
@@ -23,9 +24,15 @@ async def get_status() -> str:
                 "detail": "config not loaded yet",
             }
         )
-    health = HealthService(db_dsn=config.database.libpq_dsn, tika_url=config.tika.url)
-    components = [{"name": "cos", "healthy": True}] + await health.check_all()
-    ready = bool(components) and all(c["healthy"] for c in components)
+    health = HealthService(
+        db_dsn=config.database.libpq_dsn,
+        tika_url=config.tika.url,
+        role_pack_path=config.role_pack.path,
+    )
+    statuses = await health.check_all()
+    components = [asdict(ComponentStatus(name="cos", healthy=True, message="healthy"))]
+    components.extend(asdict(status) for status in statuses)
+    ready = bool(components) and all(component["healthy"] for component in components)
     return json.dumps(
         {
             "status": "ok",
