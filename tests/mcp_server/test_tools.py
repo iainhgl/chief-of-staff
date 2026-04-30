@@ -7,6 +7,7 @@ import cos.mcp_server.tools  # noqa: F401 — ensure decorators run
 from cos.mcp_server.tools import get_role_context, get_status, list_documents, retrieve
 from cos.retrieval.citations import CitedChunk, CitedResponse
 from cos.rolepack.loader import RolePackConfig
+from cos.services.health import ComponentStatus
 from cos.services.rolepack import RolePackService
 from cos.store.models import DocumentSummary
 
@@ -15,6 +16,7 @@ def _make_mock_config() -> MagicMock:
     mock_config = MagicMock()
     mock_config.database.libpq_dsn = "postgresql://test:test@localhost/cos_test"
     mock_config.tika.url = "http://tika:9998"
+    mock_config.role_pack.path = "role_packs/chro.yaml"
     return mock_config
 
 
@@ -63,7 +65,10 @@ def _make_role_pack_service() -> RolePackService:
 
 async def test_get_status_returns_ok_envelope(monkeypatch):
     monkeypatch.setattr(_server, "_config", _make_mock_config())
-    healthy = [{"name": "postgres", "healthy": True}, {"name": "tika", "healthy": True}]
+    healthy = [
+        ComponentStatus("Postgres", True, "healthy"),
+        ComponentStatus("Tika", True, "healthy"),
+    ]
     with patch(
         "cos.services.health.HealthService.check_all",
         new_callable=AsyncMock,
@@ -77,7 +82,13 @@ async def test_get_status_returns_ok_envelope(monkeypatch):
 
 async def test_get_status_all_components_present(monkeypatch):
     monkeypatch.setattr(_server, "_config", _make_mock_config())
-    healthy = [{"name": "postgres", "healthy": True}, {"name": "tika", "healthy": True}]
+    healthy = [
+        ComponentStatus("Postgres", True, "healthy"),
+        ComponentStatus("Tika", True, "healthy"),
+        ComponentStatus("MCP server", True, "listening on stdio"),
+        ComponentStatus("Role pack", True, "CHRO loaded"),
+        ComponentStatus("Database", True, "connected (0 documents indexed)"),
+    ]
     with patch(
         "cos.services.health.HealthService.check_all",
         new_callable=AsyncMock,
@@ -86,17 +97,27 @@ async def test_get_status_all_components_present(monkeypatch):
         result = json.loads(await get_status())
 
     components = result["data"]["components"]
-    assert len(components) == 3
-    assert components[0] == {"name": "cos", "healthy": True}
-    assert components[1]["name"] == "postgres"
-    assert components[2]["name"] == "tika"
+    assert len(components) == 6
+    assert components[0] == {
+        "name": "cos",
+        "healthy": True,
+        "message": "healthy",
+        "recovery_hint": "",
+    }
+    assert components[1]["name"] == "Postgres"
+    assert components[1]["message"] == "healthy"
+    assert components[2]["name"] == "Tika"
+    assert components[2]["message"] == "healthy"
+    assert components[3]["name"] == "MCP server"
+    assert components[4]["name"] == "Role pack"
+    assert components[5]["name"] == "Database"
 
 
 async def test_get_status_ready_false_when_unhealthy(monkeypatch):
     monkeypatch.setattr(_server, "_config", _make_mock_config())
     unhealthy = [
-        {"name": "postgres", "healthy": False},
-        {"name": "tika", "healthy": True},
+        ComponentStatus("Postgres", False, "container not running", "Run: cos restart"),
+        ComponentStatus("Tika", True, "healthy"),
     ]
     with patch(
         "cos.services.health.HealthService.check_all",
@@ -110,7 +131,13 @@ async def test_get_status_ready_false_when_unhealthy(monkeypatch):
 
 async def test_get_status_ready_true_when_all_healthy(monkeypatch):
     monkeypatch.setattr(_server, "_config", _make_mock_config())
-    healthy = [{"name": "postgres", "healthy": True}, {"name": "tika", "healthy": True}]
+    healthy = [
+        ComponentStatus("Postgres", True, "healthy"),
+        ComponentStatus("Tika", True, "healthy"),
+        ComponentStatus("MCP server", True, "listening on stdio"),
+        ComponentStatus("Role pack", True, "CHRO loaded"),
+        ComponentStatus("Database", True, "connected (0 documents indexed)"),
+    ]
     with patch(
         "cos.services.health.HealthService.check_all",
         new_callable=AsyncMock,

@@ -1,5 +1,5 @@
 # generated: 2026-04-17
-# last_updated: 2026-04-29  # 4-6-documentation-and-housekeeping -> done
+# last_updated: 2026-04-30  # 5-1-health-check-system -> done
 # project: CoS
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-17
-last_updated: 2026-04-29  # 4-6-documentation-and-housekeeping -> done
+last_updated: 2026-04-30  # 5-1-health-check-system -> done
 project: CoS
 project_key: NOKEY
 tracking_system: file-system
@@ -100,8 +100,8 @@ development_status:
   # Epic 5: Platform Operations & Resilience
   # Operator and non-technical users can monitor, diagnose, and recover the platform via CLI
   # ─────────────────────────────────────────────
-  epic-5: backlog
-  5-1-health-check-system: backlog
+  epic-5: in-progress
+  5-1-health-check-system: done
   5-2-platform-restart-and-recovery: backlog
   5-3-diagnostic-log-export: backlog
   5-4-secrets-and-security-audit: backlog
