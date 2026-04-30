@@ -18,6 +18,7 @@ _RESTART_TIMEOUT = 30
 _POLL_INTERVAL = 2
 _SERVICES = ("postgres", "tika", "cos")
 _DISPLAY_NAMES = {"postgres": "Postgres", "tika": "Tika", "cos": "MCP server"}
+_VALID_COMPONENTS = frozenset(_SERVICES)
 
 
 @app.command()
@@ -57,9 +58,52 @@ def restart() -> None:
 
 
 @app.command()
-def logs() -> None:
-    """Tail platform logs."""
-    raise NotImplementedError
+def logs(
+    component: str | None = typer.Argument(
+        None, help="Component name: postgres, tika, or cos"
+    ),
+    since: str | None = typer.Option(
+        None, "--since", help="Show logs since duration (e.g. 10m, 1h)"
+    ),
+) -> None:
+    """Export platform logs for diagnosis or support."""
+    try:
+        if component is not None and component not in _VALID_COMPONENTS:
+            valid_options = ", ".join(_SERVICES)
+            typer.echo(
+                f"Unknown component: {component}. Valid options: {valid_options}",
+            )
+            raise typer.Exit(code=1)
+
+        if not _any_containers_running():
+            typer.echo(
+                "No containers running. Start the platform first: "
+                "docker compose up -d"
+            )
+            raise typer.Exit(code=1)
+
+        cmd = ["docker", "compose", "logs", "--no-color", "--timestamps"]
+        if since:
+            cmd.extend(["--since", since])
+        else:
+            cmd.extend(["--tail", "100"])
+        if component:
+            cmd.append(component)
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or "docker compose logs failed")
+        typer.echo(result.stdout, nl=False)
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        typer.echo(f"Error retrieving logs: {exc}", err=True)
+        raise typer.Exit(code=1)
 
 
 @app.command()
@@ -329,3 +373,14 @@ def _parse_compose_ps_json(text: str) -> list[dict[str, object]]:
     if parsed:
         return parsed
     return cast(list[dict[str, object]], json.loads(text))
+
+
+def _any_containers_running() -> bool:
+    """Return True if at least one Compose service container is running."""
+    result = subprocess.run(
+        ["docker", "compose", "ps", "-q", "--status=running"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    return result.returncode == 0 and bool(result.stdout.strip())
