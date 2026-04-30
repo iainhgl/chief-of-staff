@@ -1,6 +1,9 @@
 import asyncio
-import json as _json
+import json
+import subprocess
+import time
 from pathlib import Path
+from typing import cast
 
 import typer
 
@@ -10,6 +13,11 @@ from cos.services.ingestion import SUPPORTED_SUFFIXES, IngestService
 from cos.services.provenance import DocumentSummary, ProvenanceService, VersionSummary
 
 app = typer.Typer(name="cos", help="CoS platform CLI")
+
+_RESTART_TIMEOUT = 30
+_POLL_INTERVAL = 2
+_SERVICES = ("postgres", "tika", "cos")
+_DISPLAY_NAMES = {"postgres": "Postgres", "tika": "Tika", "cos": "MCP server"}
 
 
 @app.command()
@@ -32,7 +40,20 @@ def status() -> None:
 @app.command()
 def restart() -> None:
     """Restart platform services."""
-    raise NotImplementedError
+    try:
+        typer.echo("Restarting platform...")
+        _run_docker_compose_restart()
+        stuck = _wait_for_healthy()
+        if stuck is not None:
+            display = _DISPLAY_NAMES.get(stuck, stuck.title())
+            typer.echo(f"{display} did not become healthy. Run: cos logs {stuck}")
+            raise typer.Exit(code=1)
+        typer.echo("Platform restarted. All components healthy.")
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        typer.echo(f"Error restarting platform: {exc}", err=True)
+        raise typer.Exit(code=1)
 
 
 @app.command()
@@ -139,7 +160,7 @@ async def _docs_list(service: ProvenanceService, json_output: bool) -> None:
 
     if json_output:
         typer.echo(
-            _json.dumps(
+            json.dumps(
                 [
                     {
                         "id": document.id,
@@ -170,7 +191,7 @@ async def _docs_versions(
 
     if json_output:
         typer.echo(
-            _json.dumps(
+            json.dumps(
                 [
                     {
                         "version_number": version.version_number,
@@ -241,3 +262,70 @@ def _display_status_message(status: ComponentStatus) -> str:
     if status.name == "MCP server" and status.healthy:
         return "healthy"
     return status.message
+
+
+def _run_docker_compose_restart() -> None:
+    result = subprocess.run(
+        ["docker", "compose", "restart"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or "docker compose restart failed")
+
+
+def _wait_for_healthy(
+    timeout: int = _RESTART_TIMEOUT, poll_interval: int = _POLL_INTERVAL
+) -> str | None:
+    deadline = time.monotonic() + timeout
+    while True:
+        stuck = _first_unhealthy_service()
+        if stuck is None:
+            return None
+        if time.monotonic() >= deadline:
+            return stuck
+        time.sleep(poll_interval)
+
+
+def _first_unhealthy_service() -> str | None:
+    result = subprocess.run(
+        ["docker", "compose", "ps", "--format", "json"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    if result.returncode != 0:
+        return "cos"
+
+    text = result.stdout.strip()
+    if not text:
+        return "cos"
+
+    try:
+        services = _parse_compose_ps_json(text)
+    except Exception:
+        return "cos"
+
+    healthy = {
+        service.get("Service", "")
+        for service in services
+        if service.get("Health") == "healthy"
+    }
+    for name in _SERVICES:
+        if name not in healthy:
+            return name
+    return None
+
+
+def _parse_compose_ps_json(text: str) -> list[dict[str, object]]:
+    parsed: list[dict[str, object]] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parsed.append(cast(dict[str, object], json.loads(line)))
+
+    if parsed:
+        return parsed
+    return cast(list[dict[str, object]], json.loads(text))
