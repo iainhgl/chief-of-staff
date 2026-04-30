@@ -195,3 +195,8 @@
 - No distinction between container "unhealthy" vs "starting" states — both treated as "not yet healthy"; message "did not become healthy" is accurate for both; directed to `cos logs` for differentiation [`src/cos/cli.py:_first_unhealthy_service`]
 - AC2 30-second timeout budget excludes restart command duration — `_wait_for_healthy` starts its 30s countdown after `docker compose restart` completes; total operator wall time can exceed 30s on slow restarts; integration concern validated in Story 5.5 [`src/cos/cli.py:_wait_for_healthy`]
 - `_run_docker_compose_restart` only checks `stderr` for error detail; some docker versions emit errors to stdout — minor; fallback message "docker compose restart failed" is still meaningful [`src/cos/cli.py:277`]
+
+## Deferred from: code review of 5-3-diagnostic-log-export (2026-04-30)
+
+- `_any_containers_running` treats docker-unavailable non-zero returncode as "no containers" — shows misleading "Start the platform first" operator message when Docker socket is down or Docker itself is broken; Story 5.5 operator validation will exercise recovery scenarios [`src/cos/cli.py:_any_containers_running`]
+- `subprocess.TimeoutExpired` from `_any_containers_running` propagates to `logs()` outer handler as "Error retrieving logs: ..." — message is confusing since the timeout occurred in the status check, not log retrieval; acceptable for Phase 1; revisit in a future hardening pass [`src/cos/cli.py:_any_containers_running`]
