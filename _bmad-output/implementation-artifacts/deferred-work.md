@@ -187,3 +187,11 @@
 - `get_role_context` missing error envelope on unexpected exception — `svc.get_active()` cannot raise today but unguarded path survives; pre-existing code issue not introduced by this story [`src/cos/mcp_server/tools.py`]
 - Startup log at `server.py:121` still logs `config.channels` after switch to role-pack-driven `output_channels` — misleading if the two differ; pre-existing code bug not introduced by this story [`src/cos/mcp_server/server.py:121`]
 - Architecture note 5 (`_EMBED_PROVIDERS`) is only half-accurate for future providers — adding a new provider also requires matching the `VoyageTransportConfig | None` transport interface; document transport contract when a second provider is added [`src/cos/ingestion/embedder.py`]
+
+## Deferred from: code review of 5-2-platform-restart-and-recovery (2026-04-30)
+
+- `subprocess.run` called without `cwd` in restart helpers — docker compose project resolved via directory search from process cwd; expected operator behaviour (running from project root); pre-existing pattern applies to all CLI commands that shell out [`src/cos/cli.py`]
+- `_first_unhealthy_service` returns `"cos"` on all failure modes (docker not found, empty output, parse error) — reasonable safe fallback; conflates distinct failure causes but Story 5.3 `cos logs` provides full diagnostics [`src/cos/cli.py:300,309`]
+- No distinction between container "unhealthy" vs "starting" states — both treated as "not yet healthy"; message "did not become healthy" is accurate for both; directed to `cos logs` for differentiation [`src/cos/cli.py:_first_unhealthy_service`]
+- AC2 30-second timeout budget excludes restart command duration — `_wait_for_healthy` starts its 30s countdown after `docker compose restart` completes; total operator wall time can exceed 30s on slow restarts; integration concern validated in Story 5.5 [`src/cos/cli.py:_wait_for_healthy`]
+- `_run_docker_compose_restart` only checks `stderr` for error detail; some docker versions emit errors to stdout — minor; fallback message "docker compose restart failed" is still meaningful [`src/cos/cli.py:277`]
