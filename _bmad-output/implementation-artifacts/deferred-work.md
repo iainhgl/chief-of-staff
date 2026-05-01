@@ -210,3 +210,13 @@
 - `output/router.py` uses `str(exc)` in a structured log field (same pattern fixed elsewhere in this story) — story spec explicitly excluded `router.py`; same anti-pattern as was fixed in `retrieval.py` and `tools.py` [`src/cos/output/router.py:52`]
 - `RuntimeError` in `AnthropicAdapter.complete()` has no test after the try/except refactor — already tracked from Story 3.3 review; still unaddressed [`tests/llm/test_anthropic_adapter.py`]
 - `caplog` logger-name mismatch risk — `anthropic.py` uses the root logger; refactoring to a named `logging.getLogger(__name__)` logger would silently break the negative assertion in `test_complete_logs_status_code_not_key_on_api_error` without a test failure [`tests/llm/test_anthropic_adapter.py`]
+
+## Deferred from: code review of 5-5-operator-validation-recovery-scenario (2026-05-01)
+
+- `docker compose ps -q postgres` may silently return empty string if Docker Compose container naming differs from service name; project defines service as `postgres` so this works currently but is fragile if project name changes [`docs/manual-testing.md`]
+- T5.5.4 fresh subprocess via `docker compose exec` does not test the live running MCP server's state — it's a proxy test that re-initialises a new Python process; acceptable by design but the limitation is invisible to operators [`docs/manual-testing.md`]
+- T5.5.4 `_startup_sequence` calls `run_migrations` as an undocumented side-effect during the manual test — idempotent, so safe; only a risk if a future migration is non-idempotent [`docs/manual-testing.md`]
+- T5.5.4 `result['data']['answer'] is not None` assertion does not guard against an empty string answer — a synthesis that returns `""` would pass the assertion while indicating a real failure [`docs/manual-testing.md`]
+- "three services" (Docker health) vs "five components" (`cos status` health) inconsistency in pre-existing sections of manual-testing.md — outside this story's scope [`docs/manual-testing.md`]
+- sprint-status.yaml has duplicate `last_updated` field in both comment header block and YAML data block — pre-existing design; both are updated in sync so no functional impact [`_bmad-output/implementation-artifacts/sprint-status.yaml`]
+- CosConfig.load('/app/config.yaml') in T5.5.4 uses a hardcoded path that would silently break if the docker-compose.yml volume mount path changes [`docs/manual-testing.md`]

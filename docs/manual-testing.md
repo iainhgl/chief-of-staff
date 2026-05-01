@@ -1,6 +1,6 @@
 # Manual Testing Guide
 
-Reflects the platform as built at the end of **Epic 4: Role Identity & Configuration**. Run these tests to verify the platform is healthy, documents are ingested, questions are answered with grounded citations, and the CHRO role identity is active and switchable.
+Reflects the platform as built at the end of **Epic 5: Platform Operations & Resilience**. Run these tests to verify the platform is healthy, documents are ingested, questions are answered with grounded citations, the CHRO role identity is active, and the platform recovers gracefully from component failures.
 
 This guide is rewritten at the end of each epic to reflect current platform state — it does not accumulate historical tests.
 
@@ -17,7 +17,7 @@ This guide is rewritten at the end of each epic to reflect current platform stat
 
 ---
 
-## What Epic 4 delivers
+## What Epic 5 delivers
 
 - Full document ingestion pipeline: PDF, Word (`.docx`), Markdown, and plain text (from Epic 2)
 - `cos ingest <path>` — ingest a single file or folder from the CLI
@@ -32,8 +32,9 @@ This guide is rewritten at the end of each epic to reflect current platform stat
 - Role pack system: define role identity in `role_packs/chro.yaml`; switch by editing `config.yaml` and restarting — no code change required
 - Two role packs included: `role_packs/chro.yaml` (CHRO) and `role_packs/enterprise_architect.yaml`
 - OutputRouter enforces fail-closed egress: unrecognised channels suppress output and log a structured error
-
-Other CLI commands such as `cos status`, `cos logs`, and `cos restart` remain stubs.
+- `cos status` — plain-language health table; identifies exactly which component failed and how to fix it; exits with code 1 when any component is unhealthy
+- `cos restart` — single command that restarts all services and polls until all containers report healthy; prints confirmation or identifies the stuck component
+- `cos logs` — single command log export; supports `--since <duration>` for time filtering and optional component filter
 
 ---
 
@@ -286,17 +287,24 @@ else:
 ## 10 — Restart round-trip
 
 ```bash
-docker compose down
-docker compose up -d
+uv run cos restart
 ```
 
-Wait 30–60 seconds, then:
+Wait for the command to complete — it polls until all containers are healthy (up to ~30 seconds of polling after the restart finishes).
+
+**Expected:**
+```
+Restarting platform...
+Platform restarted. All components healthy.
+```
+
+Confirm health:
 
 ```bash
-docker compose ps
+docker compose exec cos uv run cos status
 ```
 
-**Expected:** All three services back to `(healthy)` with no manual intervention.
+**Expected:** All five components healthy with `✓` icons and no recovery hints.
 
 Follow up with test 2 (startup logs) to confirm clean restart.
 
@@ -850,14 +858,183 @@ asyncio.run(main())
 
 ---
 
+## Epic 5: Platform Operations & Resilience
+
+**Prerequisites:**
+
+- Platform running: `docker compose up -d` (all three services healthy)
+- At least one document ingested (`cos ingest` or T2.6.1 already run — the `retrieve` test at T5.5.4 requires at least one indexed document)
+- Working directory: `cos/`
+- Valid `llm.api_key` in `config.yaml`
+
+---
+
+### T5.5.1 — `cos status` shows all components healthy [LIVE]
+
+```bash
+docker compose exec cos uv run cos status
+```
+
+**Expected:**
+```
+CoS Platform Status
+-------------------
+Postgres        ✓ healthy
+Tika            ✓ healthy
+MCP server      ✓ healthy
+Role pack       ✓ CHRO loaded
+Database        ✓ connected (N documents indexed)
+```
+
+- All five rows have `✓` icons
+- "Role pack" shows `CHRO loaded` (confirms role pack is active)
+- "Database" shows a document count (N ≥ 0)
+- No recovery hints appear
+- No raw tracebacks or technical jargon
+
+**Fail signal:** Any `✗` row, a missing component row, a raw Python exception, or the error `"cos status" is not a command` (indicates Epic 5 is not built on this branch).
+
+---
+
+### T5.5.2 — Postgres stopped: `cos status` identifies failure and recovery action [LIVE]
+
+**Step 1:** Stop the Postgres container:
+```bash
+docker stop $(docker compose ps -q postgres)
+```
+
+**Step 2:** Immediately run `cos status`:
+```bash
+docker compose exec cos uv run cos status
+```
+
+**Expected:**
+```
+CoS Platform Status
+-------------------
+Postgres        ✗ container not running — Run: cos restart
+Tika            ✓ healthy
+MCP server      ✓ healthy
+Role pack       ✓ CHRO loaded
+Database        ✗ could not connect — Run: cos restart
+```
+
+- Both Postgres and Database rows show `✗` (both depend on the Postgres connection)
+- Recovery hint `Run: cos restart` appears on both failing rows
+- Tika, MCP server, and Role pack rows are unaffected — they don't depend on Postgres
+- No Docker internals, container IDs, or raw tracebacks in the output
+- Command exits with code 1 (verify: `echo $?` returns `1`)
+
+**Fail signal:** Output shows Postgres `✓ healthy` (it was stopped), raw traceback appears, or recovery hint is absent.
+
+> **Note:** Postgres remains stopped after this test. Run T5.5.3 next to recover — do not run any other tests in between.
+
+---
+
+### T5.5.3 — `cos restart` recovers the platform within the 30-second polling window [LIVE]
+
+Run from the **host** (Docker CLI required):
+
+```bash
+uv run cos restart
+```
+
+**Expected:**
+```
+Restarting platform...
+Platform restarted. All components healthy.
+```
+
+Timing note: `cos restart` calls `docker compose restart` (up to 30s) then polls for healthy state (up to another 30s). Total wall time from running the command to seeing the confirmation may be up to ~60 seconds on a slow machine.
+
+Confirm with status:
+```bash
+docker compose exec cos uv run cos status
+```
+
+**Expected:** All five components healthy (same output as T5.5.1). `cos restart` exits with code 0.
+
+**Fail signal:** `did not become healthy` message, exit code 1, or `cos status` still shows any `✗` row after the restart command reported success.
+
+---
+
+### T5.5.4 — `retrieve` query returns a cited answer after recovery [LIVE]
+
+```bash
+docker compose exec -i cos uv run python -c "
+import asyncio, json
+import cos.mcp_server.server as srv
+from cos.config import CosConfig
+from cos.mcp_server.tools import retrieve
+
+async def main():
+    config = CosConfig.load('/app/config.yaml')
+    await srv._startup_sequence(config)
+    result = json.loads(await retrieve(query='What frameworks do I have for workforce segmentation?'))
+    print(json.dumps(result, indent=2))
+    assert result['status'] == 'ok', f'retrieve failed: {result}'
+    assert result['data']['answer'] is not None, 'answer is null — synthesis failed'
+    assert len(result['data']['citations']) > 0, 'No citations returned'
+    print(f'retrieve ok after recovery: {len(result[\"data\"][\"citations\"])} citations')
+
+asyncio.run(main())
+"
+```
+
+**Expected:**
+
+- `status` is `"ok"`
+- `data.answer` is a non-empty string
+- `data.citations` contains at least one item with `source_path`, `chunk_index`, `score`
+- No error envelope or null answer
+
+This confirms the recovery was genuine: the platform can synthesise and return grounded answers after a restart, not just report healthy containers.
+
+**Fail signal:** `status != "ok"`, `data.answer` is null (synthesis failed), or `data.citations` is empty.
+
+---
+
+### T5.5.5 — `cos logs` shows restart event, structured JSON, no credentials [LIVE]
+
+Run from the **host**:
+
+```bash
+uv run cos logs cos --since 5m
+```
+
+**Expected:**
+
+- Output is a mix of Docker log timestamps and structured JSON log lines from the `cos` service
+- The startup sequence is visible in the log: lines include `"message": "migrations applied"`, `"message": "Role pack loaded"`, `"message": "MCP server: listening"`
+- All `cos`-service log lines are valid JSON objects (not plain text)
+- No line contains: `api_key`, `get_secret_value`, `password`, `YOUR_API_KEY_HERE`, or any API key value
+- Exit code 0
+
+Run a quick credential scan:
+```bash
+uv run cos logs cos --since 5m > /tmp/cos-logs-check.txt && grep -E "api_key|get_secret_value|password" /tmp/cos-logs-check.txt || echo "No credential strings found — ok"
+```
+
+**Expected:** No matches. Prints `No credential strings found — ok`.
+
+**Known limitation (already deferred):** If Docker is unavailable (not just containers stopped), `cos logs` prints "No containers running. Start the platform first." rather than a Docker error. This is expected behaviour — not a test failure in this scenario.
+
+**Fail signal:** Any log line containing an API key value, structured log lines in plain text (not JSON), or exit code 1.
+
+---
+
 ## 11 — Running all live tests
 
 Use this sequence for a concise end-to-end operator pass:
 
 ```bash
-# 1. Start services
+# 0. Status check (must pass before any other step)
 docker compose up -d
 docker compose ps
+docker compose exec cos uv run cos status
+# If any component is unhealthy, stop here and recover before continuing.
+
+# 1. Start services — already done above
 
 # 2. Ingest test fixtures
 docker compose run --rm --entrypoint /app/.venv/bin/cos -v "$(pwd)/test-docs:/test-docs" cos ingest /test-docs/
