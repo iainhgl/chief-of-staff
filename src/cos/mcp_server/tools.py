@@ -1,5 +1,7 @@
 import json
+import logging
 from dataclasses import asdict
+from datetime import datetime, timezone
 
 from cos.mcp_server.server import (
     get_config,
@@ -60,12 +62,22 @@ async def retrieve(query: str) -> str:
 
     try:
         response = await retrieval_service.query(query, role_pack=role_pack)
-    except Exception as exc:
+    except Exception:
+        logging.error(
+            json.dumps(
+                {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "level": "ERROR",
+                    "component": "mcp_server",
+                    "message": "Retrieval tool failed",
+                }
+            )
+        )
         return json.dumps(
             {
                 "status": "error",
                 "error": "Retrieval failed",
-                "detail": str(exc),
+                "detail": "An internal error occurred. Run cos logs for diagnostics.",
             }
         )
 
@@ -148,12 +160,22 @@ async def list_documents() -> str:
     svc = ProvenanceService(config=config)
     try:
         docs = await svc.list_documents()
-    except Exception as exc:
+    except Exception:
+        logging.error(
+            json.dumps(
+                {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "level": "ERROR",
+                    "component": "mcp_server",
+                    "message": "list_documents tool failed",
+                }
+            )
+        )
         return json.dumps(
             {
                 "status": "error",
                 "error": "Document listing failed",
-                "detail": str(exc),
+                "detail": "An internal error occurred. Run cos logs for diagnostics.",
             }
         )
     docs_data = [

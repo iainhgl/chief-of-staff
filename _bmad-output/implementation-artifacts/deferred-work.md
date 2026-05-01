@@ -200,3 +200,13 @@
 
 - `_any_containers_running` treats docker-unavailable non-zero returncode as "no containers" — shows misleading "Start the platform first" operator message when Docker socket is down or Docker itself is broken; Story 5.5 operator validation will exercise recovery scenarios [`src/cos/cli.py:_any_containers_running`]
 - `subprocess.TimeoutExpired` from `_any_containers_running` propagates to `logs()` outer handler as "Error retrieving logs: ..." — message is confusing since the timeout occurred in the status check, not log retrieval; acceptable for Phase 1; revisit in a future hardening pass [`src/cos/cli.py:_any_containers_running`]
+
+## Deferred from: code review of 5-4-secrets-and-security-audit (2026-05-01)
+
+- Non-APIStatusError Anthropic exceptions (`APIConnectionError`, `APITimeoutError`, `APIResponseValidationError`) bypass the new llm-component structured log in `anthropic.py` — no `status_code` or error type logged for network-level failures; outside this story's security scope [`src/cos/llm/anthropic.py`]
+- `get_status` and `get_role_context` MCP tools have no `except Exception` wrapper — raw Python exceptions surface through the MCP transport instead of the safe error envelope returned by `retrieve` and `list_documents`; pre-existing [`src/cos/mcp_server/tools.py`]
+- `transport` with `has_overrides=False` constructor boundary has no test — `AnthropicAdapter(transport=HttpTransportConfig())` (non-None transport, all fields at defaults) is a real code path with no coverage [`tests/llm/test_anthropic_adapter.py`]
+- HTTPS not verified for transport-override path — `test_adapter_client_uses_https_base_url` only tests the no-transport constructor; the `return`-early branch that injects a custom `httpx.AsyncClient` is not covered [`tests/llm/test_anthropic_adapter.py`]
+- `output/router.py` uses `str(exc)` in a structured log field (same pattern fixed elsewhere in this story) — story spec explicitly excluded `router.py`; same anti-pattern as was fixed in `retrieval.py` and `tools.py` [`src/cos/output/router.py:52`]
+- `RuntimeError` in `AnthropicAdapter.complete()` has no test after the try/except refactor — already tracked from Story 3.3 review; still unaddressed [`tests/llm/test_anthropic_adapter.py`]
+- `caplog` logger-name mismatch risk — `anthropic.py` uses the root logger; refactoring to a named `logging.getLogger(__name__)` logger would silently break the negative assertion in `test_complete_logs_status_code_not_key_on_api_error` without a test failure [`tests/llm/test_anthropic_adapter.py`]

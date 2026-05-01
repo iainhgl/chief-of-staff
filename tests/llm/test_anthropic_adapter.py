@@ -2,6 +2,8 @@ import logging
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import anthropic
+import httpx
 import pytest
 
 from cos.llm.adapter import LLMAdapter
@@ -99,3 +101,38 @@ def test_adapter_missing_ca_bundle_raises() -> None:
                 ca_bundle_path=Path("/definitely/missing/zscaler.pem")
             ),
         )
+
+
+def test_adapter_client_uses_https_base_url() -> None:
+    adapter = AnthropicAdapter(model="claude-3-haiku-20240307", api_key="test")
+
+    assert str(adapter._client.base_url).startswith("https://")
+
+
+@pytest.mark.asyncio
+async def test_complete_logs_status_code_not_key_on_api_error(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    api_key = "sk-sentinel-9999"
+    adapter = AnthropicAdapter(model="claude-3-haiku-20240307", api_key=api_key)
+    error = anthropic.AuthenticationError(
+        message="invalid x-api-key",
+        response=httpx.Response(
+            401,
+            request=httpx.Request("POST", "https://api.anthropic.com"),
+        ),
+        body=None,
+    )
+
+    with caplog.at_level(logging.ERROR):
+        with patch.object(
+            adapter._client.messages,
+            "create",
+            new=AsyncMock(side_effect=error),
+        ):
+            with pytest.raises(anthropic.AuthenticationError):
+                await adapter.complete("what is X?", ["chunk"])
+
+    assert "401" in caplog.text
+    assert '"component": "llm"' in caplog.text
+    assert api_key not in caplog.text
