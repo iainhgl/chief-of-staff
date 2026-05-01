@@ -1,5 +1,8 @@
+import json
+import logging
 import ssl
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 import anthropic
@@ -22,14 +25,19 @@ class AnthropicAdapter:
         transport: "HttpTransportConfig | None" = None,
     ) -> None:
         self._model = model
-        client_kwargs: dict[str, object] = {"api_key": api_key}
         if transport is not None and transport.has_overrides:
-            client_kwargs["http_client"] = httpx.AsyncClient(
+            http_client = httpx.AsyncClient(
                 verify=_build_verify(transport.ca_bundle_path),
                 proxy=transport.proxy_url,
                 trust_env=transport.trust_env,
             )
-        self._client = anthropic.AsyncAnthropic(**client_kwargs)
+            self._client = anthropic.AsyncAnthropic(
+                api_key=api_key,
+                http_client=http_client,
+            )
+            return
+
+        self._client = anthropic.AsyncAnthropic(api_key=api_key)
 
     async def complete(self, prompt: str, context: list[str]) -> str:
         context_text = "\n\n".join(
@@ -39,12 +47,26 @@ class AnthropicAdapter:
             context_text = "(no context provided)"
 
         user_message = f"Context:\n{context_text}\n\nInstruction: {prompt}"
-        message = await self._client.messages.create(
-            model=self._model,
-            max_tokens=2048,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_message}],
-        )
+        try:
+            message = await self._client.messages.create(
+                model=self._model,
+                max_tokens=2048,
+                system=SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": user_message}],
+            )
+        except anthropic.APIStatusError as exc:
+            logging.error(
+                json.dumps(
+                    {
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "level": "ERROR",
+                        "component": "llm",
+                        "message": "API call failed",
+                        "status_code": exc.status_code,
+                    }
+                )
+            )
+            raise
         for block in message.content:
             text = getattr(block, "text", None)
             if isinstance(text, str):

@@ -217,6 +217,8 @@ async def test_retrieve_service_exception(monkeypatch):
     assert result["status"] == "error"
     assert "error" in result
     assert "detail" in result
+    assert "DB connection lost" not in result["detail"]
+    assert "cos logs" in result["detail"]
 
 
 async def test_list_documents_service_exception(monkeypatch):
@@ -230,6 +232,8 @@ async def test_list_documents_service_exception(monkeypatch):
     assert result["status"] == "error"
     assert "error" in result
     assert "detail" in result
+    assert "DB unavailable" not in result["detail"]
+    assert "cos logs" in result["detail"]
 
 
 async def test_list_documents_returns_ok_envelope(monkeypatch):

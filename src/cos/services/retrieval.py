@@ -110,7 +110,7 @@ class RetrievalService:
 
         try:
             answer = await self._llm_adapter.complete(prompt=prompt, context=context)
-        except Exception as exc:
+        except Exception:
             logging.error(
                 json.dumps(
                     {
@@ -118,11 +118,9 @@ class RetrievalService:
                         "level": "ERROR",
                         "component": "retrieval",
                         "message": "LLM synthesis failed",
-                        "error": str(exc),
                     }
                 )
             )
-            logging.debug("LLM synthesis traceback", exc_info=True)
             return CitedResponse(answer=None, citations=cited_results)
 
         return CitedResponse(answer=answer, citations=cited_results)

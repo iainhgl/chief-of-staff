@@ -84,6 +84,8 @@ connectors: []
 # password: MUST match the POSTGRES_PASSWORD environment variable in docker-compose.yml.
 #   The default in docker-compose.yml is "postgres". If you change it here, you must
 #   also update docker-compose.yml — the two are not linked automatically.
+#   SECURITY: Change this from the default "postgres" before deploying to any shared or
+#   production environment — do not copy this value as-is outside a local development setup.
 # ─────────────────────────────────────────────
 database:
   host: postgres

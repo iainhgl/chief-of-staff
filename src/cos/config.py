@@ -2,12 +2,13 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 from pydantic import BaseModel, Field, SecretStr, ValidationError
 
 LogComponent = Literal[
     "ingestion",
     "retrieval",
+    "llm",
     "mcp_server",
     "cli",
     "scheduler",
