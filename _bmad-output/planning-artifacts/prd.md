@@ -1,5 +1,5 @@
 ---
-stepsCompleted: ['step-01-init', 'step-02-discovery', 'step-02b-vision', 'step-02c-executive-summary', 'step-03-success', 'step-04-journeys', 'step-05-domain', 'step-06-innovation', 'step-07-project-type', 'step-08-scoping', 'step-09-functional', 'step-10-nonfunctional', 'step-11-polish', 'step-12-complete']
+stepsCompleted: ['step-01-init', 'step-02-discovery', 'step-02b-vision', 'step-02c-executive-summary', 'step-03-success', 'step-04-journeys', 'step-05-domain', 'step-06-innovation', 'step-07-project-type', 'step-08-scoping', 'step-09-functional', 'step-10-nonfunctional', 'step-11-polish', 'step-12-complete', 'step-e-01-discovery', 'step-e-02-review', 'step-e-03-edit']
 inputDocuments:
   - 'initial_docs/shared_cos_platform_architecture.md'
   - 'initial_docs/shared_cos_platform_diagrams_and_handoff.md'
@@ -10,6 +10,8 @@ documentCounts:
   brainstorming: 0
   projectDocs: 3
 workflowType: 'prd'
+workflow: 'edit'
+date: '2026-04-16'
 classification:
   projectType: 'api_backend_platform'
   domain: 'enterprise_ai_knowledge_management'
@@ -25,6 +27,10 @@ classification:
   connectivityChannels:
     - 'bidirectional messaging (e.g. WhatsApp): inbound Q&A + note capture, outbound briefings/digests'
     - 'email with attachments as ingestion channel'
+lastEdited: '2026-05-05'
+editHistory:
+  - date: '2026-05-05'
+    changes: 'Clarified canonical document identity, made cross-source exact-byte deduplication mandatory, aligned phased scope sequencing, and rewrote knowledge-ingestion requirements with sequential FR renumbering.'
 ---
 
 # Product Requirements Document - Chief of Staff AI Platform
@@ -114,6 +120,7 @@ _At this stage, all content is manually ingested (no live connectors). This is e
 ### Growth — First Real Users (Phases 2–3)
 
 What makes it genuinely operational for two users with different roles:
+- Canonical document identity and exact-byte deduplication foundation for cross-source ingestion before connector expansion
 - Calendar and email connectivity (read): meeting context, email-based document ingestion
 - Bidirectional messaging channel (Telegram initially; WhatsApp via Twilio as a later option): inbound questions and note capture, outbound briefs and digests
 - Role pack abstraction: second role configured without code changes
@@ -237,9 +244,11 @@ For this phase, the platform uses public LLM provider APIs (Claude and others). 
 ### Immutable Document Store
 
 Original source documents are **never deleted or overwritten**. The canonical store is append-only for source material:
-- New versions of a document can be uploaded and will be treated as a new version record
-- Deduplication on ingest is desirable (detect exact or near-duplicate content and flag rather than blindly re-index)
-- The original file and its ingestion metadata are preserved permanently
+- Canonical document identity is defined independently from any one `source_path`, connector locator, or managed-copy filename
+- Re-ingest from the same logical source creates a new version record when content changes
+- Exact-byte deduplication across all ingestion sources is mandatory: identical bytes received from different paths or connectors do not create duplicate canonical documents or duplicate embeddings
+- Provenance references (local path, Gmail attachment URI, MCP note URI, message ID, and similar locators) are preserved as source records linked to the canonical document or version they produced
+- Managed originals and Markdown working copies are preserved permanently using stable internal identifiers so filename and path collisions do not redefine identity
 - This simplifies provenance, supports citation integrity, and means retrieval results always have a traceable source
 
 ### Channel Sensitivity Hierarchy
@@ -423,11 +432,13 @@ _This section expands on the Product Scope summary above with detailed capabilit
 - All external connectors (Gmail, Calendar, Telegram)
 - Web search tool
 - Scheduled jobs / daily brief
-- Deduplication on ingest (nice-to-have, not a blocker)
+- Cross-source canonical identity hardening and exact-byte deduplication for connector-driven ingestion
+- Semantic near-duplicate warning layer
 
 ### Post-MVP Features
 
 **Phase 2 — Growth (First Real Users):**
+- Canonical document identity and exact-byte deduplication foundation across all ingestion sources
 - Gmail connector (OAuth 2.0): read email, ingest attachments
 - Google Calendar connector: read upcoming events for meeting prep
 - Telegram bot: bidirectional — inbound questions and note capture, outbound scheduled briefs
@@ -435,7 +446,7 @@ _This section expands on the Product Scope summary above with detailed capabilit
 - Web search MCP tool (Brave or Tavily): LLM-callable for live external context
 - Scheduled jobs: daily brief generation, calendar check
 - Second role pack: validates role pack abstraction works without code changes
-- Basic deduplication on ingest
+- Semantic near-duplicate warning layer after exact-byte deduplication and identity resolution are in place
 
 **Phase 3 — Expansion (Vision):**
 - Governance hardening: permissions, audit trail, confidence scoring
@@ -481,57 +492,58 @@ _Items marked (Growth) are scoped to Phase 2. All others are MVP (Phase 1)._
 - **FR2:** System extracts text and metadata from PDF, Word document, Markdown, and plain text files during ingestion
 - **FR3:** System normalises all ingested content to a Markdown working copy stored alongside the original
 - **FR4:** System stores the original source file unchanged and permanently in the document store
-- **FR5:** System records provenance metadata for each ingested document (source path, ingestion timestamp, file hash, version number)
-- **FR6:** System creates a new version record when a document with matching identity is re-ingested, preserving all prior versions
-- **FR7:** System detects near-duplicate content on ingest and flags it without silently re-indexing _(Growth)_
-- **FR8:** User can ingest a short note or thought as a document by sending a message via a connected messaging channel _(Growth)_
-- **FR9:** System ingests email message bodies and attachments received via a connected email account _(Growth)_
+- **FR5:** System records provenance metadata for each ingested document and source reference, including source locator or external ID, ingestion timestamp, content hash, and version number where applicable
+- **FR6:** System creates a new version record when the same logical source is re-ingested with changed content, preserving all prior versions
+- **FR7:** System performs exact-byte deduplication across all ingestion sources and avoids re-embedding or duplicating canonically identical content
+- **FR8:** System flags ingested content as a semantic near-duplicate when it exceeds a configurable similarity threshold against existing content and does not silently re-index it _(Growth)_
+- **FR9:** User can ingest a short note or thought as a document by sending a message via a connected messaging channel _(Growth)_
+- **FR10:** System ingests email message bodies and attachments received via a connected email account _(Growth)_
 
 ### Knowledge Retrieval
 
-- **FR10:** User can submit a natural language query and receive a grounded answer with source citations
-- **FR11:** System retrieves relevant content using both keyword and semantic (embedding-based) search
-- **FR12:** System includes document-level and chunk-level citations in every retrieval response
-- **FR13:** System applies role pack retrieval priorities when ranking search results
-- **FR14:** User can list all documents currently in the knowledge base with their metadata
-- **FR15:** System can invoke a web search to augment local retrieval when local context is insufficient _(Growth)_
+- **FR11:** User can submit a natural language query and receive a grounded answer with source citations
+- **FR12:** System retrieves relevant content using both keyword and semantic (embedding-based) search
+- **FR13:** System includes document-level and chunk-level citations in every retrieval response
+- **FR14:** System applies role pack retrieval priorities when ranking search results
+- **FR15:** User can list all documents currently in the knowledge base with their metadata
+- **FR16:** System can invoke a web search to augment local retrieval when local retrieval returns fewer than a configured minimum number of relevant cited results _(Growth)_
 
 ### Reasoning & Output
 
-- **FR16:** System synthesises retrieved content into a response that matches the active role pack's tone and style
-- **FR17:** System can produce common workflow outputs: summary, briefing, draft, comparison, and prioritisation
-- **FR18:** System delivers a scheduled briefing at a configured time via a configured output channel _(Growth)_
-- **FR19:** System prepares meeting context from upcoming calendar events at a configured interval before each meeting _(Growth)_
-- **FR20:** System only delivers output to explicitly configured channels or the local interface — no uncontrolled output paths
+- **FR17:** System synthesises retrieved content into a response that matches the active role pack's tone and style
+- **FR18:** System can produce common workflow outputs: summary, briefing, draft, comparison, and prioritisation
+- **FR19:** System delivers a scheduled briefing at a configured time via a configured output channel _(Growth)_
+- **FR20:** System prepares meeting context from upcoming calendar events at a configured interval before each meeting _(Growth)_
+- **FR21:** System only delivers output to explicitly configured channels or the local interface — no uncontrolled output paths
 
 ### Role Pack Management
 
-- **FR21:** Operator can define a role pack in a configuration file specifying role goals, tone and style rules, knowledge taxonomy, active workflows, stakeholder map, and retrieval priorities
-- **FR22:** Operator can activate a different role pack by updating the configuration file, without modifying application code
-- **FR23:** System loads and applies the active role pack at startup across all retrieval and reasoning operations
-- **FR24:** User can retrieve a summary of the currently active role context via the platform interface
+- **FR22:** Operator can define a role pack in a configuration file specifying role goals, tone and style rules, knowledge taxonomy, active workflows, stakeholder map, and retrieval priorities
+- **FR23:** Operator can activate a different role pack by updating the configuration file, without modifying application code
+- **FR24:** System loads and applies the active role pack at startup across all retrieval and reasoning operations
+- **FR25:** User can retrieve a summary of the currently active role context via the platform interface
 
 ### Platform Operations
 
-- **FR25:** Operator can check the health status of all platform components with a single CLI command
-- **FR26:** Operator can restart all platform components with a single CLI command
-- **FR27:** Operator can retrieve diagnostic logs with a single CLI command, in a format suitable for support handoff
-- **FR28:** System reports component failures with a plain-language description of the problem and specific recovery steps
-- **FR29:** Operator can provision a complete new platform instance using a single Docker Compose startup command
-- **FR30:** Operator can configure all platform settings — API keys, role pack path, output channel config, connector credentials — via a single YAML file
+- **FR26:** Operator can check the health status of all platform components with a single CLI command
+- **FR27:** Operator can restart all platform components with a single CLI command
+- **FR28:** Operator can retrieve diagnostic logs with a single CLI command, in a format suitable for support handoff
+- **FR29:** System reports component failures with a recovery message that names the failing component, states the user-visible impact, and provides specific recovery steps
+- **FR30:** Operator can provision a complete new platform instance through a single documented bootstrap command or workflow
+- **FR31:** Operator can configure all platform settings — API keys, role pack path, output channel config, connector credentials — through a single human-editable configuration artifact
 
 ### External Connectivity _(Growth)_
 
-- **FR31:** System reads upcoming events from a connected Google Calendar account for use in meeting prep and scheduled briefs
-- **FR32:** System reads and ingests email messages and attachments from a connected Gmail account
-- **FR33:** User can send a question or note to the platform via Telegram and receive a response
-- **FR34:** System sends scheduled briefs and digests to a user via a configured Telegram or email channel
+- **FR32:** System reads upcoming events from a connected Google Calendar account for use in meeting prep and scheduled briefs
+- **FR33:** System reads and ingests email messages and attachments from a connected Gmail account
+- **FR34:** User can send a question or note to the platform via Telegram and receive a response
+- **FR35:** System sends scheduled briefs and digests to a user via a configured Telegram or email channel
 
 ### Security & Governance
 
-- **FR35:** System enforces egress control — responses are delivered only to configured output channels or the local interface
-- **FR36:** System preserves all ingested source documents permanently — originals are never modified or deleted
-- **FR37:** Operator can view the full list of ingested documents with their provenance metadata and version history
+- **FR36:** System enforces egress control — responses are delivered only to configured output channels or the local interface
+- **FR37:** System preserves all ingested source documents permanently — originals are never modified or deleted
+- **FR38:** Operator can view the full list of ingested documents with their provenance metadata and version history
 
 ## Non-Functional Requirements
 
@@ -540,32 +552,32 @@ _Items marked (Growth) are scoped to Phase 2. All others are MVP (Phase 1)._
 - **NFR1:** Retrieval queries return a response within 5 seconds under normal operating conditions (local deployment, knowledge base up to 10,000 documents)
 - **NFR2:** Document ingestion processes at a rate of at least 10 documents per minute for standard file types (PDF, Word, Markdown) on typical consumer hardware
 - **NFR3:** The MCP server responds to tool calls within 2 seconds for non-retrieval operations (`get_status`, `get_role_context`, `list_documents`)
-- **NFR4:** System startup (all containers healthy and ready to serve) completes within 60 seconds on a clean `docker compose up`
+- **NFR4:** System startup from a clean deployment state completes within 60 seconds with all required services healthy and ready to serve
 
 ### Security
 
 - **NFR5:** API keys and connector credentials are stored only in the local configuration file and are never logged, included in responses, or transmitted beyond their intended API endpoint
 - **NFR6:** All LLM API calls are made over HTTPS — no plaintext transmission of document content to external providers
 - **NFR7:** Output is delivered exclusively to channels listed in the active configuration — the system must fail closed (suppress output) rather than fail open (deliver to an unintended destination) if a channel is misconfigured
-- **NFR8:** The platform does not expose any network ports beyond localhost by default in the Docker Compose configuration
+- **NFR8:** The platform does not expose any network ports beyond localhost by default in its standard deployment configuration
 
 ### Reliability
 
 - **NFR9:** The platform recovers to a fully operational state within 30 seconds of a `cos restart` command under normal conditions
-- **NFR10:** A failure in any single component (e.g. ingestion worker crashes) does not cause the MCP server or retrieval layer to become unavailable
-- **NFR11:** Connector failures (Gmail API unavailable, Telegram bot unreachable) are handled gracefully — the core retrieval and Q&A path remains available regardless of connector state _(Growth)_
+- **NFR10:** A failure in any single non-core component (e.g. ingestion worker crash) does not make the MCP server or retrieval layer unavailable for more than 30 seconds under normal recovery conditions
+- **NFR11:** Connector failures (Gmail API unavailable, Telegram bot unreachable) surface an explicit degraded-status or error signal within 60 seconds while the core retrieval and Q&A path remains available regardless of connector state _(Growth)_
 - **NFR12:** The system preserves knowledge base integrity across unclean shutdowns — no partial ingestion records or corrupted embeddings result from a container crash
 
 ### Maintainability
 
 - **NFR13:** The complete platform can be provisioned on a new machine by a technically competent person following the setup documentation, without assistance, in under 2 hours
-- **NFR14:** Routine operation requires no manual intervention — the platform runs unattended once started
-- **NFR15:** All configuration is expressed in a single `config.yaml` file — no environment-specific code changes are required to switch roles, providers, or channels
-- **NFR16:** The platform is deployable on a cloud Linux VM using the same Docker Compose configuration as local deployment, without code changes
+- **NFR14:** Routine operation requires no scheduled manual intervention during a 7-day normal-use period after startup
+- **NFR15:** All configuration is expressed in a single human-editable configuration file — no environment-specific code changes are required to switch roles, providers, or channels
+- **NFR16:** The platform is deployable on a cloud Linux VM using the standard deployment package and configuration model used locally, without code changes
 
 ### Integration
 
-- **NFR17:** The MCP server conforms to the published MCP specification and is verified to work with Claude Desktop
+- **NFR17:** The MCP server conforms to the published MCP specification and passes an interoperability test against Claude Desktop for the supported tool set
 - **NFR18:** The embedding model is configurable — switching providers requires only a config change, not a code change
 - **NFR19:** The LLM provider is configurable — the platform works with any provider supported by the model adapter without modifying ingestion, storage, or retrieval components
-- **NFR20:** External connector credentials (Google OAuth tokens, Telegram bot token) are stored and refreshed locally without requiring re-authorisation under normal operation _(Growth)_
+- **NFR20:** External connector credentials (Google OAuth tokens, Telegram bot token) are stored and refreshed locally without requiring re-authorisation during a 30-day normal-operation period _(Growth)_

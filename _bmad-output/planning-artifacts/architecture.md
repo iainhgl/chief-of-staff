@@ -72,13 +72,15 @@ Critical NFRs that will drive architectural decisions:
 
 ### Cross-Cutting Concerns Identified
 
-1. **Provenance & citation integrity** — every stored chunk must carry a traceable link back to its source document and ingestion record; this constraint touches ingestion, storage schema, retrieval response format, and the MCP tool contract
-2. **Egress control** — all output paths (MCP responses, scheduled briefs, connector replies) must validate against configured channels before delivering; must fail closed
-3. **Role pack propagation** — the active role pack affects retrieval ranking weights, reasoning tone, output channel permissions, and scheduled workflow definitions; it is loaded at startup and must be consistently applied across all components without tight coupling
-4. **Provider-agnostic abstraction** — two independent adapter boundaries: embedding (ingestion + retrieval) and LLM (reasoning); must be isolated so swapping one does not affect the other
-5. **Component isolation** — ingestion worker, MCP server, and scheduler must be separate processes; a crash in one must not affect the others; shared state only via the database
-6. **Immutability** — original source files and their ingestion metadata are write-once; no update or delete paths for source material; version records are additive
-7. **Configuration-driven behaviour** — no environment-specific branching in code; all variable behaviour (role, provider, channels) resolved from `config.yaml` at startup
+1. **Canonical identity boundary** — canonical content identity is separate from provenance: immutable `content_blobs` are deduplicated by SHA-256 and addressed by UUID, while `documents` capture logical lineage and `sources` capture where content came from; filenames and connector locators never become canonical identity by accident
+2. **Provenance & citation integrity** — every stored chunk must trace through `document_version` and `source_version` (or an equivalent linking model) back to the exact source observation that produced it; this constraint touches ingestion, storage schema, retrieval response format, and the MCP tool contract
+3. **Deterministic ingest outcomes** — the ingest workflow must resolve the same four cases consistently across CLI, connectors, and synthetic note capture: new source + new content, known source + unchanged content, known source + changed content, and new source + known content
+4. **Egress control** — all output paths (MCP responses, scheduled briefs, connector replies) must validate against configured channels before delivering; must fail closed
+5. **Role pack propagation** — the active role pack affects retrieval ranking weights, reasoning tone, output channel permissions, and scheduled workflow definitions; it is loaded at startup and must be consistently applied across all components without tight coupling
+6. **Provider-agnostic abstraction** — two independent adapter boundaries: embedding (ingestion + retrieval) and LLM (reasoning); must be isolated so swapping one does not affect the other
+7. **Component isolation** — ingestion worker, MCP server, and scheduler must be separate processes; a crash in one must not affect the others; shared state only via the database
+8. **Immutability of managed copies** — original bytes and Markdown working copies are write-once artifacts stored under internal storage keys derived from content identity, not under user-provided filenames; version records are additive and previous versions remain addressable
+9. **Configuration-driven behaviour** — no environment-specific branching in code; all variable behaviour (role, provider, channels) resolved from `config.yaml` at startup
 
 ## Starter Template Evaluation
 
@@ -136,7 +138,8 @@ cos/
         │   └── chunker.py      # text splitting with overlap
         ├── store/
         │   ├── db.py           # psycopg3 async pool + pgvector registration
-        │   ├── models.py       # Document, Chunk, Embedding, ProvenanceRecord
+        │   ├── models.py       # Document, DocumentVersion, ContentBlob, Source,
+        │   │                   # SourceVersion, Chunk, Embedding, ProvenanceRecord
         │   └── migrations/     # SQL migration files (applied at startup)
         ├── retrieval/
         │   ├── search.py       # hybrid keyword + semantic search
@@ -174,6 +177,9 @@ cos/
 
 **Critical Decisions (Block Implementation):**
 - Raw SQL schema with startup migrations — no ORM; psycopg3 async directly
+- Canonical identity is split explicitly across `documents`, `document_versions`, `content_blobs`, `sources`, and `source_versions` (or an equivalent linking model); `source_path` or connector locator must not act as the effective document key
+- `content_blobs` are identified by UUID plus unique SHA-256 hash; exact-byte deduplication happens before chunking, embedding, and managed-copy writes
+- Managed originals and Markdown copies are addressed by internal storage key (`content_blob_id` and/or SHA-256), never by source filename or connector-provided name
 - Thin service layer (`cos.services.*`) — only public interface between modules
 - `OutputRouter` as sole exit point — fail-closed egress enforcement
 - Three-container Compose structure — postgres, tika, cos
@@ -181,13 +187,13 @@ cos/
 
 **Important Decisions (Shape Architecture):**
 - 1024 token / 100 token overlap chunk defaults
-- CLI-triggered ingestion for Phase 1; schema pre-designed for Phase 2 job queue
+- CLI-triggered ingestion for Phase 1; the same ingest decision engine must already support the four canonical identity outcomes that future connectors will use
 - Structured errors returned in MCP tool results (not protocol errors)
 - JSON logging to stdout; `cos status` via Docker health checks
 - `tokens/` directory for OAuth (separate from `config.yaml`)
 
 **Deferred Decisions (Post-MVP):**
-- Background job queue (Postgres `jobs` table) — Phase 2, when connectors need to trigger ingestion; if Phase 1 CLI approach proves problematic, move to this pattern earlier
+- Background job queue (Postgres `jobs` table) — Phase 2, after the canonical identity model is in place; connector-triggered ingestion must build on the same `content_blob`/`source_version` decisions rather than inventing a second path
 - OAuth token flow implementation — `tokens/` directory structure decided; implementation deferred to Growth tier
 - Multi-provider LLM adapter — adapter interface defined in Phase 1; second provider wired in Phase 2+
 - `cos re-embed` CLI command — Phase 2; re-embeds all existing chunks using the currently configured embedding provider; required when switching embedding models; implementation: re-embed into temp table, swap atomically in a transaction to avoid mixed-model state; the `embeddings` table `model` and `provider` columns make it possible to detect which model was used and verify consistency before and after
@@ -199,13 +205,26 @@ cos/
 | Decision | Choice | Rationale |
 |---|---|---|
 | Schema strategy | Raw SQL + migration files | Solo build; stay close to the data; no ORM magic; easy to read and debug |
-| Migration execution | Applied by MCP server at startup | Single operator; `docker compose up` should just work with no extra steps |
+| Migration execution | Applied by MCP server at startup | Single operator; `docker compose up` should just work with no extra steps; the identity-hardening migration must land before Epic 6 connector stories |
+| Canonical logical identity | `documents` table represents logical document lineage, independent of path, filename, or connector locator | Prevents provenance locators from silently becoming the canonical key |
+| Content identity | `content_blobs` table (or equivalent) with UUID primary key and unique SHA-256 hash | Exact-byte deduplication must work across all ingestion channels before chunks and embeddings are created |
+| Source identity | `sources` table with `source_type`, `source_locator`, and `source_alias` | Preserves where content came from while keeping connector-specific locators out of canonical document identity |
+| Source-to-version linkage | `source_versions` table, or an equivalent additive linking model, connects a source observation to the resulting `document_version` and `content_blob` | Makes re-ingest behaviour explicit and citation-safe without overloading `documents` |
+| Document versioning | `document_versions` are additive within a `document`; changed content on the same logical source creates a new version row | Preserves history while keeping one canonical lineage per logical document |
+| Chunk ownership | `chunks` and `embeddings` belong to `document_version_id`; the version points to the immutable `content_blob_id` | Retrieval can cite the exact version while embeddings are never duplicated for unchanged bytes |
+| Managed copy addressing | Canonical originals and Markdown copies are stored by internal ID/hash, not by filename | Avoids collisions and ensures repeat ingest of the same bytes resolves to the same stored artifacts |
 | Chunk size | 1024 tokens | Mixed corpus (strategy docs, frameworks, emails); larger chunks suit narrative content |
 | Chunk overlap | 100 tokens | Preserves cross-boundary context without excessive duplication |
 | Document store | Append-only; version records additive | Immutability per PRD; originals never modified or deleted |
-| Schema layout | `documents` → `chunks` → `embeddings`; `document_versions` for provenance | Clean FK chain; citation integrity traceable at chunk level |
+| Schema layout | `documents` → `document_versions` → `chunks` → `embeddings`, with shared `content_blobs` and provenance via `sources` → `source_versions` | Clean FK chain; citation integrity traceable at chunk level without path-centric identity |
 
-**Phase 2 design note:** The `documents` table will include a `status` column from day one. A `jobs` table (ingestion job queue) will be added in Phase 2 without requiring schema rework — the document model already supports it.
+**Ingest outcome model (locked before Epic 6):**
+- **New source + new content** — create `source`, `content_blob`, `document`, `document_version`, and `source_version`; write canonical original + Markdown copy under the internal storage key; chunk and embed once
+- **Known source + unchanged content** — record the ingest attempt against the existing source lineage, but do not create a new `document_version`, `content_blob`, managed copy, chunk set, or embedding set
+- **Known source + changed content** — keep the existing `document` and `source`, create a new `content_blob`, a new `document_version`, and a new `source_version`; write new managed copies under the new storage key; chunk and embed the new version only
+- **New source + known content** — create the new `source` and linking `source_version`, attach them to the existing `content_blob` and canonical `document_version`, and skip duplicate chunking, embedding, and managed-copy storage
+
+**Phase 2 design note:** The `documents` table will include a `status` column from day one. A `jobs` table (ingestion job queue) will be added in Phase 2 without requiring schema rework — the canonical identity model already supports it.
 
 ---
 
@@ -242,8 +261,22 @@ cos/
 | Startup sequence | Postgres health check → Tika health check → cos (migrations then serve) | Ensures dependencies are ready; migration applied once per startup |
 | Logging | Structured JSON to stdout | Docker-native; `cos logs` wraps `docker compose logs`; cloud-VM portable |
 | Health checks | Docker Compose `healthcheck` per container; `cos status` formats output | Plain-language status for non-technical users; no additional service endpoints needed |
-| Recovery | `cos restart` = `docker compose restart`; migrations re-run idempotently | 30-second recovery target (NFR9); idempotent migrations mean no manual DB repair |
-| Data persistence | Named Docker volume for Postgres data; local bind mount for originals + Markdown copies | Survives container restarts and rebuilds; portable to cloud VM |
+| Recovery | `cos restart` = `docker compose restart`; migrations re-run idempotently and ingest replays resolve to the same source/hash outcome | 30-second recovery target (NFR9); deterministic identity rules mean no manual de-duplication or DB repair after restart |
+| Data persistence | Named Docker volume for Postgres data; local bind mount or object-storage path for managed originals + Markdown copies addressed by internal ID/hash | Survives container restarts and rebuilds without making filenames part of canonical identity; portable to cloud VM |
+
+---
+
+### Data Persistence / Recovery Model
+
+| Decision | Choice | Rationale |
+|---|---|---|
+| Durable relational state | Postgres persists `documents`, `document_versions`, `content_blobs`, `sources`, `source_versions`, `chunks`, and `embeddings` on a named volume | Canonical identity, provenance, and retrieval state must survive container restarts intact |
+| Managed original storage | Store extracted originals under an internal storage path derived from `content_blob_id` and/or SHA-256, not the inbound filename | Same-named files from different sources must not collide or redefine identity |
+| Managed Markdown storage | Store normalized Markdown copies under the same internal identity scheme as the original blob | The working copy and original remain paired without relying on user-provided names |
+| Reuse of known content | When a new source resolves to an existing `content_blob`, reuse the existing managed original and Markdown copy rather than writing duplicates | Exact-byte deduplication must reduce storage and retrieval noise across sources |
+| Transactional promotion | A `document_version` is not promoted as current until the associated canonical storage references and chunk/embed records are persisted successfully | Prevents partially indexed versions from becoming visible after crashes or interrupted ingest runs |
+| Recovery semantics | After an unclean shutdown, re-running ingest re-evaluates the same source + hash inputs and lands in the same one of the four ingest outcomes | Recovery is operationally simple because identity rules are deterministic and additive |
+| Migration/backfill expectation | Existing path-centric Phase 1 data is migrated onto the canonical identity model before Epic 6 connector work begins | This is the lowest-risk point to absorb identity hardening before external sources multiply provenance cases |
 
 ---
 
@@ -251,15 +284,18 @@ cos/
 
 **Implementation Sequence:**
 1. Docker Compose scaffold (postgres + pgvector + tika + cos skeleton)
-2. DB schema + migration runner (applied at cos startup)
-3. Config loader (`cos/config.py` — Pydantic model from `config.yaml`)
-4. Service layer stubs (`cos/services/` — interfaces defined before implementations)
-5. Ingestion pipeline (`cos/ingestion/` → `cos/services/ingestion`)
-6. Retrieval layer (`cos/retrieval/` → `cos/services/retrieval`)
-7. MCP server tools (consume service layer only)
-8. CLI (`cos status`, `cos ingest`, `cos logs`, `cos restart`)
-9. Role pack loader (YAML → typed config; consumed by retrieval + MCP tools)
-10. OutputRouter (used by MCP tools and, later, scheduler/connectors)
+2. DB schema + migration runner with canonical identity tables (`documents`, `document_versions`, `content_blobs`, `sources`, `source_versions` or equivalent)
+3. Managed storage layout and storage helpers for canonical originals + Markdown copies addressed by internal ID/hash
+4. Config loader (`cos/config.py` — Pydantic model from `config.yaml`)
+5. Service layer stubs (`cos/services/` — interfaces defined before implementations)
+6. Ingest decision engine that resolves the four source/content outcomes before any chunking or embedding
+7. Ingestion pipeline (`cos/ingestion/` → `cos/services/ingestion`) that chunks and embeds only genuinely new content versions
+8. Retrieval layer (`cos/retrieval/` → `cos/services/retrieval`) that cites `document_version` plus source provenance cleanly
+9. MCP server tools (consume service layer only)
+10. CLI (`cos status`, `cos ingest`, `cos logs`, `cos restart`)
+11. Role pack loader (YAML → typed config; consumed by retrieval + MCP tools)
+12. OutputRouter (used by MCP tools and, later, scheduler/connectors)
+13. Background jobs, Gmail, Calendar, and synthetic note-connectors only after the canonical identity foundation is proven stable
 
 **Cross-Component Dependencies:**
 - Every component depends on `cos/config.py` — build this first, build it right
@@ -279,8 +315,8 @@ cos/
 
 | Element | Convention | Example |
 |---|---|---|
-| Tables | snake_case, plural | `documents`, `chunks`, `embeddings`, `document_versions` |
-| Columns | snake_case | `source_path`, `ingested_at`, `chunk_index` |
+| Tables | snake_case, plural | `documents`, `document_versions`, `content_blobs`, `source_versions` |
+| Columns | snake_case | `content_blob_id`, `source_locator`, `chunk_index` |
 | Primary keys | `id` (UUID) | `id UUID PRIMARY KEY DEFAULT gen_random_uuid()` |
 | Foreign keys | `{table_singular}_id` | `document_id`, `chunk_id` |
 | Indexes | `idx_{table}_{column(s)}` | `idx_chunks_document_id`, `idx_embeddings_chunk_id` |
@@ -292,7 +328,7 @@ cos/
 | Python modules/files | snake_case | `ingestion/pipeline.py`, `store/db.py` |
 | Python classes | PascalCase | `DocumentRecord`, `OutputRouter`, `CosConfig` |
 | Python functions/methods | snake_case | `get_pool()`, `retrieve_chunks()`, `send_output()` |
-| Python variables | snake_case | `chunk_size`, `source_path`, `role_pack` |
+| Python variables | snake_case | `chunk_size`, `content_blob_id`, `role_pack` |
 | Constants | UPPER_SNAKE_CASE | `DEFAULT_CHUNK_SIZE`, `MAX_RETRIES` |
 
 ### Structure Patterns
@@ -323,8 +359,10 @@ cos/
 ```python
 {
     "content": "...",
-    "source_document_id": "uuid",
-    "source_path": "path/to/original",
+    "document_id": "uuid",
+    "document_version_id": "uuid",
+    "source_locator": "file:///managed/originals/...",
+    "source_alias": "board-pack-q2.pdf",
     "chunk_index": 3,
     "score": 0.87
 }
@@ -429,10 +467,12 @@ cos/
         ├── store/                  # data layer — never imported directly by mcp_server or cli
         │   ├── __init__.py
         │   ├── db.py               # psycopg3 async pool; pgvector type registration
-        │   ├── models.py           # DocumentRecord, ChunkRecord, EmbeddingRecord,
-        │   │                       # DocumentVersion, ProvenanceRecord dataclasses
+        │   ├── models.py           # DocumentRecord, DocumentVersionRecord,
+        │   │                       # ContentBlobRecord, SourceRecord, SourceVersionRecord,
+        │   │                       # ChunkRecord, EmbeddingRecord, ProvenanceRecord dataclasses
         │   └── migrations/         # numbered SQL files; applied idempotently at startup
-        │       ├── 001_initial.sql # documents, chunks, embeddings, document_versions tables
+        │       ├── 001_initial.sql # documents, document_versions, content_blobs, sources,
+        │       │                   # source_versions, chunks, embeddings tables
         │       └── 002_jobs.sql    # (Phase 2) jobs table for background ingestion queue
         │
         ├── ingestion/              # ingestion implementation — consumed via services layer
@@ -541,7 +581,8 @@ cos ingest <path>
     → extractor.py (Tika → Markdown)
     → chunker.py (Markdown → chunks)
     → embedder.py (chunks → vectors via embedding adapter)
-    → store/db.py (write documents, chunks, embeddings, provenance — transactional)
+    → store/db.py (write content_blobs, documents, document_versions, source_versions,
+                   chunks, embeddings, provenance — transactional)
 ```
 
 **Query path:**
@@ -678,7 +719,7 @@ The project structure directly maps to each architectural boundary: `cos/service
 
 **Important notes for implementation:**
 - `config.yaml.example` must document all required top-level keys (`role_pack`, `llm`, `embedding`, `channels`, `connectors`) — this is the contract that `CosConfig` implements
-- `001_initial.sql` must include both `CREATE EXTENSION IF NOT EXISTS vector` and the `status` column on `documents` from day one
+- `001_initial.sql` must include both `CREATE EXTENSION IF NOT EXISTS vector` and the canonical identity tables/constraints (`content_blobs`, `sources`, `source_versions`, `documents.status`) from day one
 - `conftest.py` test fixtures should use a real Postgres instance (test DB), not mocks — the pgvector behaviour is not reliably mockable
 
 **Nice-to-have (not blocking):**

@@ -1,7 +1,7 @@
 ---
 type: 'architecture-diagrams'
 architectureRef: 'architecture.md'
-date: '2026-04-17'
+date: '2026-05-05'
 ---
 
 # CoS Platform — Architecture Diagrams
@@ -44,7 +44,7 @@ C4Context
     Person(iain, "Iain (Operator)", "Configures instances, sets up role packs")
     Person(users, "Sarah / Marcus (Users)", "Senior professionals. Interact via Telegram; receive proactive briefs.")
 
-    System(cos, "CoS Platform", "Now includes connectors, scheduler, and bidirectional messaging.")
+    System(cos, "CoS Platform", "Now includes canonical identity hardening, connectors, scheduler, and bidirectional messaging.")
 
     System_Ext(claude_desktop, "Claude Desktop", "MCP client")
     System_Ext(claude_api, "Claude API (Anthropic)", "LLM synthesis")
@@ -100,11 +100,11 @@ C4Container
     UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")
 ```
 
-### Phase 2 — Container additions
+### Phase 2 — Container additions and baseline migration
 
 ```mermaid
 C4Container
-    title CoS Platform — Container Diagram (Phase 2 additions to cos)
+    title CoS Platform — Container Diagram (Phase 2 migration + additions on top of implemented baseline)
 
     Person(users, "Sarah / Marcus", "Role pack users")
     System_Ext(telegram_api, "Telegram Bot API", "Bidirectional messaging")
@@ -113,8 +113,8 @@ C4Container
     System_Ext(web_search, "Web Search API", "Live internet search")
 
     System_Boundary(cos_platform, "CoS Platform — Docker Compose (Phase 2)") {
-        Container(cos, "cos (extended)", "Python 3.12 / uv", "Now also runs APScheduler for scheduled briefs. Adds Gmail, Calendar, and Telegram connector modules. Adds web_search MCP tool exposed to Claude Desktop.")
-        ContainerDb(postgres, "Postgres + pgvector", "pgvector/pgvector:pg16", "Adds jobs table (002_jobs.sql) for background connector-triggered ingestion queue.")
+        Container(cos, "cos (extended)", "Python 3.12 / uv", "Runs the Epic 6 migration/hardening flow on top of the implemented Phase 1 baseline, then adds the canonical ingest decision engine, APScheduler for scheduled briefs, and Gmail, Calendar, and Telegram connector modules. Adds web_search and ingest_document MCP tools.")
+        ContainerDb(postgres, "Postgres + pgvector", "pgvector/pgvector:pg16", "Carries the implemented baseline schema from Epics 1-5, then is migrated in Epic 6 to canonical identity tables for content blobs and source lineage; jobs table (002_jobs.sql) is added for background connector-triggered ingestion.")
         Container(tika, "Apache Tika", "apache/tika", "Unchanged from Phase 1.")
         ContainerDb(filesystem, "Local Filesystem", "Docker bind mount", "Adds tokens/ directory for OAuth credentials (gitignored).")
     }
@@ -148,9 +148,9 @@ C4Component
         Component(mcp_server, "MCP Server", "cos/mcp_server/ — FastMCP 1.27.0", "FastMCP app (server.py). Tool definitions in tools.py: retrieve, get_role_context, list_documents, get_status. Calls services layer only. Entrypoint: cos-mcp.")
         Component(cli, "CLI", "cos/cli.py — Typer", "Commands: cos status, cos restart, cos logs, cos ingest. Calls services layer only. Entrypoint: cos.")
         Component(services, "Service Layer", "cos/services/", "IngestService, RetrievalService, RolePackService, OutputService, HealthService. The only permitted cross-module import path. Thin orchestration — no business logic.")
-        Component(ingestion, "Ingestion Pipeline", "cos/ingestion/", "pipeline.py orchestrates extract→normalise→chunk→embed→store. extractor.py wraps tika-client. chunker.py: 1024 token chunks, 100 token overlap. embedder.py: configurable embedding adapter.")
-        Component(retrieval, "Retrieval Engine", "cos/retrieval/", "search.py: hybrid tsvector keyword + pgvector cosine similarity. Role pack retrieval weights applied to ranking. citations.py: formats CitedResults with full provenance.")
-        Component(store, "Data Store", "cos/store/", "db.py: psycopg3 async pool with pgvector type registration. models.py: DocumentRecord, ChunkRecord, EmbeddingRecord, ProvenanceRecord dataclasses. migrations/: idempotent numbered SQL files applied at startup.")
+        Component(ingestion, "Ingestion Pipeline", "cos/ingestion/", "pipeline.py orchestrates extract→normalise→hash→dedupe decision→chunk→embed→store. extractor.py wraps tika-client. chunker.py: 1024 token chunks, 100 token overlap. embedder.py: configurable embedding adapter.")
+        Component(retrieval, "Retrieval Engine", "cos/retrieval/", "search.py: hybrid tsvector keyword + pgvector cosine similarity. Role pack retrieval weights applied to ranking. citations.py: formats CitedResults with source_alias plus full provenance.")
+        Component(store, "Data Store", "cos/store/", "db.py: psycopg3 async pool with pgvector type registration. models.py: DocumentRecord, DocumentVersionRecord, ContentBlobRecord, SourceRecord, SourceVersionRecord, ChunkRecord, EmbeddingRecord. migrations/: idempotent numbered SQL files applied at startup.")
         Component(rolepack, "Role Pack Loader", "cos/rolepack/", "loader.py reads YAML role pack → RolePackConfig (Pydantic). Contains: role goals, tone and style, knowledge taxonomy, retrieval priorities, output channels, stakeholder map.")
         Component(output_router, "OutputRouter", "cos/output/router.py", "Sole exit point for all user-facing output. Validates channel against configured channels. Fail-closed: suppresses and logs on invalid channel. Never raises an unhandled exception.")
         Component(llm, "LLM Adapter", "cos/llm/", "adapter.py: LLMAdapter protocol defining complete() contract. anthropic.py: Claude implementation. Swapping provider requires only a new implementation file and config change.")
@@ -178,7 +178,7 @@ C4Component
 
 ## 4. Dynamic Flows
 
-### 4.1 Ingestion — New Document (Phase 1)
+### 4.1 Ingestion — Canonical Ingest Decision (Identity-Hardened Flow)
 
 ```mermaid
 sequenceDiagram
@@ -187,6 +187,7 @@ sequenceDiagram
     participant IS as IngestService<br/>(services/ingestion.py)
     participant EX as extractor.py
     participant Tika as Apache Tika
+    participant DEC as ingest decision engine
     participant CK as chunker.py
     participant EM as embedder.py
     participant EmbAPI as Embedding Provider
@@ -198,24 +199,53 @@ sequenceDiagram
     IS->>EX: extract("./docs/strategy.pdf")
     EX->>Tika: POST /tika/form (PDF bytes)
     Tika-->>EX: plain text + metadata
-    EX->>FS: write original (immutable copy)
-    EX->>FS: write Markdown working copy
-    EX-->>IS: ExtractedContent(text, metadata)
-    IS->>CK: chunk(text, size=1024, overlap=100)
-    CK-->>IS: List[Chunk]
-    IS->>EM: embed(chunks)
-    EM->>EmbAPI: POST embeddings (batch)
-    EmbAPI-->>EM: List[Vector]
-    EM-->>IS: List[ChunkWithVector]
-    IS->>DB: BEGIN TRANSACTION
-    DB->>DB: INSERT documents (source_path, file_hash, ingested_at, status)
-    DB->>DB: INSERT document_versions (provenance record)
-    DB->>DB: INSERT chunks (content, chunk_index, document_id, content_tsv)
-    DB->>DB: INSERT embeddings (vector, chunk_id, model, provider)
-    DB->>DB: COMMIT
-    DB-->>IS: ok
-    IS-->>CLI: IngestionResult(doc_id, chunk_count=24)
-    CLI-->>Iain: Ingested strategy.pdf → 24 chunks indexed
+    EX-->>IS: ExtractedContent(text, metadata, sha256)
+    IS->>DEC: resolve(source_locator, source_alias, sha256)
+    DEC->>DB: lookup source lineage + content_blob hash
+    DB-->>DEC: current canonical state
+
+    alt New source + new content
+        DEC-->>IS: create canonical blob, document, version, and source lineage
+        IS->>FS: write original under internal blob key
+        IS->>FS: write Markdown copy under internal blob key
+        IS->>CK: chunk(text, size=1024, overlap=100)
+        CK-->>IS: List[Chunk]
+        IS->>EM: embed(chunks)
+        EM->>EmbAPI: POST embeddings (batch)
+        EmbAPI-->>EM: List[Vector]
+        EM-->>IS: List[ChunkWithVector]
+        IS->>DB: BEGIN TRANSACTION
+        DB->>DB: INSERT content_blobs, documents, document_versions
+        DB->>DB: INSERT sources, source_versions
+        DB->>DB: INSERT chunks (document_version_id, content, chunk_index, content_tsv)
+        DB->>DB: INSERT embeddings (vector, chunk_id, model, provider)
+        DB->>DB: COMMIT
+        DB-->>IS: ok
+        IS-->>CLI: IngestionResult(new_version_created=true, chunk_count=24)
+    else Known source + unchanged content
+        DEC-->>IS: no-op outcome
+        IS-->>CLI: IngestionResult(no_op=true, reason="unchanged content")
+    else Known source + changed content
+        DEC-->>IS: create new content blob + new document_version
+        IS->>FS: write new original and Markdown copy under new blob key
+        IS->>CK: chunk(text)
+        CK-->>IS: List[Chunk]
+        IS->>EM: embed(chunks)
+        EM->>EmbAPI: POST embeddings
+        EmbAPI-->>EM: List[Vector]
+        IS->>DB: BEGIN TRANSACTION
+        DB->>DB: INSERT new content_blob, document_version, source_version
+        DB->>DB: INSERT chunks and embeddings for new version only
+        DB->>DB: COMMIT
+        IS-->>CLI: IngestionResult(new_version_created=true, chunk_count=24)
+    else New source + known content
+        DEC-->>IS: link new source lineage to existing canonical content
+        IS->>DB: INSERT source + source_version only
+        DB-->>IS: linked without duplicate chunking
+        IS-->>CLI: IngestionResult(reused_existing_content=true, chunk_count=0)
+    end
+
+    CLI-->>Iain: Clear outcome message with canonical identity result
 ```
 
 ### 4.2 Query — MCP Retrieve Tool (Phase 1)
@@ -249,7 +279,7 @@ sequenceDiagram
     DB-->>SR: ranked results from both searches
     SR-->>RS: merged and re-ranked chunks (role pack weights applied)
     RS->>CI: format_citations(chunks)
-    CI-->>RS: CitedResults (content, source_document_id, source_path, chunk_index, score)
+    CI-->>RS: CitedResults (content, source_document_id, document_version_id, source_alias, source_locator, chunk_index, score)
     RS->>LLM: complete(retrieved_chunks, query, tone=RolePackConfig.tone)
     LLM->>ClaudeAPI: POST /messages (system prompt + context + query)
     ClaudeAPI-->>LLM: synthesised response
@@ -308,8 +338,8 @@ sequenceDiagram
     participant LLM as LLMAdapter
     participant ClaudeAPI as Claude API
     participant OR as OutputRouter
-    participant TG as output/channels/telegram.py
-    participant TelegramAPI as Telegram Bot API
+    participant CH as output channel handler
+    participant OUT as Configured output channel
     actor User
 
     SCH->>SCH: trigger at configured time (e.g. 07:30)
@@ -326,11 +356,11 @@ sequenceDiagram
     LLM->>ClaudeAPI: POST /messages
     ClaudeAPI-->>LLM: brief content
     LLM-->>SCH: MorningBrief
-    SCH->>OR: send(channel="telegram", content=brief)
-    OR->>OR: validate "telegram" in config.output_channels
-    OR->>TG: send(brief)
-    TG->>TelegramAPI: POST /sendMessage (bot_token from config)
-    TelegramAPI-->>User: morning brief message in Telegram
+    SCH->>OR: send(channel=config.scheduler.brief_channel, content=brief)
+    OR->>OR: validate configured channel in output_channels
+    OR->>CH: dispatch(brief)
+    CH->>OUT: deliver brief
+    OUT-->>User: morning brief message
     SCH->>DB: log(job_id, result, provenance)
 ```
 
@@ -342,6 +372,7 @@ sequenceDiagram
     participant TelegramAPI as Telegram Bot API
     participant TB as connectors/telegram_bot.py
     participant IS as IngestService
+    participant JOBS as jobs queue / worker
     participant RS as RetrievalService
     participant LLM as LLMAdapter
     participant OR as OutputRouter
@@ -354,10 +385,11 @@ sequenceDiagram
     TB->>TB: classify: note or question?
 
     alt Note capture (prefixed "Note:" or short declarative statement)
-        TB->>IS: ingest_note(text, metadata={source:"telegram", timestamp:...})
-        IS->>DB: INSERT document (content, auto-tagged, timestamped)
-        IS->>DB: INSERT chunks and embeddings
-        IS-->>TB: IngestionResult
+        TB->>JOBS: enqueue ingest job (source_locator=telegram://..., source_alias=message timestamp)
+        JOBS->>IS: ingest_note(text, metadata={source:"telegram", timestamp:...})
+        IS->>DB: canonical ingest decision + writes
+        IS-->>JOBS: IngestionResult
+        JOBS-->>TB: completed
         TB->>OR: send(channel="telegram", content="Note saved")
         OR->>TG: send("Note saved")
         TG->>TelegramAPI: POST /sendMessage
@@ -383,24 +415,42 @@ sequenceDiagram
 erDiagram
     documents {
         uuid id PK
-        text source_path
-        text file_hash
         text status
-        timestamptz ingested_at
-        int current_version
+        uuid current_document_version_id FK
+        timestamptz created_at
     }
     document_versions {
         uuid id PK
         uuid document_id FK
+        uuid content_blob_id FK
         int version_number
-        text source_path
-        text file_hash
         timestamptz ingested_at
         text extraction_method
     }
+    content_blobs {
+        uuid id PK
+        text sha256_hash
+        text original_storage_key
+        text markdown_storage_key
+        timestamptz created_at
+    }
+    sources {
+        uuid id PK
+        text source_type
+        text source_locator
+        text source_alias
+        timestamptz first_seen_at
+    }
+    source_versions {
+        uuid id PK
+        uuid source_id FK
+        uuid document_version_id FK
+        uuid content_blob_id FK
+        timestamptz observed_at
+    }
     chunks {
         uuid id PK
-        uuid document_id FK
+        uuid document_version_id FK
         int chunk_index
         text content
         tsvector content_tsv
@@ -423,13 +473,16 @@ erDiagram
     }
 
     documents ||--o{ document_versions : "versioned by"
-    documents ||--o{ chunks : "split into"
+    content_blobs ||--o{ document_versions : "materialises as"
+    sources ||--o{ source_versions : "observed as"
+    document_versions ||--o{ source_versions : "linked from"
+    document_versions ||--o{ chunks : "split into"
     chunks ||--|| embeddings : "embedded as"
 ```
 
-`jobs` table is Phase 2. All other tables are Phase 1 MVP.
+`jobs` table is Phase 2. The canonical identity tables (`content_blobs`, `sources`, `source_versions`) are the identity-hardening foundation that must land before connector expansion.
 
-Citation integrity: every `embeddings` row → `chunks` row → `documents` row → original file on filesystem. No answer can be returned without this chain being intact.
+Citation integrity: every `embeddings` row → `chunks` row → `document_versions` row → `content_blobs` and `source_versions` → `sources` → managed original/Markdown copies. User-facing citations use `source_alias`; raw locators remain available for traceability.
 
 ---
 
@@ -451,6 +504,9 @@ flowchart LR
 
     subgraph P2["Phase 2 — First Real Users"]
         direction TB
+        ID2["Canonical Identity Migration + Hardening\n(implemented baseline -> content_blobs + sources + source_versions)"]
+        DEDUPE2["Hash-First Dedupe\n+ re-ingest semantics"]
+        CITES2["Source Alias Citations\n+ migration/backfill"]
         SCH2["APScheduler\n(daily brief)"]
         BOT2["Telegram Bot\n(bidirectional)"]
         GMAIL2["Gmail Connector\n(ingest email)"]
@@ -460,7 +516,7 @@ flowchart LR
         TG2["Telegram Channel\n(OutputRouter)"]
     end
 
-    subgraph P3["Phase 3 — Governance & Write-back"]
+    subgraph P3["Vision Phases 4-5 — Governance & Write-back"]
         direction TB
         GOV3["Governance Layer\n(audit, confidence)"]
         WB3["Write-back Actions\n(approval step)"]
@@ -468,6 +524,10 @@ flowchart LR
     end
 
     P1 --> P2 --> P3
+    ID2 --> DEDUPE2 --> CITES2 --> JOBS2
+    JOBS2 --> GMAIL2
+    JOBS2 --> BOT2
+    CAL2 --> SCH2
 ```
 
 ---

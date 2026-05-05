@@ -1,5 +1,5 @@
 # generated: 2026-04-17
-# last_updated: 2026-05-05  # 5-6-documentation-and-housekeeping -> done
+# last_updated: 2026-05-05  # 6-1-canonical-blob-source-and-version-schema-hardening -> done
 # project: CoS
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,9 +33,11 @@
 # - Stories can be worked in parallel if team capacity allows
 # - Developer typically creates next story after previous one is 'done' to incorporate learnings
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+# - This file is a live implementation tracker, not a zero-state planning baseline
+# - Epics 1-5 represent the implemented baseline; Epic 6 onward reflects the change-course backlog
 
 generated: 2026-04-17
-last_updated: 2026-05-05  # 5-6-documentation-and-housekeeping -> done
+last_updated: 2026-05-05  # 6-1-canonical-blob-source-and-version-schema-hardening -> done
 project: CoS
 project_key: NOKEY
 tracking_system: file-system
@@ -110,18 +112,22 @@ development_status:
   epic-5-retrospective: optional
 
   # ─────────────────────────────────────────────
-  # Epic 6: Connected Knowledge Sources (Growth)
-  # Platform automatically ingests live content from Gmail and Google Calendar
+  # Epic 6: Canonical Source Identity & Connected Ingestion (Growth)
+  # Canonical identity hardening lands before Gmail, Calendar, and MCP connected ingest
   # ─────────────────────────────────────────────
-  epic-6: backlog
-  6-1-oauth-authentication-setup: backlog
-  6-2-near-duplicate-detection-on-ingest: backlog
-  6-3-jobs-queue-and-background-ingestion-worker: backlog
-  6-4-gmail-connector: backlog
-  6-5-google-calendar-connector: backlog
-  6-6-ingest-document-mcp-tool: backlog
-  6-7-operator-validation-connected-sources-live: backlog
-  6-8-documentation-and-housekeeping: backlog
+  epic-6: in-progress
+  6-1-canonical-blob-source-and-version-schema-hardening: done
+  6-2-hash-first-ingest-and-exact-byte-deduplication: backlog
+  6-3-re-ingest-semantics-and-no-op-handling: backlog
+  6-4-citation-and-listing-updates-using-source-alias: backlog
+  6-5-migration-backfill-and-operator-recovery: backlog
+  6-6-oauth-authentication-setup-for-gmail-and-calendar: backlog
+  6-7-jobs-queue-and-background-ingestion-worker: backlog
+  6-8-gmail-connector: backlog
+  6-9-google-calendar-connector: backlog
+  6-10-ingest-document-mcp-tool: backlog
+  6-11-operator-validation-connected-sources-live: backlog
+  6-12-documentation-and-housekeeping: backlog
   epic-6-retrospective: optional
 
   # ─────────────────────────────────────────────
