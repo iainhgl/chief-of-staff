@@ -220,3 +220,10 @@
 - "three services" (Docker health) vs "five components" (`cos status` health) inconsistency in pre-existing sections of manual-testing.md — outside this story's scope [`docs/manual-testing.md`]
 - sprint-status.yaml has duplicate `last_updated` field in both comment header block and YAML data block — pre-existing design; both are updated in sync so no functional impact [`_bmad-output/implementation-artifacts/sprint-status.yaml`]
 - CosConfig.load('/app/config.yaml') in T5.5.4 uses a hardcoded path that would silently break if the docker-compose.yml volume mount path changes [`docs/manual-testing.md`]
+
+## Deferred from: code review of 5-6-documentation-and-housekeeping (2026-05-01)
+
+- 30-second `subprocess.run` timeout on `docker compose restart` is undisclosed — if `docker compose restart` itself takes >30s the command fails at the restart step, not the polling step; the "35–45 seconds total wall time" estimate does not apply in that case [`src/cos/cli.py:311`]
+- `_check_mcp_server` always returns `healthy=True` — MCP server component can never show ✗ or trigger exit code 1; the documented claim that `cos status` "identifies exactly which component failed" is not true for the MCP server [`src/cos/services/health.py:73`]
+- `_check_postgres` and `_check_database` can hang for OS-level TCP timeout (~30s each) — if Postgres container is paused/stuck rather than stopped cleanly, `cos status` may block ~60s before returning [`src/cos/services/health.py:38`]
+- "MCP server" display name vs "cos" Docker service name mismatch in stuck-component message — if `cos` container is stuck, user sees "MCP server did not become healthy. Run: cos logs cos" (display name and service name differ in one message) [`src/cos/cli.py:49`]

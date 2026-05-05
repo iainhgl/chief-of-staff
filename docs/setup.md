@@ -81,14 +81,6 @@ docker compose up -d
 
 All three services (postgres, tika, cos) will start and reach a healthy state within 60 seconds.
 
-## Check Platform Status
-
-```bash
-docker compose ps
-```
-
-Shows all three services and their health state. All should show `healthy` or `running`.
-
 ## Configure the MCP Server
 
 Connect Claude to the CoS MCP server so it can call the platform's tools.
@@ -131,23 +123,6 @@ role_pack:
 ```
 
 To use a different role or author your own, see [role-packs.md](role-packs.md) for the full authoring guide and field reference.
-
-## Restart the Platform
-
-Three-step restart procedure:
-
-```bash
-# Step 1 — stop all services
-docker compose down
-
-# Step 2 — start again
-docker compose up -d
-
-# Step 3 — verify all services are healthy
-docker compose ps
-```
-
-No manual intervention is needed between steps.
 
 ## Ingest Documents
 
@@ -270,14 +245,128 @@ Call list_documents and show me the raw JSON response.
 
 This returns a standard JSON envelope. The document rows live in `data.documents` and match the output of `cos docs --json`. Each document includes `id`, `source_path`, `ingested_at`, `current_version`, and `chunk_count`.
 
-## View Logs
+## Platform Operations
+
+### Check Platform Status
+
+Run from the `cos/` directory on the **host** (not inside the container):
 
 ```bash
-docker compose logs cos
+docker compose exec cos uv run cos status
 ```
 
-Streams structured JSON logs from the cos service. To follow logs in real time:
+Expected output when the platform is fully healthy:
+
+```text
+CoS Platform Status
+-------------------
+Postgres        ✓ healthy
+Tika            ✓ healthy
+MCP server      ✓ healthy
+Role pack       ✓ CHRO loaded
+Database        ✓ connected (42 documents indexed)
+```
+
+Each row shows a component name, a `✓` (healthy) or `✗` (problem) icon, a plain-language message, and — if something is wrong — an exact recovery instruction. No technical jargon appears in the output.
+
+**Exit code:** 0 when all components are healthy; 1 if any component is unhealthy.
+
+### Restart the Platform
+
+Run from the `cos/` directory on the **host** (not inside the container):
 
 ```bash
-docker compose logs -f cos
+uv run cos restart
 ```
+
+The command restarts all services and polls until every container is healthy. Expected output:
+
+```text
+Restarting platform...
+Platform restarted. All components healthy.
+```
+
+**Timing note:** `cos restart` calls `docker compose restart`, then polls for up to 30 seconds. Total wall time to the confirmation message is typically 35–45 seconds on a standard machine.
+
+**If a container stays stuck**, the output names it and suggests the next step:
+
+```text
+Tika did not become healthy. Run: cos logs tika
+```
+
+Exit code 0 on success, 1 on failure.
+
+### View Logs
+
+Run from the `cos/` directory on the **host** (not inside the container):
+
+```bash
+uv run cos logs                # last 100 lines from all containers
+uv run cos logs cos            # filter to the cos service only
+uv run cos logs --since 10m    # last 10 minutes from all containers
+uv run cos logs cos --since 5m # cos service, last 5 minutes
+```
+
+Valid component names: `postgres`, `tika`, `cos`. The `--since` value is passed directly to `docker compose logs` and follows Docker's duration format (e.g. `10m`, `1h`, `30s`); invalid values produce a Docker error message.
+
+Log output is a mix of Docker timestamps and structured JSON lines from the cos service. No API keys or credential values appear in any log line.
+
+If no containers are running, the command prints a plain-language message rather than a Docker error:
+
+```text
+No containers running. Start the platform first: docker compose up -d
+```
+
+**Exit code:** 0 when containers are running; 1 if no containers are running.
+
+### Recovery: Postgres not running
+
+The most common failure is Postgres stopping unexpectedly. The three-step recovery procedure:
+
+**Step 1 — check what is wrong:**
+
+```bash
+docker compose exec cos uv run cos status
+```
+
+When Postgres is down, both the `Postgres` and `Database` rows fail with a recovery hint:
+
+```text
+CoS Platform Status
+-------------------
+Postgres        ✗ container not running — Run: cos restart
+Tika            ✓ healthy
+MCP server      ✓ healthy
+Role pack       ✓ CHRO loaded
+Database        ✗ could not connect — Run: cos restart
+```
+
+> **If `docker compose exec` fails** with "container not running", the `cos` container has also stopped — skip directly to Step 2.
+
+**Step 2 — restart the platform:**
+
+```bash
+uv run cos restart
+```
+
+Wait for the confirmation: `Platform restarted. All components healthy.`
+
+**Step 3 — confirm recovery:**
+
+```bash
+docker compose exec cos uv run cos status
+```
+
+All five rows should show `✓` icons. The platform is ready to accept queries again.
+
+---
+
+### Sending logs for support
+
+If you need to share diagnostic information, capture the last 10 minutes of logs from all containers:
+
+```bash
+uv run cos logs --since 10m
+```
+
+Paste the output into your support message. The output contains no API keys or credential values — it is safe to share.
