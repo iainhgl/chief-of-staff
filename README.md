@@ -2,7 +2,7 @@
 
 A personal AI platform that acts as a Chief of Staff for a specific role — retaining knowledge in a structured store and reasoning over it to answer questions grounded in source material.
 
-## Current Capabilities (Epic 4)
+## Current Capabilities (Epic 5)
 
 What is working today:
 
@@ -18,9 +18,12 @@ What is working today:
 - **`retrieve`** — ask questions about ingested documents; returns a synthesised answer grounded in source material with citations in both `data.citations` and top-level `citations` (`source_path`, `chunk_index`, `score` per citation); handles the no-content case without fabrication
 - **`list_documents`** — returns a JSON envelope with `data.documents`, where each document includes `id`, `source_path`, `ingested_at`, `current_version`, and `chunk_count`; the document rows match `cos docs --json`
 - **`get_role_context`** — returns the active role summary from the loaded role pack; `data.role_name` is the role's display name and the response also includes `goals`, `tone`, `knowledge_taxonomy`, and `active_workflows`
-- **`get_status`** — returns a JSON envelope with health of all three components (cos, postgres, tika) and a `ready` flag
+- **`get_status`** — returns a JSON envelope with health of all six components (cos, postgres, tika, MCP server, role pack, database) and a `ready` flag
+- **`cos status`** — plain-language health table for all five components; identifies exactly which component failed and states the recovery action; exit code 1 when any component is unhealthy; run from the host: `docker compose exec cos uv run cos status`
+- **`cos restart`** — single command that restarts all services and polls until every container is healthy; prints confirmation or names the stuck component; run from the host: `uv run cos restart`
+- **`cos logs`** — single command log export; supports optional component filter and `--since <duration>` for time filtering; run from the host: `uv run cos logs`
 
-Knowledge retrieval and Q&A with citations are working. Role identity is configuration-only — author a YAML file and point `config.yaml` at it; no code changes are required. See [docs/role-packs.md](docs/role-packs.md) for the authoring guide. Connected sources (email, calendar) are planned for Epic 6.
+Knowledge retrieval and Q&A with citations are working. Role identity is configuration-only — author a YAML file and point `config.yaml` at it; no code changes are required. See [docs/role-packs.md](docs/role-packs.md) for the authoring guide. The platform can be monitored, restarted, and diagnosed using plain-language CLI commands — see [docs/setup.md](docs/setup.md) for the operations reference. Connected sources (email, calendar) are planned for Epic 6.
 
 ## How it Works
 
@@ -38,7 +41,7 @@ The model layer is kept behind an interface so the underlying LLM can be changed
 ## Get Started
 
 See [docs/setup.md](docs/setup.md) for step-by-step provisioning instructions:
-prerequisites, configuration, starting the platform, connecting Claude, querying the knowledge base, and the restart procedure.
+prerequisites, configuration, starting the platform, connecting Claude, querying the knowledge base, and the platform operations reference (status, restart, logs, and the Postgres recovery procedure).
 
 ## Stack
 
@@ -60,7 +63,7 @@ cos/
 │   └── manual-testing.md     # end-to-end operator validation tests
 ├── src/
 │   └── cos/
-│       ├── cli.py            # `cos` CLI entry point (stub commands)
+│       ├── cli.py            # `cos` CLI entry point (status, restart, logs, ingest, docs)
 │       ├── config.py         # CosConfig — Pydantic model reads config.yaml at startup
 │       ├── mcp_server/       # FastMCP server — tools and startup sequence
 │       ├── services/         # thin service layer — only cross-module import path
