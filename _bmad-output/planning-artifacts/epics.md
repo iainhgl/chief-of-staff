@@ -3,7 +3,6 @@ stepsCompleted: ['step-01-validate-prerequisites', 'step-02-design-epics', 'step
 inputDocuments:
   - '_bmad-output/planning-artifacts/prd.md'
   - '_bmad-output/planning-artifacts/architecture.md'
-  - '_bmad-output/planning-artifacts/architecture-diagrams.md'
 ---
 
 # CoS - Epic Breakdown
@@ -24,57 +23,58 @@ FR1: Operator can ingest a single file or a folder of files into the knowledge b
 FR2: System extracts text and metadata from PDF, Word document, Markdown, and plain text files during ingestion
 FR3: System normalises all ingested content to a Markdown working copy stored alongside the original
 FR4: System stores the original source file unchanged and permanently in the document store
-FR5: System records provenance metadata for each ingested document (source path, ingestion timestamp, file hash, version number)
-FR6: System creates a new version record when a document with matching identity is re-ingested, preserving all prior versions
-FR7: System detects near-duplicate content on ingest and flags it without silently re-indexing (Growth)
-FR8: User can ingest a short note or thought as a document by sending a message via a connected messaging channel (Growth)
-FR9: System ingests email message bodies and attachments received via a connected email account (Growth)
+FR5: System records provenance metadata for each ingested document and source reference, including source locator or external ID, ingestion timestamp, content hash, and version number where applicable
+FR6: System creates a new version record when the same logical source is re-ingested with changed content, preserving all prior versions
+FR7: System performs exact-byte deduplication across all ingestion sources and avoids re-embedding or duplicating canonically identical content
+FR8: System flags ingested content as a semantic near-duplicate when it exceeds a configurable similarity threshold against existing content and does not silently re-index it (Growth)
+FR9: User can ingest a short note or thought as a document by sending a message via a connected messaging channel (Growth)
+FR10: System ingests email message bodies and attachments received via a connected email account (Growth)
 
 **Knowledge Retrieval**
 
-FR10: User can submit a natural language query and receive a grounded answer with source citations
-FR11: System retrieves relevant content using both keyword and semantic (embedding-based) search
-FR12: System includes document-level and chunk-level citations in every retrieval response
-FR13: System applies role pack retrieval priorities when ranking search results
-FR14: User can list all documents currently in the knowledge base with their metadata
-FR15: System can invoke a web search to augment local retrieval when local context is insufficient (Growth)
+FR11: User can submit a natural language query and receive a grounded answer with source citations
+FR12: System retrieves relevant content using both keyword and semantic (embedding-based) search
+FR13: System includes document-level and chunk-level citations in every retrieval response
+FR14: System applies role pack retrieval priorities when ranking search results
+FR15: User can list all documents currently in the knowledge base with their metadata
+FR16: System can invoke a web search to augment local retrieval when local retrieval returns fewer than a configured minimum number of relevant cited results (Growth)
 
 **Reasoning & Output**
 
-FR16: System synthesises retrieved content into a response that matches the active role pack's tone and style
-FR17: System can produce common workflow outputs: summary, briefing, draft, comparison, and prioritisation
-FR18: System delivers a scheduled briefing at a configured time via a configured output channel (Growth)
-FR19: System prepares meeting context from upcoming calendar events at a configured interval before each meeting (Growth)
-FR20: System only delivers output to explicitly configured channels or the local interface — no uncontrolled output paths
+FR17: System synthesises retrieved content into a response that matches the active role pack's tone and style
+FR18: System can produce common workflow outputs: summary, briefing, draft, comparison, and prioritisation
+FR19: System delivers a scheduled briefing at a configured time via a configured output channel (Growth)
+FR20: System prepares meeting context from upcoming calendar events at a configured interval before each meeting (Growth)
+FR21: System only delivers output to explicitly configured channels or the local interface — no uncontrolled output paths
 
 **Role Pack Management**
 
-FR21: Operator can define a role pack in a configuration file specifying role goals, tone and style rules, knowledge taxonomy, active workflows, stakeholder map, and retrieval priorities
-FR22: Operator can activate a different role pack by updating the configuration file, without modifying application code
-FR23: System loads and applies the active role pack at startup across all retrieval and reasoning operations
-FR24: User can retrieve a summary of the currently active role context via the platform interface
+FR22: Operator can define a role pack in a configuration file specifying role goals, tone and style rules, knowledge taxonomy, active workflows, stakeholder map, and retrieval priorities
+FR23: Operator can activate a different role pack by updating the configuration file, without modifying application code
+FR24: System loads and applies the active role pack at startup across all retrieval and reasoning operations
+FR25: User can retrieve a summary of the currently active role context via the platform interface
 
 **Platform Operations**
 
-FR25: Operator can check the health status of all platform components with a single CLI command
-FR26: Operator can restart all platform components with a single CLI command
-FR27: Operator can retrieve diagnostic logs with a single CLI command, in a format suitable for support handoff
-FR28: System reports component failures with a plain-language description of the problem and specific recovery steps
-FR29: Operator can provision a complete new platform instance using a single Docker Compose startup command
-FR30: Operator can configure all platform settings — API keys, role pack path, output channel config, connector credentials — via a single YAML file
+FR26: Operator can check the health status of all platform components with a single CLI command
+FR27: Operator can restart all platform components with a single CLI command
+FR28: Operator can retrieve diagnostic logs with a single CLI command, in a format suitable for support handoff
+FR29: System reports component failures with a recovery message that names the failing component, states the user-visible impact, and provides specific recovery steps
+FR30: Operator can provision a complete new platform instance through a single documented bootstrap command or workflow
+FR31: Operator can configure all platform settings — API keys, role pack path, output channel config, connector credentials — through a single human-editable configuration artifact
 
 **External Connectivity (Growth)**
 
-FR31: System reads upcoming events from a connected Google Calendar account for use in meeting prep and scheduled briefs (Growth)
-FR32: System reads and ingests email messages and attachments from a connected Gmail account (Growth)
-FR33: User can send a question or note to the platform via Telegram and receive a response (Growth)
-FR34: System sends scheduled briefs and digests to a user via a configured Telegram or email channel (Growth)
+FR32: System reads upcoming events from a connected Google Calendar account for use in meeting prep and scheduled briefs
+FR33: System reads and ingests email messages and attachments from a connected Gmail account
+FR34: User can send a question or note to the platform via Telegram and receive a response
+FR35: System sends scheduled briefs and digests to a user via a configured Telegram or email channel
 
 **Security & Governance**
 
-FR35: System enforces egress control — responses are delivered only to configured output channels or the local interface
-FR36: System preserves all ingested source documents permanently — originals are never modified or deleted
-FR37: Operator can view the full list of ingested documents with their provenance metadata and version history
+FR36: System enforces egress control — responses are delivered only to configured output channels or the local interface
+FR37: System preserves all ingested source documents permanently — originals are never modified or deleted
+FR38: Operator can view the full list of ingested documents with their provenance metadata and version history
 
 ### Non-Functional Requirements
 
@@ -82,36 +82,36 @@ FR37: Operator can view the full list of ingested documents with their provenanc
 
 NFR1: Retrieval queries return a response within 5 seconds under normal operating conditions (local deployment, knowledge base up to 10,000 documents)
 NFR2: Document ingestion processes at a rate of at least 10 documents per minute for standard file types (PDF, Word, Markdown) on typical consumer hardware
-NFR3: The MCP server responds to tool calls within 2 seconds for non-retrieval operations (get_status, get_role_context, list_documents)
-NFR4: System startup (all containers healthy and ready to serve) completes within 60 seconds on a clean docker compose up
+NFR3: The MCP server responds to tool calls within 2 seconds for non-retrieval operations (`get_status`, `get_role_context`, `list_documents`)
+NFR4: System startup from a clean deployment state completes within 60 seconds with all required services healthy and ready to serve
 
 **Security**
 
 NFR5: API keys and connector credentials are stored only in the local configuration file and are never logged, included in responses, or transmitted beyond their intended API endpoint
 NFR6: All LLM API calls are made over HTTPS — no plaintext transmission of document content to external providers
 NFR7: Output is delivered exclusively to channels listed in the active configuration — the system must fail closed (suppress output) rather than fail open (deliver to an unintended destination) if a channel is misconfigured
-NFR8: The platform does not expose any network ports beyond localhost by default in the Docker Compose configuration
+NFR8: The platform does not expose any network ports beyond localhost by default in its standard deployment configuration
 
 **Reliability**
 
-NFR9: The platform recovers to a fully operational state within 30 seconds of a cos restart command under normal conditions
-NFR10: A failure in any single component (e.g. ingestion worker crashes) does not cause the MCP server or retrieval layer to become unavailable
-NFR11: Connector failures (Gmail API unavailable, Telegram bot unreachable) are handled gracefully — the core retrieval and Q&A path remains available regardless of connector state (Growth)
+NFR9: The platform recovers to a fully operational state within 30 seconds of a `cos restart` command under normal conditions
+NFR10: A failure in any single non-core component (e.g. ingestion worker crash) does not make the MCP server or retrieval layer unavailable for more than 30 seconds under normal recovery conditions
+NFR11: Connector failures (Gmail API unavailable, Telegram bot unreachable) surface an explicit degraded-status or error signal within 60 seconds while the core retrieval and Q&A path remains available regardless of connector state (Growth)
 NFR12: The system preserves knowledge base integrity across unclean shutdowns — no partial ingestion records or corrupted embeddings result from a container crash
 
 **Maintainability**
 
 NFR13: The complete platform can be provisioned on a new machine by a technically competent person following the setup documentation, without assistance, in under 2 hours
-NFR14: Routine operation requires no manual intervention — the platform runs unattended once started
-NFR15: All configuration is expressed in a single config.yaml file — no environment-specific code changes are required to switch roles, providers, or channels
-NFR16: The platform is deployable on a cloud Linux VM using the same Docker Compose configuration as local deployment, without code changes
+NFR14: Routine operation requires no scheduled manual intervention during a 7-day normal-use period after startup
+NFR15: All configuration is expressed in a single human-editable configuration file — no environment-specific code changes are required to switch roles, providers, or channels
+NFR16: The platform is deployable on a cloud Linux VM using the standard deployment package and configuration model used locally, without code changes
 
 **Integration**
 
-NFR17: The MCP server conforms to the published MCP specification and is verified to work with Claude Desktop
+NFR17: The MCP server conforms to the published MCP specification and passes an interoperability test against Claude Desktop for the supported tool set
 NFR18: The embedding model is configurable — switching providers requires only a config change, not a code change
 NFR19: The LLM provider is configurable — the platform works with any provider supported by the model adapter without modifying ingestion, storage, or retrieval components
-NFR20: External connector credentials (Google OAuth tokens, Telegram bot token) are stored and refreshed locally without requiring re-authorisation under normal operation (Growth)
+NFR20: External connector credentials (Google OAuth tokens, Telegram bot token) are stored and refreshed locally without requiring re-authorisation during a 30-day normal-operation period (Growth)
 
 ### Additional Requirements
 
@@ -121,16 +121,22 @@ _Technical requirements from the Architecture document that affect implementatio
 - **Language & runtime:** Python 3.12+ pinned via `.python-version`; async-first throughout using asyncio; `asyncio.run()` only at entry points (cli.py, mcp_server/server.py).
 - **Three-container Docker Compose:** `postgres` (pgvector/pgvector:pg16), `tika` (apache/tika), `cos` (Python/uv image). All ports bind to 127.0.0.1 only; MCP server uses stdio transport (no host port).
 - **Startup sequence dependency:** Postgres healthcheck (`pg_isready`) → Tika healthcheck (`GET /tika`) → cos (`depends_on` both healthy). MCP server applies migrations then starts FastMCP.
-- **Database strategy:** Raw SQL + numbered migration files in `cos/store/migrations/`; no ORM. Migrations applied idempotently at cos startup (`IF NOT EXISTS`, `ON CONFLICT DO NOTHING`). Schema: `documents` → `chunks` → `embeddings` with `document_versions` for provenance. `documents.status` column from day one. `jobs` table deferred to Phase 2 (`002_jobs.sql` stub only).
+- **Canonical identity model:** Canonical identity is split across `documents`, `document_versions`, `content_blobs`, `sources`, and `source_versions` (or an equivalent additive linking model). `source_path`, filename, and connector locator must not become the effective canonical key.
+- **Database strategy:** Raw SQL + numbered migration files in `cos/store/migrations/`; no ORM. Migrations applied idempotently at cos startup (`IF NOT EXISTS`, `ON CONFLICT DO NOTHING`). Identity-hardening migration must land before connector stories proceed. `documents.status` column exists from day one; `jobs` table remains deferred to Phase 2.
+- **Hash-first ingest:** `content_blobs` use UUID primary keys plus unique SHA-256 hashes. Exact-byte deduplication happens before chunking, embedding, and managed-copy writes.
+- **Managed storage layout:** Canonical originals and Markdown working copies are stored by internal ID/hash, never by inbound filenames or connector-provided names. Known content reuses the existing managed copies instead of writing duplicates.
+- **Deterministic ingest outcomes:** The ingest workflow must explicitly resolve four cases: new source + new content, known source + unchanged content, known source + changed content, and new source + known content.
 - **Chunking defaults:** 1024 tokens per chunk, 100 token overlap. Configurable via CosConfig.
 - **Service layer boundary:** `cos/services/*` is the only permitted cross-module import path. `cos/mcp_server/` and `cos/cli.py` import only from `cos/services/*`. Internal modules (`cos/store/`, `cos/ingestion/`, `cos/retrieval/`) never import from each other.
 - **Config boundary:** `CosConfig` (Pydantic v2) in `cos/config.py` reads `config.yaml` once at startup. No other module reads config.yaml directly. `config.yaml` is gitignored; `config.yaml.example` is the committed template documenting all required keys.
 - **OutputRouter:** Sole exit point for all user-facing output. Injected as dependency (not a module-level singleton). Validates channel against configured channels; suppresses and logs on invalid channel (fail-closed). Never raises an unhandled exception.
 - **LLM adapter boundary:** `LLMAdapter` protocol in `cos/llm/adapter.py` defines the `complete()` contract. `cos/llm/anthropic.py` is the Phase 1 Claude implementation. Swapping provider = new implementation file + config change only.
 - **MCP server pattern:** FastMCP pattern from official MCP SDK 1.27.0. Tools: `retrieve`, `get_role_context`, `list_documents`, `get_status`. All tools return the standard envelope: `{"status": "ok/error", "data": {...}, "citations": [...]}`. No custom response shapes.
+- **Citation integrity:** Retrieval results must cite `document_version` plus source provenance cleanly, using `source_alias` for user-facing listing/citation labels while preserving connector-specific locators underneath.
 - **Logging:** Structured JSON to stdout. Mandatory fields: `timestamp`, `level`, `component`, `message`. No bare `print()` calls anywhere. `component` must be one of: `ingestion`, `retrieval`, `mcp_server`, `cli`, `scheduler`, `connector`.
 - **Connectors stub:** `cos/connectors/` exists as a stub directory from Phase 1 with a placeholder `__init__.py` only — no dead code.
 - **OAuth tokens:** `tokens/` directory for OAuth credentials (gitignored); separate from `config.yaml` because tokens are rotated by the auth library (dynamic) while config is hand-edited (static). Phase 2 only.
+- **Migration/backfill expectation:** Existing path-centric Phase 1 data must be migrated onto the canonical identity model before Epic 6 connector work begins, with operator recovery documentation covering backfill and re-run behaviour.
 - **Setup documentation:** `docs/setup.md` required — non-technical user setup and restart instructions. Covers provisioning, `cos status`, `cos restart`, `cos logs`, and the three-step restart procedure.
 - **Test structure:** `tests/` at root mirroring `src/cos/`. `conftest.py` uses a real Postgres test instance (not mocks — pgvector behaviour is not reliably mockable). Key test: `tests/output/test_router.py` verifies fail-closed behaviour.
 - **Entry points:** `pyproject.toml` scripts: `cos = "cos.cli:app"` and `cos-mcp = "cos.mcp_server.server:run"`.
@@ -148,46 +154,62 @@ _Not applicable — this is an API backend platform with no UI. The primary inte
 | FR2 | Epic 2 | Extract PDF, Word, Markdown, plain text |
 | FR3 | Epic 2 | Normalise to Markdown working copy |
 | FR4 | Epic 2 | Store original unchanged permanently |
-| FR5 | Epic 2 | Record provenance metadata |
-| FR6 | Epic 2 | Version record on re-ingest |
-| FR7 | Epic 6 | Near-duplicate detection (Growth) |
-| FR8 | Epic 7 | Note capture via Telegram (Growth) |
-| FR9 | Epic 6 | Email ingestion via Gmail (Growth) |
-| FR10 | Epic 3 | Natural language query → cited answer |
-| FR11 | Epic 3 | Hybrid keyword + semantic search |
-| FR12 | Epic 3 | Document + chunk-level citations |
-| FR13 | Epic 3 | Role pack retrieval priorities |
-| FR14 | Epic 3 | List documents with metadata |
-| FR15 | Epic 7 | Web search augmentation (Growth) |
-| FR16 | Epic 3 | Synthesise response in role pack tone |
-| FR17 | Epic 3 | Common workflow outputs |
-| FR18 | Epic 7 | Scheduled briefing via channel (Growth) |
-| FR19 | Epic 7 | Meeting prep from calendar (Growth) |
-| FR20 | Epic 3 | Egress control — configured channels only |
-| FR21 | Epic 4 | Define role pack in config file |
-| FR22 | Epic 4 | Activate different role pack, no code change |
-| FR23 | Epic 4 | Load and apply role pack at startup |
-| FR24 | Epic 4 | Retrieve active role context summary |
-| FR25 | Epic 5 | Health status — single CLI command |
-| FR26 | Epic 5 | Restart — single CLI command |
-| FR27 | Epic 5 | Diagnostic logs — single CLI command |
-| FR28 | Epic 5 | Plain-language errors with recovery steps |
-| FR29 | Epic 1 | Docker Compose provisioning |
-| FR30 | Epic 1 | Single YAML config for all settings |
-| FR31 | Epic 6 | Google Calendar read (Growth) |
-| FR32 | Epic 6 | Gmail read and ingest (Growth) |
-| FR33 | Epic 7 | Telegram Q&A and note capture (Growth) |
-| FR34 | Epic 7 | Scheduled briefs via Telegram (Growth) — email delivery channel descoped; Telegram is the Phase 2 delivery channel |
-| FR35 | Epic 3 | Enforce egress control |
-| FR36 | Epic 2 | Originals never modified or deleted |
-| FR37 | Epic 2 | View documents with provenance history |
+| FR5 | Epic 2 | Record provenance metadata for document and source references |
+| FR6 | Epic 2 | Version record on re-ingest of the same logical source |
+| FR7 | Epic 6 | Exact-byte deduplication across ingestion sources |
+| FR8 | Epic 6 | Semantic near-duplicate warning layer (Growth) |
+| FR9 | Epic 7 | Note capture via Telegram (Growth) |
+| FR10 | Epic 6 | Email ingestion via Gmail (Growth) |
+| FR11 | Epic 3 | Natural language query → cited answer |
+| FR12 | Epic 3 | Hybrid keyword + semantic search |
+| FR13 | Epic 3 | Document + chunk-level citations |
+| FR14 | Epic 3 | Role pack retrieval priorities |
+| FR15 | Epic 3 | List documents with metadata |
+| FR16 | Epic 7 | Web search augmentation (Growth) |
+| FR17 | Epic 3 | Synthesise response in role pack tone |
+| FR18 | Epic 3 | Common workflow outputs |
+| FR19 | Epic 7 | Scheduled briefing via channel (Growth) |
+| FR20 | Epic 7 | Meeting prep from calendar (Growth) |
+| FR21 | Epic 3 | Egress control — configured channels only |
+| FR22 | Epic 4 | Define role pack in config file |
+| FR23 | Epic 4 | Activate different role pack, no code change |
+| FR24 | Epic 4 | Load and apply role pack at startup |
+| FR25 | Epic 4 | Retrieve active role context summary |
+| FR26 | Epic 5 | Health status — single CLI command |
+| FR27 | Epic 5 | Restart — single CLI command |
+| FR28 | Epic 5 | Diagnostic logs — single CLI command |
+| FR29 | Epic 5 | Plain-language recovery messaging |
+| FR30 | Epic 1 | Platform bootstrap/provisioning workflow |
+| FR31 | Epic 1 | Single human-editable config artifact |
+| FR32 | Epic 6 | Google Calendar read (Growth) |
+| FR33 | Epic 6 | Gmail read and ingest (Growth) |
+| FR34 | Epic 7 | Telegram Q&A and note capture (Growth) |
+| FR35 | Epic 7 | Scheduled briefs via configured Telegram or email channel (Growth) |
+| FR36 | Epic 3 | Enforce egress control |
+| FR37 | Epic 2 | Originals never modified or deleted |
+| FR38 | Epic 2 | View documents with provenance history |
+
+## Implementation Baseline Context
+
+Epics 1 through 5 are already implemented and should be read as the historical baseline that existed before the canonical identity / exact-byte deduplication strategy correction. Their story text records what was built; it is not the target contract for new development.
+
+Epic 6 is the migration and hardening pivot:
+- it upgrades the implemented path-centric baseline to the canonical identity model defined in `architecture.md`
+- it establishes the post-migration provenance contract for listings and citations
+- no connector or ambient-intelligence story should introduce new user-facing contract assumptions that bypass Epic 6
+
+For Epic 6 onward, the authoritative user-facing provenance contract is:
+- `document_version_id` identifies the cited canonical version
+- `source_alias` is the primary human-readable label in `retrieve`, `list_documents`, and `cos docs`
+- `source_locator` is retained underneath for traceability, debugging, and connector-specific provenance
+- legacy `source_path` behavior from the implemented baseline is treated as migration input, not the desired end state
 
 ## Epic List
 
 ## Epic 1: Runnable Platform Foundation
 
-Operator can stand up a fully healthy CoS instance from scratch with a single command — all containers running, config loaded, migrations applied, and the MCP server ready to accept connections from Claude Desktop or Claude Code.
-**FRs covered:** FR29, FR30
+Operator can stand up a fully healthy CoS instance from scratch with a single documented bootstrap flow — all containers running, config loaded, migrations applied, and the MCP server ready to accept connections from Claude Desktop or Claude Code.
+**FRs covered:** FR30, FR31
 **NFRs:** NFR4, NFR8, NFR10, NFR13, NFR15, NFR16
 **Architecture requirements:** uv project initialisation, three-container Docker Compose, DB migration runner, CosConfig, service layer interfaces, LLMAdapter protocol, OutputRouter interface, MCP server skeleton
 
@@ -272,6 +294,8 @@ So that I can reconfigure the platform for a different role, provider, or channe
 As an operator,
 I want the platform to create and maintain its database schema automatically on every startup,
 So that no manual database setup steps are required when provisioning a new instance or restarting the platform.
+
+**Historical baseline note:** This story records the already-implemented pre-Epic 6 baseline schema. Story 6.1 intentionally migrates this baseline to the canonical identity model; do not treat this story as the target schema for new development.
 
 **Acceptance Criteria:**
 
@@ -399,8 +423,8 @@ So that any technically competent person can provision, configure, and operate t
 
 ## Epic 2: Document Knowledge Base
 
-Operator can load documents of any common format into the knowledge base and have them permanently stored with full provenance — original preserved, Markdown copy created, chunked, embedded, and ready for retrieval.
-**FRs covered:** FR1, FR2, FR3, FR4, FR5, FR6, FR36, FR37
+Operator can ingest local documents into an immutable, versioned knowledge base and audit provenance/history from the CLI.
+**FRs covered:** FR1, FR2, FR3, FR4, FR5, FR6, FR37, FR38
 **NFRs:** NFR2, NFR12
 
 ### Story 2.1: Document Extraction & Markdown Normalisation
@@ -468,6 +492,8 @@ So that the knowledge base supports both semantic and keyword search across all 
 As an operator,
 I want every ingested document and its chunks to be stored with full provenance in a single atomic transaction,
 So that the knowledge base is never left in a partial or inconsistent state, even if the container crashes mid-ingest.
+
+**Historical baseline note:** This story records the already-implemented pre-Epic 6 ingest semantics. Stories 6.2 and 6.3 intentionally replace the unchanged-content re-ingest behavior with canonical no-op handling and exact-byte deduplication across sources.
 
 **Acceptance Criteria:**
 
@@ -610,7 +636,7 @@ So that any operator can load documents into the knowledge base without assistan
 ## Epic 3: Knowledge Retrieval & Cited Q&A
 
 User can ask natural language questions via Claude Desktop or Claude Code and receive synthesised, grounded answers with full source citations — results ranked by role pack priorities, response shaped by role pack tone, delivered only via configured channels.
-**FRs covered:** FR10, FR11, FR12, FR13, FR14, FR16, FR17, FR20, FR35
+**FRs covered:** FR11, FR12, FR13, FR14, FR15, FR17, FR18, FR21, FR36
 **NFRs:** NFR1, NFR3, NFR6, NFR7, NFR17
 **Note:** FR13 (role pack retrieval weights) and FR16 (role pack tone) are architecturally wired up in this epic using the stub RolePackService. The real CHRO configuration is activated in Epic 4 — the retrieval behaviour will improve once real weights and tone are loaded.
 
@@ -726,6 +752,8 @@ As a user,
 I want to ask questions and list my knowledge base directly from Claude Desktop or Claude Code,
 So that the full retrieval and citation pipeline is accessible through the MCP interface I already use.
 
+**Historical baseline note:** This story records the already-implemented pre-Epic 6 MCP contract. Story 6.4 is the explicit contract-switch story that migrates listings and citations from legacy `source_path` semantics to canonical `document_version_id` plus `source_alias`.
+
 **Acceptance Criteria:**
 
 **Given** a connected MCP client calls the `retrieve` tool with a `query` string,
@@ -811,7 +839,7 @@ So that any operator knows how to query the knowledge base and understand what g
 ## Epic 4: Role Identity & Configuration
 
 Operator can define a complete role identity — goals, tone, knowledge taxonomy, stakeholder map, retrieval priorities — in a YAML file and activate it without touching the code. The role is applied consistently across all retrieval and reasoning from startup. The CHRO role pack is the first real implementation; a second minimal role pack demonstrates portability.
-**FRs covered:** FR21, FR22, FR23, FR24
+**FRs covered:** FR22, FR23, FR24, FR25
 **NFRs:** NFR15, NFR18, NFR19
 
 ### Story 4.1: Role Pack Schema & CHRO Configuration File
@@ -979,7 +1007,7 @@ So that a new operator can configure the platform for a different person without
 ## Epic 5: Platform Operations & Resilience
 
 Operator and non-technical users can monitor, diagnose, and recover the platform using simple CLI commands with plain-language guidance — no technical knowledge required to keep the platform running.
-**FRs covered:** FR25, FR26, FR27, FR28
+**FRs covered:** FR26, FR27, FR28, FR29
 **NFRs:** NFR5, NFR9, NFR14
 
 ### Story 5.1: Health Check System (`cos status`)
@@ -1174,260 +1202,341 @@ So that the platform can be handed over to another person with a simple setup ca
 **When** cross-checked for consistency,
 **Then** CLI command syntax, expected output, and recovery steps are identical across `docs/setup.md`, `README.md`, and `architecture.md`.
 
-## Epic 6: Connected Knowledge Sources
+## Epic 6: Canonical Source Identity & Connected Ingestion
 
-Platform automatically ingests live content from configured Gmail and Google Calendar accounts, keeping the knowledge base current — email bodies, attachments, and calendar events become part of the searchable knowledge base without manual effort. Near-duplicate detection keeps the index clean.
-**FRs covered:** FR7, FR9, FR31, FR32
-**NFRs:** NFR11, NFR20
+Operator can safely expand from manual ingest to multi-source ingest because the platform resolves canonical document identity correctly, deduplicates exact content across sources, preserves clean provenance and citations, and then adds Gmail and Calendar ingestion on top of that hardened base.
+**FRs covered:** FR7, FR8, FR10, FR32, FR33
+**NFRs:** NFR11, NFR12, NFR20
 
-### Story 6.1: OAuth Authentication Setup (Gmail & Calendar)
+**Epic 6 framing:** Epics 1 through 5 are the implemented baseline. Epic 6 is intentionally a migration/hardening epic that upgrades that baseline before any new connector-led development proceeds.
+
+### Story 6.1: Canonical Blob, Source, and Version Schema Hardening
 
 As an operator,
-I want to authenticate the platform against Gmail and Google Calendar once and have tokens refreshed automatically,
-So that the connectors can access live data without requiring me to re-authorise under normal operation.
+I want the canonical store schema to separate logical documents, immutable content blobs, and source provenance,
+So that connector locators and filenames do not accidentally define document identity.
 
 **Acceptance Criteria:**
 
-**Given** `config.yaml` contains Google OAuth client credentials (`client_id`, `client_secret`) and the platform is running,
-**When** `cos auth gmail` is run for the first time,
-**Then** a browser-based OAuth 2.0 consent flow is initiated, the user grants access, and a token is written to `tokens/gmail.json` — the terminal confirms success with a plain-language message.
+**Given** the already-implemented Phase 1 baseline schema is present,
+**When** the next migration set is applied,
+**Then** it upgrades the existing store in place rather than assuming a fresh greenfield database, preserving already-indexed documents while adding canonical identity structures.
 
-**Given** `cos auth calendar` is run for the first time,
-**When** the OAuth flow completes,
-**Then** a token is written to `tokens/google_calendar.json` with the same confirmation behaviour.
+**Given** the next migration set is applied,
+**When** the schema is inspected,
+**Then** it contains canonical identity tables or equivalent structures for `content_blobs`, `sources`, `source_versions`, and `document_versions`, with foreign keys linking them to logical `documents`.
 
-**Given** tokens exist in `tokens/` and have expired,
-**When** a connector makes an API call,
-**Then** `google-auth` refreshes the token automatically using the refresh token — no manual re-authorisation is required and the API call succeeds transparently.
+**Given** the canonical schema is in place,
+**When** table constraints are reviewed,
+**Then** `content_blobs` enforce uniqueness on SHA-256 content hash and `sources` store provenance-specific fields such as `source_type`, `source_locator`, and `source_alias` without making those fields the canonical document key.
 
-**Given** `tokens/` and both token files,
-**When** `.gitignore` is inspected,
-**Then** the entire `tokens/` directory is gitignored — OAuth tokens are never committed.
+**Given** a stored document version is inspected,
+**When** its lineage is traced,
+**Then** the path from `document_version` to `content_blob` and `source_version` is sufficient to identify both the exact bytes used and the source observation that produced them.
 
-**Given** a connector attempts an API call but `tokens/gmail.json` does not exist,
-**When** the call fails,
-**Then** the error is logged with `component: "connector"` and a plain-language message: `Gmail not authenticated. Run: cos auth gmail` — the MCP server and retrieval path remain available.
+**Given** pre-existing Epic 2 tables are migrated forward,
+**When** the migration runs repeatedly in development or CI,
+**Then** it remains idempotent and does not duplicate rows or destroy existing provenance history.
 
 ---
 
-### Story 6.2: Near-Duplicate Detection on Ingest
+### Story 6.2: Hash-First Ingest and Exact-Byte Deduplication
 
 As an operator,
-I want the platform to detect when I am ingesting content that is already in the knowledge base,
-So that near-identical documents do not inflate retrieval noise or waste embedding quota.
+I want ingest to detect canonically identical bytes before chunking, embedding, or managed-copy writes,
+So that duplicate content from different paths or connectors does not create duplicate storage or retrieval noise.
 
 **Acceptance Criteria:**
 
-**Given** a document is submitted for ingestion whose `file_hash` (SHA-256) exactly matches an existing `documents` row,
-**When** the ingestion pipeline runs,
-**Then** ingestion is skipped, a version check is logged, and the CLI (or calling service) receives a plain-language notice: `Skipped strategy.pdf — identical content already indexed (version 1, ingested 2026-04-10).`
+**Given** bytes submitted for ingest exactly match an existing `content_blob` SHA-256 hash,
+**When** the ingest pipeline evaluates the input,
+**Then** it reuses the existing canonical blob record and does not create duplicate chunk, embedding, original-file, or Markdown-copy artifacts.
 
-**Given** a document is submitted whose content is semantically very similar to an existing document (above a configurable similarity threshold),
-**When** near-duplicate detection runs,
-**Then** the ingestion is flagged with a warning rather than silently proceeding: `Near-duplicate detected: strategy_v2.pdf is 94% similar to strategy.pdf. Ingesting as new version — review if unintended.`
+**Given** the same bytes arrive from a new path or connector locator,
+**When** ingest completes,
+**Then** a new provenance/source record is created and linked to the existing canonical content without redefining document identity around the new locator.
 
-**Given** the similarity threshold is configurable in `config.yaml`,
-**When** the threshold is set to `1.0` (exact only),
-**Then** only exact hash matches are flagged and all semantically similar but distinct documents are ingested normally.
+**Given** the same bytes arrive from the same known source,
+**When** the pipeline runs,
+**Then** the operation resolves as a no-op for content processing and returns a clear notice that no new version or embeddings were created.
 
-**Given** a legitimately new document that happens to share some content with existing documents,
-**When** its similarity score falls below the threshold,
-**Then** it is ingested normally with no warning — deduplication does not block valid new content.
-
-**Given** near-duplicate detection runs on a document,
-**When** the detection check executes,
-**Then** it does not materially slow ingestion for content that is clearly new — the hash check is fast (DB lookup) and semantic similarity is only computed when hash similarity suggests a potential match.
+**Given** a truly new byte sequence arrives,
+**When** the pipeline runs,
+**Then** the hash check completes before chunking or embedding begins, and the new content proceeds through normal ingest exactly once.
 
 ---
 
-### Story 6.3: Jobs Queue & Background Ingestion Worker
+### Story 6.3: Re-Ingest Semantics and No-Op Handling
 
 As an operator,
-I want connector-triggered ingestion to queue work reliably so that email attachments and calendar events are processed in the background without blocking the MCP server,
-So that the platform ingests live content automatically without affecting query response times.
+I want ingest to resolve the four source/content outcomes deterministically,
+So that unchanged re-ingests are no-ops and changed re-ingests create the right new version records.
 
 **Acceptance Criteria:**
 
-**Given** `002_jobs.sql` is applied at startup,
-**When** the `jobs` table is inspected,
-**Then** it contains columns: `id` (UUID PK), `job_type` (text), `status` (text: `pending`, `processing`, `done`, `failed`), `payload` (jsonb), `created_at` (timestamptz), and `completed_at` (timestamptz, nullable).
+**Given** a known source is re-ingested with unchanged content,
+**When** the decision engine runs,
+**Then** it records the ingest attempt as unchanged and does not create a new `document_version`, `content_blob`, chunk set, or embedding set.
 
-**Given** a connector (Gmail or Calendar) receives new content to ingest,
-**When** it submits work,
-**Then** it inserts a row into `jobs` with `job_type: "ingest_document"` and a `payload` containing the content and metadata — it does not call `IngestService` directly.
+**Given** a known source is re-ingested with changed content,
+**When** ingest completes,
+**Then** the existing logical document is preserved, a new `content_blob` and `document_version` are created, and the new version becomes current only after all related writes succeed.
 
-**Given** a background ingestion worker is running,
-**When** it polls the `jobs` table,
-**Then** it picks up `pending` jobs in `created_at` order, sets `status: "processing"`, calls `IngestService`, and sets `status: "done"` or `status: "failed"` with an error note on completion.
+**Given** a new source provides bytes already known to the system,
+**When** the decision engine runs,
+**Then** it creates the new source lineage and links it to the existing canonical content/version without duplicate chunking or embedding.
 
-**Given** the background worker crashes or the container restarts mid-job,
-**When** the worker restarts,
-**Then** jobs stuck in `processing` status are retried — no job is permanently lost due to a worker restart.
-
-**Given** the background worker is processing a job and the MCP server receives a `retrieve` query simultaneously,
-**When** both execute,
-**Then** the query responds within the NFR1 latency target — the ingestion worker does not block the retrieval path.
-
-**Given** a job fails after the maximum retry count,
-**When** `cos status` is run,
-**Then** the output notes that failed ingestion jobs exist and advises running `cos logs` for detail.
+**Given** the ingest outcome is returned to the caller,
+**When** the result is logged or displayed,
+**Then** it clearly states which of the four canonical outcomes occurred so operators can reason about connector behaviour without inspecting the database directly.
 
 ---
 
-### Story 6.4: Gmail Connector
-
-As an operator,
-I want email messages and attachments from a configured Gmail account to be automatically ingested into the knowledge base,
-So that email-based knowledge (reports, briefs, strategy docs sent as attachments) becomes searchable without manual download and ingest steps.
-
-**Acceptance Criteria:**
-
-**Given** Gmail is authenticated and the connector is enabled in `config.yaml`,
-**When** the Gmail connector polls for new messages,
-**Then** it retrieves unread messages from the configured label or inbox, submits the message body as an ingest job, and submits each attachment (PDF, Word, plain text) as a separate ingest job — in each case using the jobs queue from Story 6.3.
-
-**Given** an email with a PDF attachment is ingested,
-**When** the resulting document is retrieved via `list_documents`,
-**Then** it shows `source_path` referencing the email (e.g. `gmail://message_id/attachment/filename.pdf`) and `ingested_at` matching the ingestion time.
-
-**Given** an email has already been ingested (matched by Gmail message ID),
-**When** the connector polls again,
-**Then** it does not re-ingest the same message — message IDs are tracked to prevent duplicates.
-
-**Given** the Gmail API is temporarily unavailable,
-**When** the connector attempts to poll,
-**Then** the failure is logged with `component: "connector"`, the job is not created, and the MCP server and retrieval path remain fully available — NFR11 is satisfied.
-
-**Given** the Gmail API returns a rate-limit error (429),
-**When** the connector handles it,
-**Then** it backs off and retries after a configurable delay — it does not crash or flood the API with retries.
-
----
-
-### Story 6.5: Google Calendar Connector
-
-As an operator,
-I want the platform to read upcoming calendar events from a configured Google Calendar account,
-So that meeting context is available for retrieval and can be used in meeting prep and scheduled briefings in Epic 7.
-
-**Acceptance Criteria:**
-
-**Given** Google Calendar is authenticated and the connector is enabled in `config.yaml`,
-**When** `CalendarConnector.get_today_events()` is called,
-**Then** it returns a list of `CalendarEvent` objects for the current day, each containing: `title`, `start_time`, `end_time`, `attendees` (list), and `description` (if present).
-
-**Given** `get_upcoming_events(days=N)` is called,
-**When** it executes,
-**Then** it returns events for the next N days — the lookahead window is configurable in `config.yaml`.
-
-**Given** calendar events are fetched,
-**When** the data is used by `RetrievalService`,
-**Then** event titles and attendee names are usable as query terms for retrieving relevant documents from the knowledge base — enabling meeting prep queries like "retrieve context for my 2pm board meeting."
-
-**Given** the Google Calendar API is temporarily unavailable,
-**When** the connector attempts to fetch events,
-**Then** the failure is logged with `component: "connector"`, an empty event list is returned to the caller, and the MCP server and retrieval path remain fully available — NFR11 is satisfied.
-
-**Given** calendar events are fetched but contain no events for the requested period,
-**When** the connector returns,
-**Then** it returns an empty list — not an error — and the caller handles the empty case gracefully.
-
----
-
-### Story 6.6: `ingest_document` MCP Tool
+### Story 6.4: Citation and Listing Updates Using Source Alias
 
 As a user,
-I want to ingest a note or document directly from Claude Desktop or Claude Code using an MCP tool,
-So that I can capture thoughts and short documents into the knowledge base without switching to the terminal.
+I want document listings and citations to show stable, readable source aliases while preserving underlying provenance locators,
+So that results stay understandable without losing traceability.
 
 **Acceptance Criteria:**
 
-**Given** a connected MCP client calls `ingest_document` with a `content` string and optional `title` and `tags`,
-**When** the tool executes,
-**Then** it calls `IngestService.ingest_note(text, metadata)` and returns the standard envelope: `{"status": "ok", "data": {"document_id": "...", "chunk_count": N}, "citations": []}`.
+**Given** the implemented pre-Epic 6 baseline exposed path-centric labels such as `source_path`,
+**When** Story 6.4 is complete,
+**Then** this story becomes the authoritative contract-switch point from legacy path-centric provenance to canonical provenance semantics.
 
-**Given** the ingested note is stored,
-**When** `list_documents` is called,
-**Then** the note appears with `source_path: "mcp://ingest_document/<timestamp>"` and the provided title (or a generated one) as its identifier.
+**Given** a document originated from any source type,
+**When** `list_documents` or `cos docs` displays it after the Epic 6 migration,
+**Then** the primary user-facing label uses `source_alias`, while the underlying canonical provenance retains the full `source_locator`.
 
-**Given** a note is ingested via `ingest_document` and then a retrieval query is submitted,
-**When** the `retrieve` tool searches,
-**Then** the note's content is searchable and citable — it is a full first-class document in the knowledge base.
+**Given** retrieval returns cited results,
+**When** citation formatting runs after the Epic 6 migration,
+**Then** each result includes the canonical `document_version_id` plus a readable `source_alias`, rather than relying on raw path-centric identifiers alone.
 
-**Given** `ingest_document` is called with empty `content`,
-**When** the tool validates the input,
-**Then** it returns `{"status": "error", "error": "Content is required", "detail": "..."}` — not an unhandled exception.
+**Given** MCP or CLI consumers still need to trace a result back to the original observation,
+**When** a machine-readable response is inspected,
+**Then** the underlying provenance includes `source_locator` for traceability, but `source_alias` remains the primary display label.
 
-**Given** the near-duplicate detection from Story 6.2 is active,
-**When** `ingest_document` is called with content very similar to an existing document,
-**Then** the tool returns a warning in the response data alongside a successful ingest confirmation — the user is informed without blocking the capture.
+**Given** multiple source records point at the same canonical content,
+**When** a listing or citation is produced,
+**Then** the platform shows a stable, deterministic alias selection strategy documented in code and operator docs.
+
+**Given** a legacy path-centric record has been migrated,
+**When** it is surfaced through the updated listing/citation path,
+**Then** it still appears with a readable alias and complete provenance rather than a broken or empty label.
 
 ---
 
-### Story 6.7: Operator Validation — Connected Sources Live
+### Story 6.5: Migration, Backfill, and Operator Recovery
+
+As an operator,
+I want existing path-centric Phase 1 data migrated onto the canonical identity model with safe recovery steps,
+So that we can harden the store before connector work without corrupting provenance or retrieval.
+
+**Acceptance Criteria:**
+
+**Given** an existing Phase 1 database with path-centric provenance records,
+**When** the backfill/migration process runs,
+**Then** all existing documents are assigned canonical content/source/version relationships without losing retrieval visibility or version history.
+
+**Given** the migration is interrupted mid-run,
+**When** the operator reruns the migration,
+**Then** the process resumes safely or replays idempotently without creating duplicate canonical blobs or broken foreign-key chains.
+
+**Given** migrated records are sampled after backfill,
+**When** the operator compares pre- and post-migration outputs,
+**Then** document counts remain stable and citations/listings continue to resolve to valid records.
+
+**Given** the migration introduces a degraded or partial state,
+**When** the operator follows the recovery documentation,
+**Then** the required rollback, re-run, or reconcile steps are explicit, plain-language, and sufficient to restore a healthy canonical store.
+
+---
+
+### Story 6.6: OAuth Authentication Setup for Gmail and Calendar
+
+As an operator,
+I want to authenticate Gmail and Google Calendar once with local token refresh,
+So that connectors can access live data without repeated re-authorisation.
+
+**Acceptance Criteria:**
+
+**Given** `config.yaml` contains valid Google OAuth client credentials,
+**When** `cos auth gmail` or `cos auth calendar` is run for the first time,
+**Then** a browser-based OAuth flow completes and the resulting token is stored under `tokens/` with a plain-language success confirmation.
+
+**Given** tokens exist and later expire,
+**When** a connector makes an API call,
+**Then** the auth library refreshes the token locally using the stored refresh token without requiring a new manual consent flow.
+
+**Given** the `tokens/` directory exists,
+**When** repository ignore rules are reviewed,
+**Then** the token directory is gitignored and no generated token artifact is committed.
+
+**Given** a connector runs without the required token file,
+**When** authentication fails,
+**Then** the system logs a connector-scoped error with a direct recovery instruction and leaves the MCP retrieval path available.
+
+---
+
+### Story 6.7: Jobs Queue and Background Ingestion Worker
+
+As an operator,
+I want connector-triggered ingestion to run through a background job mechanism,
+So that live-source ingest does not block MCP retrieval or destabilise the core path.
+
+**Acceptance Criteria:**
+
+**Given** the Phase 2 jobs migration is applied,
+**When** the jobs table is inspected,
+**Then** it supports queued ingestion work with status tracking, retry metadata, and completion/error timestamps.
+
+**Given** a connector discovers new content to ingest,
+**When** it submits work,
+**Then** it creates a background job carrying the connector payload and does not invoke the ingest pipeline inline on the connector poll loop.
+
+**Given** the worker processes queued jobs,
+**When** it handles an ingest request,
+**Then** it executes through the same canonical identity decision path used by CLI ingest and records whether the outcome was new content, changed content, known-content/new-source, or no-op.
+
+**Given** the worker crashes or the container restarts mid-job,
+**When** processing resumes,
+**Then** unfinished work is retried safely and does not leave partial canonical identity records visible to users.
+
+---
+
+### Story 6.8: Gmail Connector
+
+As an operator,
+I want Gmail messages and attachments ingested through the hardened identity pipeline,
+So that email-based knowledge becomes searchable without manual download and duplicate inflation.
+
+**Acceptance Criteria:**
+
+**Given** Gmail is authenticated and enabled in configuration,
+**When** the connector polls for new messages,
+**Then** it creates background ingest jobs for message bodies and supported attachments using Gmail identifiers as provenance locators.
+
+**Given** an attachment or message body was already observed from the same Gmail source,
+**When** the connector polls again,
+**Then** the canonical ingest decision engine prevents duplicate processing and records the appropriate no-op or new-version outcome.
+
+**Given** two different Gmail messages carry byte-identical attachments,
+**When** both are ingested,
+**Then** they resolve to shared canonical content with distinct source provenance records rather than duplicate embeddings.
+
+**Given** the Gmail API is temporarily unavailable or rate-limited,
+**When** the connector handles the failure,
+**Then** it logs a degraded connector status, backs off appropriately, and leaves the core retrieval path healthy.
+
+---
+
+### Story 6.9: Google Calendar Connector
+
+As an operator,
+I want upcoming calendar events available through the same connected-source foundation,
+So that meeting context can later power prep and scheduled briefings.
+
+**Acceptance Criteria:**
+
+**Given** Google Calendar is authenticated and enabled in configuration,
+**When** the connector fetches events,
+**Then** it returns structured event records containing title, time range, attendees, and description fields suitable for retrieval and downstream workflows.
+
+**Given** calendar events are materialised into the knowledge context,
+**When** they are surfaced for retrieval or prep workflows,
+**Then** their provenance uses calendar-specific locators and readable aliases without redefining canonical document identity rules.
+
+**Given** an unchanged event is observed on successive syncs,
+**When** the connector reprocesses it,
+**Then** the ingest decision path treats it as unchanged/no-op rather than creating duplicate records.
+
+**Given** the Calendar API is unavailable,
+**When** the connector runs,
+**Then** the failure is logged as a degraded connector condition and the rest of the platform continues operating normally.
+
+---
+
+### Story 6.10: `ingest_document` MCP Tool
+
+As a user,
+I want to ingest notes or short documents directly through MCP,
+So that synthetic note capture also uses the same canonical identity and provenance model.
+
+**Acceptance Criteria:**
+
+**Given** a connected MCP client calls `ingest_document` with content and optional metadata,
+**When** the tool executes successfully,
+**Then** it routes the request through the same ingest decision engine as CLI and connector ingestion and returns the standard MCP response envelope.
+
+**Given** an MCP-ingested note duplicates existing bytes exactly,
+**When** the tool completes,
+**Then** it returns a successful response that explains the content was linked to existing canonical content rather than duplicated.
+
+**Given** an MCP-ingested note is semantically very similar but not byte-identical to existing content,
+**When** the near-duplicate layer runs,
+**Then** the tool returns a warning alongside the successful ingest outcome without blocking capture.
+
+**Given** the tool receives invalid input such as empty content,
+**When** validation runs,
+**Then** it returns a structured error envelope rather than an unhandled exception.
+
+---
+
+### Story 6.11: Operator Validation — Connected Sources Live
 
 As Iain (operator and first user),
-I want to run a documented smoke test of all connected knowledge sources,
-So that I can confirm live data from Gmail and Calendar flows into the knowledge base correctly before adding the Telegram layer in Epic 7.
+I want a smoke test proving canonical identity hardening and live-source ingestion work together,
+So that Epic 7 builds on a stable connected-ingestion base.
 
 **Acceptance Criteria:**
 
-**Given** Gmail authentication has been completed with `cos auth gmail`,
-**When** the connector polls and a test email with a PDF attachment exists in the inbox,
-**Then** the email body and attachment each appear as separate documents in `list_documents` within a reasonable polling interval — without any manual CLI ingest command.
+**Given** canonical identity migrations and backfill have completed,
+**When** the operator runs the validation checklist,
+**Then** local legacy documents, Gmail ingests, Calendar-derived records, and MCP-ingested notes all surface with valid aliases and provenance links.
 
-**Given** Google Calendar authentication has been completed with `cos auth calendar`,
-**When** `CalendarConnector.get_today_events()` is called,
-**Then** today's events are returned correctly and a retrieval query using a meeting title returns relevant documents from the knowledge base.
+**Given** a test set includes repeated content across local files, Gmail attachments, and MCP note capture,
+**When** validation completes,
+**Then** exact-byte duplicates share canonical content while retaining distinct source provenance records.
 
-**Given** a short note is typed directly into Claude Desktop or Claude Code using `ingest_document`,
-**When** a subsequent `retrieve` query references the note content,
-**Then** the note appears in the cited results — captured in seconds, retrievable immediately.
+**Given** a known source is re-ingested unchanged and then changed,
+**When** validation compares the outcomes,
+**Then** the unchanged case produces a no-op and the changed case produces a new current `document_version` with intact history.
 
-**Given** Gmail authentication tokens are present and valid,
-**When** the `cos` container is restarted,
-**Then** the Gmail connector resumes polling without requiring re-authentication — token refresh is automatic.
-
-**Given** the Gmail API is temporarily blocked (simulated by revoking network access for the `cos` container),
-**When** the connector attempts to poll,
-**Then** `cos status` shows the Gmail connector as degraded but all other components (MCP server, retrieval, Postgres) remain healthy and queries continue to be answered.
+**Given** connector authentication tokens remain valid across a container restart,
+**When** the platform restarts,
+**Then** connectors recover without fresh authorisation and the canonical identity rules still produce deterministic ingest outcomes.
 
 ---
 
-### Story 6.8: Documentation & Housekeeping
+### Story 6.12: Documentation and Housekeeping
 
-As Iain (operator and platform maintainer),
-I want all documentation updated to cover the connected knowledge source setup and operation,
-So that an operator can authenticate connectors, understand what gets ingested, and diagnose connector failures without assistance.
+As an operator,
+I want setup, migration, connector, and recovery documentation updated to match the hardened identity model,
+So that the backlog and docs stay consistent with the actual strategy.
 
 **Acceptance Criteria:**
 
-**Given** a new `docs/connectors.md` guide is created,
+**Given** the Epic 6 work is complete,
+**When** the documentation set is reviewed,
+**Then** it explains the canonical identity model, the four ingest outcomes, exact-byte deduplication behaviour, and how `source_alias` appears in listings and citations.
+
+**Given** connector setup documentation is updated,
 **When** it is reviewed,
-**Then** it covers: how to create Google OAuth credentials, how to run `cos auth gmail` and `cos auth calendar`, what content each connector ingests, how ingestion is queued and processed, how to check connector health via `cos status`, and how to diagnose failures via `cos logs`.
+**Then** it covers OAuth setup, token storage, connector-specific provenance locators, job processing, and degraded-mode recovery steps.
 
-**Given** `docs/setup.md` is updated,
-**When** it is reviewed,
-**Then** it references `docs/connectors.md` for connector setup and notes that connectors are optional — the platform functions fully without them.
+**Given** migration/backfill documentation is updated,
+**When** an operator follows it on an existing Phase 1 instance,
+**Then** the instructions are sufficient to migrate, validate, and recover without reading implementation code.
 
-**Given** the root `README.md` is updated,
-**When** it is reviewed,
-**Then** the current capabilities section reflects Phase 2 connected source ingestion: Gmail attachments, Calendar events, and MCP-based note capture.
-
-**Given** any deviations from `architecture.md` during Epic 6 (e.g. changes to jobs table schema, connector polling behaviour, OAuth token management),
-**When** `architecture.md` is reviewed,
-**Then** the connectors and jobs queue sections reflect what was built.
-
-**Given** all Epic 6 documents are reviewed together,
-**When** cross-checked for consistency,
-**Then** `cos auth` command syntax, connector config keys, and jobs queue behaviour are described consistently across `docs/connectors.md`, `docs/setup.md`, and `architecture.md`.
+**Given** Epic 6 introduced any divergence from `architecture.md`,
+**When** the architecture and planning artifacts are reviewed together,
+**Then** the documented model, story ordering, and operator workflow are consistent across `architecture.md`, `epics.md`, and connector documentation.
 
 ## Epic 7: Ambient Messaging Intelligence
 
 Users interact with the platform through Telegram — asking questions, capturing notes, and receiving proactive morning briefs — without opening a dedicated interface. The platform comes to them, augmented by live web search when local knowledge is insufficient.
-**FRs covered:** FR8, FR15, FR18, FR19, FR33, FR34
+**FRs covered:** FR9, FR16, FR19, FR20, FR34, FR35
 **NFRs:** NFR11, NFR20
-**Note on FR34:** Scheduled briefs are delivered via Telegram only in this phase. The "or email" option from the PRD has been descoped — email delivery is deferred to a future phase if a specific user requires it.
 
 ### Story 7.1: Telegram Bot Setup & Output Channel
 
@@ -1507,7 +1616,7 @@ So that I can capture ideas in the moment, from my phone, knowing they will be s
 
 **Given** a note has been ingested via Telegram,
 **When** `list_documents` is called,
-**Then** the note appears with `source_path: "telegram://<timestamp>"` and a non-zero `chunk_count`.
+**Then** the note appears with a readable `source_alias`, a canonical `document_version_id`, and a non-zero `chunk_count`, while the underlying provenance retains the Telegram locator.
 
 **Given** a subsequent `retrieve` query references the content of the captured note,
 **When** the retrieval runs,
@@ -1552,20 +1661,20 @@ So that my answers are augmented with current information rather than being limi
 ### Story 7.5: Scheduler Infrastructure & Morning Brief
 
 As a user,
-I want to receive a proactive morning brief via Telegram at a configured time each day,
+I want to receive a proactive morning brief via a configured output channel at a configured time each day,
 So that the platform surfaces relevant knowledge before I start work, without me having to ask.
 
 **Acceptance Criteria:**
 
-**Given** APScheduler is integrated and a brief time is configured in `config.yaml` (e.g. `scheduler.morning_brief_time: "07:30"`),
+**Given** APScheduler is integrated and a brief time plus outbound channel are configured in `config.yaml` (e.g. `scheduler.morning_brief_time: "07:30"` and `scheduler.brief_channel: "telegram"` or `"email"`),
 **When** the scheduler triggers at the configured time,
-**Then** it fetches today's calendar events via `CalendarConnector`, retrieves relevant documents for each event via `RetrievalService`, synthesises a morning brief via `LLMAdapter`, and delivers it via `OutputRouter.send(channel="telegram")`.
+**Then** it fetches today's calendar events via `CalendarConnector`, retrieves relevant documents for each event via `RetrievalService`, synthesises a morning brief via `LLMAdapter`, and delivers it via `OutputRouter.send(channel=<configured brief channel>)`.
 
 **Given** a morning brief is delivered,
-**When** the Telegram message is reviewed,
-**Then** it is appropriately concise for a messaging context, references today's key meetings, and cites at least one relevant knowledge base document per meeting where relevant content exists.
+**When** the outbound message is reviewed in the configured channel,
+**Then** it is appropriately formatted for that channel, references today's key meetings, and cites at least one relevant knowledge base document per meeting where relevant content exists.
 
-**Given** a scheduled brief job runs but the Telegram channel is unavailable,
+**Given** a scheduled brief job runs but the configured output channel is unavailable,
 **When** delivery fails,
 **Then** the failure is logged with `component: "scheduler"`, the job is marked as `failed` in the jobs table, and the next scheduled job runs normally at its configured time — one delivery failure does not stop the scheduler.
 
