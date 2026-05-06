@@ -89,6 +89,14 @@ class GmailConnectorConfig(BaseModel):
     staging_dir: Path = Path("/data/connector-staging/gmail")
 
 
+class GoogleCalendarConnectorConfig(BaseModel):
+    calendar_ids: list[str] = ["primary"]
+    lookback_hours: int = Field(default=12, ge=0)
+    lookahead_days: int = Field(default=14, ge=0)
+    max_results: int = Field(default=100, ge=1, le=2500)
+    staging_dir: Path = Path("/data/connector-staging/google-calendar")
+
+
 class CosConfig(BaseModel):
     llm: LLMConfig
     embedding: EmbeddingConfig
@@ -101,6 +109,7 @@ class CosConfig(BaseModel):
     chunking: ChunkingConfig = ChunkingConfig()
     google_oauth: GoogleOAuthConfig | None = None
     gmail: GmailConnectorConfig | None = None
+    google_calendar: GoogleCalendarConnectorConfig | None = None
 
     @classmethod
     def load(cls, path: str | Path = "config.yaml") -> "CosConfig":

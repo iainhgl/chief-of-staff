@@ -73,6 +73,46 @@ def sync_gmail() -> None:
     typer.echo(f"  {result.attachments_skipped} unsupported attachments skipped")
 
 
+@sync_app.command("calendar")
+def sync_calendar() -> None:
+    """Fetch upcoming Calendar events and enqueue background ingest jobs."""
+    from cos.services.calendar import CalendarSyncDegradedError
+
+    try:
+        config = CosConfig.load()
+        if "google_calendar" not in config.connectors:
+            typer.echo(
+                'Error: "google_calendar" is not enabled. Add "google_calendar" to the '
+                "connectors list in config.yaml and try again.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        result = asyncio.run(_do_sync_calendar(config))
+    except SystemExit as exc:
+        typer.echo(f"Calendar sync configuration error: {exc}", err=True)
+        raise typer.Exit(code=1)
+    except typer.Exit:
+        raise
+    except CalendarSyncDegradedError as exc:
+        typer.echo(f"Calendar sync degraded: {exc}", err=True)
+        typer.echo("Partial results:", err=True)
+        typer.echo(f"  {exc.result.calendars_scanned} calendars scanned", err=True)
+        typer.echo(f"  {exc.result.events_discovered} events discovered", err=True)
+        typer.echo(f"  {exc.result.jobs_enqueued} jobs enqueued", err=True)
+        raise typer.Exit(code=1)
+    except AuthError as exc:
+        typer.echo(f"Authentication error: {exc}", err=True)
+        raise typer.Exit(code=1)
+    except Exception as exc:
+        typer.echo(f"Calendar sync failed: {exc}", err=True)
+        raise typer.Exit(code=1)
+
+    typer.echo("Calendar sync complete:")
+    typer.echo(f"  {result.calendars_scanned} calendars scanned")
+    typer.echo(f"  {result.events_discovered} events discovered")
+    typer.echo(f"  {result.jobs_enqueued} jobs enqueued")
+
+
 async def _do_sync_gmail(config: CosConfig) -> Any:
     from cos.services.gmail import poll_gmail
 
@@ -80,6 +120,15 @@ async def _do_sync_gmail(config: CosConfig) -> Any:
         config.database.libpq_dsn
     ) as conn:
         return await poll_gmail(config, conn)
+
+
+async def _do_sync_calendar(config: CosConfig) -> Any:
+    from cos.services.calendar import sync_calendar as _sync_calendar
+
+    async with await psycopg.AsyncConnection.connect(
+        config.database.libpq_dsn
+    ) as conn:
+        return await _sync_calendar(config, conn)
 
 
 def _run_connector_auth(connector: str, token_path: str) -> None:  # type: ignore[type-arg]
