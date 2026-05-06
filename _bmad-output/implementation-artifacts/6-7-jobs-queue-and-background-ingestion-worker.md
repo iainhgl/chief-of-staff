@@ -1,6 +1,6 @@
 # Story 6.7: Jobs Queue and Background Ingestion Worker
 
-Status: review
+Status: done
 
 ## Story
 
@@ -84,6 +84,13 @@ So that live-source ingest does not block MCP retrieval or destabilise the core 
   - [x] Add [tests/worker/test_worker.py](/Users/iain.livingstone/Development/CoS/cos/tests/worker/test_worker.py) for `run_once`, success, retryable failure, terminal failure, and stale job recovery on startup
   - [x] Extend [tests/ingestion/test_pipeline.py](/Users/iain.livingstone/Development/CoS/cos/tests/ingestion/test_pipeline.py) and [tests/services/test_ingestion_service.py](/Users/iain.livingstone/Development/CoS/cos/tests/services/test_ingestion_service.py) to cover the new shared source-aware ingest path while keeping existing CLI ingest behaviour unchanged
   - [x] Keep all tests offline: no Gmail API, Calendar API, browser auth, or external queue service
+
+### Review Findings
+
+- [x] [Review][Patch] Claimed jobs are not durably visible as `running` because claim, ingest, and terminal update share one uncommitted connection, so status tracking and startup stale-job recovery do not work as designed [src/cos/services/jobs.py:41]
+- [x] [Review][Patch] Retry backoff is calculated from the claim transaction start time rather than the failure time, so long-running failures can be re-queued immediately instead of waiting for the intended delay [src/cos/store/db.py:715]
+- [x] [Review][Patch] Malformed `jobs.payload` rows can raise before the retry/terminal handling block and crash the worker loop instead of being recorded as a failed job [src/cos/services/jobs.py:50]
+- [x] [Review][Defer] `gen_random_uuid()` remains an implicit migration dependency in the new jobs table, but that pattern is pre-existing across earlier migrations in this repo [src/cos/store/migrations/002_jobs.sql:3] — deferred, pre-existing
 
 ## Dev Notes
 

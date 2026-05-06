@@ -720,7 +720,8 @@ async def mark_job_retryable_failure(
 ) -> None:
     await conn.execute(
         "UPDATE jobs SET status = 'queued', last_error = %s, "
-        "available_at = now() + (%s * INTERVAL '1 second'), updated_at = now() "
+        "available_at = clock_timestamp() + (%s * INTERVAL '1 second'), "
+        "updated_at = clock_timestamp() "
         "WHERE id = %s::uuid",
         (error, backoff_seconds, job_id),
     )

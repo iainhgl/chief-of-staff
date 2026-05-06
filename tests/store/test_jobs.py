@@ -1,6 +1,7 @@
 """Tests for job queue store helpers (enqueue, claim, status transitions)."""
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import psycopg
 from conftest import TEST_DSN
@@ -15,7 +16,10 @@ from cos.store.db import (
 )
 
 
-async def test_enqueue_job_creates_queued_record(migrated_db, db_conn) -> None:
+async def test_enqueue_job_creates_queued_record(
+    migrated_db: None,
+    db_conn: psycopg.AsyncConnection[Any],
+) -> None:
     payload = {"staged_path": "/data/test.md", "source_type": "file",
                "source_locator": "/data/test.md", "source_alias": "test.md"}
     job = await enqueue_job(db_conn, "ingest", payload)
@@ -28,14 +32,17 @@ async def test_enqueue_job_creates_queued_record(migrated_db, db_conn) -> None:
     assert job.max_attempts == 3
 
 
-async def test_enqueue_job_respects_custom_max_attempts(migrated_db, db_conn) -> None:
+async def test_enqueue_job_respects_custom_max_attempts(
+    migrated_db: None,
+    db_conn: psycopg.AsyncConnection[Any],
+) -> None:
     payload = {"staged_path": "/data/x.md", "source_type": "file",
                "source_locator": "/data/x.md", "source_alias": "x.md"}
     job = await enqueue_job(db_conn, "ingest", payload, max_attempts=5)
     assert job.max_attempts == 5
 
 
-async def test_claim_next_job_returns_oldest_first(migrated_db) -> None:
+async def test_claim_next_job_returns_oldest_first(migrated_db: None) -> None:
     payload_a = {"staged_path": "/data/a.md", "source_type": "file",
                  "source_locator": "/data/a.md", "source_alias": "a.md"}
     payload_b = {"staged_path": "/data/b.md", "source_type": "file",
@@ -56,13 +63,14 @@ async def test_claim_next_job_returns_oldest_first(migrated_db) -> None:
 
 
 async def test_claim_next_job_returns_none_when_queue_empty(
-    migrated_db, db_conn
+    migrated_db: None,
+    db_conn: psycopg.AsyncConnection[Any],
 ) -> None:
     result = await claim_next_job(db_conn, "ingest")
     assert result is None
 
 
-async def test_claim_next_job_skips_running_jobs(migrated_db) -> None:
+async def test_claim_next_job_skips_running_jobs(migrated_db: None) -> None:
     payload = {"staged_path": "/data/r.md", "source_type": "file",
                "source_locator": "/data/r.md", "source_alias": "r.md"}
 
@@ -78,7 +86,7 @@ async def test_claim_next_job_skips_running_jobs(migrated_db) -> None:
         assert second is None
 
 
-async def test_claim_next_job_skips_future_available_at(migrated_db) -> None:
+async def test_claim_next_job_skips_future_available_at(migrated_db: None) -> None:
     payload = {"staged_path": "/data/f.md", "source_type": "file",
                "source_locator": "/data/f.md", "source_alias": "f.md"}
     future = datetime.now(timezone.utc) + timedelta(hours=1)
@@ -91,7 +99,7 @@ async def test_claim_next_job_skips_future_available_at(migrated_db) -> None:
         assert result is None
 
 
-async def test_mark_job_succeeded_sets_status(migrated_db) -> None:
+async def test_mark_job_succeeded_sets_status(migrated_db: None) -> None:
     payload = {"staged_path": "/data/s.md", "source_type": "file",
                "source_locator": "/data/s.md", "source_alias": "s.md"}
 
@@ -114,7 +122,9 @@ async def test_mark_job_succeeded_sets_status(migrated_db) -> None:
     assert row[1] is not None
 
 
-async def test_mark_job_retryable_failure_requeues_with_backoff(migrated_db) -> None:
+async def test_mark_job_retryable_failure_requeues_with_backoff(
+    migrated_db: None,
+) -> None:
     payload = {"staged_path": "/data/retry.md", "source_type": "file",
                "source_locator": "/data/retry.md", "source_alias": "retry.md"}
 
@@ -141,7 +151,38 @@ async def test_mark_job_retryable_failure_requeues_with_backoff(migrated_db) -> 
     assert row[2] == 1
 
 
-async def test_mark_job_terminal_failure_sets_failed(migrated_db) -> None:
+async def test_mark_job_retryable_failure_uses_failure_time_not_claim_time(
+    migrated_db: None,
+) -> None:
+    payload = {
+        "staged_path": "/data/delayed.md",
+        "source_type": "file",
+        "source_locator": "/data/delayed.md",
+        "source_alias": "delayed.md",
+    }
+
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        job = await enqueue_job(conn, "ingest", payload)
+
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        claimed = await claim_next_job(conn, "ingest")
+        assert claimed is not None
+        await conn.execute("SELECT pg_sleep(1)")
+        await mark_job_retryable_failure(
+            conn, claimed.id, "transient error", backoff_seconds=0
+        )
+        result = await conn.execute(
+            "SELECT started_at, available_at FROM jobs WHERE id = %s::uuid",
+            (job.id,),
+        )
+        row = await result.fetchone()
+
+    assert row is not None
+    started_at, available_at = row
+    assert available_at > started_at + timedelta(milliseconds=500)
+
+
+async def test_mark_job_terminal_failure_sets_failed(migrated_db: None) -> None:
     payload = {"staged_path": "/data/fail.md", "source_type": "file",
                "source_locator": "/data/fail.md", "source_alias": "fail.md"}
 
@@ -166,7 +207,9 @@ async def test_mark_job_terminal_failure_sets_failed(migrated_db) -> None:
     assert row[2] is not None
 
 
-async def test_requeue_stale_jobs_returns_running_jobs_to_queued(migrated_db) -> None:
+async def test_requeue_stale_jobs_returns_running_jobs_to_queued(
+    migrated_db: None,
+) -> None:
     payload = {"staged_path": "/data/stale.md", "source_type": "file",
                "source_locator": "/data/stale.md", "source_alias": "stale.md"}
 
@@ -198,7 +241,9 @@ async def test_requeue_stale_jobs_returns_running_jobs_to_queued(migrated_db) ->
     assert row[1] is None
 
 
-async def test_requeue_stale_jobs_ignores_fresh_running_jobs(migrated_db) -> None:
+async def test_requeue_stale_jobs_ignores_fresh_running_jobs(
+    migrated_db: None,
+) -> None:
     payload = {"staged_path": "/data/fresh.md", "source_type": "file",
                "source_locator": "/data/fresh.md", "source_alias": "fresh.md"}
 
@@ -214,7 +259,9 @@ async def test_requeue_stale_jobs_ignores_fresh_running_jobs(migrated_db) -> Non
     assert requeued == 0
 
 
-async def test_requeue_stale_jobs_ignores_succeeded_and_failed(migrated_db) -> None:
+async def test_requeue_stale_jobs_ignores_succeeded_and_failed(
+    migrated_db: None,
+) -> None:
     payload_s = {"staged_path": "/data/done.md", "source_type": "file",
                  "source_locator": "/data/done.md", "source_alias": "done.md"}
 
@@ -232,7 +279,9 @@ async def test_requeue_stale_jobs_ignores_succeeded_and_failed(migrated_db) -> N
     assert requeued == 0
 
 
-async def test_retry_cycle_eventually_reaches_terminal_failure(migrated_db) -> None:
+async def test_retry_cycle_eventually_reaches_terminal_failure(
+    migrated_db: None,
+) -> None:
     payload = {"staged_path": "/data/exhaust.md", "source_type": "file",
                "source_locator": "/data/exhaust.md", "source_alias": "exhaust.md"}
 

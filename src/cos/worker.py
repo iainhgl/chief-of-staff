@@ -24,8 +24,7 @@ async def run_once(dsn: str, config: CosConfig) -> bool:
 
     Test-friendly single-iteration mode — does not run startup recovery or sleep.
     """
-    async with await psycopg.AsyncConnection.connect(dsn) as conn:
-        return await process_next_ingest_job(conn, config)
+    return await process_next_ingest_job(dsn, config)
 
 
 async def _run_loop(dsn: str, config: CosConfig) -> None:
@@ -53,8 +52,7 @@ async def _run_loop(dsn: str, config: CosConfig) -> None:
         )
 
     while True:
-        async with await psycopg.AsyncConnection.connect(dsn) as conn:
-            processed = await process_next_ingest_job(conn, config)
+        processed = await process_next_ingest_job(dsn, config)
         if not processed:
             await asyncio.sleep(_IDLE_SLEEP_SECONDS)
 

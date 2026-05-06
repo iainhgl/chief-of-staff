@@ -18,6 +18,13 @@ from cos.store.db import (
 )
 from cos.store.models import IngestJobPayload, JobRecord
 
+_REQUIRED_INGEST_PAYLOAD_FIELDS = (
+    "staged_path",
+    "source_type",
+    "source_locator",
+    "source_alias",
+)
+
 
 async def submit_ingest_job(
     conn: psycopg.AsyncConnection[Any],
@@ -38,33 +45,61 @@ async def submit_ingest_job(
     return await enqueue_job(conn, "ingest", payload)
 
 
+def _hydrate_ingest_payload(job: JobRecord) -> IngestJobPayload:
+    missing = [
+        field for field in _REQUIRED_INGEST_PAYLOAD_FIELDS if field not in job.payload
+    ]
+    if missing:
+        missing_fields = ", ".join(missing)
+        raise ValueError(
+            f"ingest job {job.id} missing payload fields: {missing_fields}"
+        )
+
+    metadata = job.payload.get("metadata", {})
+    if not isinstance(metadata, dict):
+        raise ValueError(f"ingest job {job.id} metadata must be an object")
+
+    values: dict[str, str] = {}
+    for field in _REQUIRED_INGEST_PAYLOAD_FIELDS:
+        value = job.payload[field]
+        if not isinstance(value, str) or not value:
+            raise ValueError(
+                f"ingest job {job.id} field {field!r} must be a non-empty string"
+            )
+        values[field] = value
+
+    return IngestJobPayload(
+        staged_path=values["staged_path"],
+        source_type=values["source_type"],
+        source_locator=values["source_locator"],
+        source_alias=values["source_alias"],
+        metadata=metadata,
+    )
+
+
 async def process_next_ingest_job(
-    conn: psycopg.AsyncConnection[Any],
+    dsn: str,
     config: CosConfig,
 ) -> bool:
     """Claim and process one ingest job. Returns True if a job was processed."""
-    job = await claim_next_job(conn, "ingest")
+    async with await psycopg.AsyncConnection.connect(dsn) as claim_conn:
+        job = await claim_next_job(claim_conn, "ingest")
     if job is None:
         return False
 
-    payload = IngestJobPayload(
-        staged_path=job.payload["staged_path"],
-        source_type=job.payload["source_type"],
-        source_locator=job.payload["source_locator"],
-        source_alias=job.payload["source_alias"],
-        metadata=job.payload.get("metadata", {}),
-    )
-
     try:
-        result = await run_pipeline_from_source(
-            staged_path=Path(payload.staged_path),
-            source_type=payload.source_type,
-            source_locator=payload.source_locator,
-            source_alias=payload.source_alias,
-            config=config,
-            conn=conn,
-        )
-        await mark_job_succeeded(conn, job.id)
+        payload = _hydrate_ingest_payload(job)
+        async with await psycopg.AsyncConnection.connect(dsn) as process_conn:
+            result = await run_pipeline_from_source(
+                staged_path=Path(payload.staged_path),
+                source_type=payload.source_type,
+                source_locator=payload.source_locator,
+                source_alias=payload.source_alias,
+                config=config,
+                conn=process_conn,
+            )
+        async with await psycopg.AsyncConnection.connect(dsn) as update_conn:
+            await mark_job_succeeded(update_conn, job.id)
         logging.info(
             json.dumps(
                 {
@@ -80,7 +115,8 @@ async def process_next_ingest_job(
     except Exception as exc:
         error_str = str(exc)
         if job.attempt_count >= job.max_attempts:
-            await mark_job_terminal_failure(conn, job.id, error_str)
+            async with await psycopg.AsyncConnection.connect(dsn) as update_conn:
+                await mark_job_terminal_failure(update_conn, job.id, error_str)
             logging.error(
                 json.dumps(
                     {
@@ -94,7 +130,8 @@ async def process_next_ingest_job(
                 )
             )
         else:
-            await mark_job_retryable_failure(conn, job.id, error_str)
+            async with await psycopg.AsyncConnection.connect(dsn) as update_conn:
+                await mark_job_retryable_failure(update_conn, job.id, error_str)
             logging.warning(
                 json.dumps(
                     {
