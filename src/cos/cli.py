@@ -137,7 +137,18 @@ def ingest(
 
 async def _ingest_file(target: Path, service: IngestService) -> None:
     result = await service.ingest_file(str(target))
-    typer.echo(f"Ingested {target.name} -> {result.chunk_count} chunks indexed")
+    if result.outcome == "unchanged":
+        typer.echo(f"No change detected in {target.name} — already up to date")
+    elif result.outcome == "new_source_known_content":
+        typer.echo(f"Recorded {target.name} as new source — content already indexed")
+    elif result.outcome == "changed_content":
+        typer.echo(
+            "Updated "
+            f"{target.name} -> {result.chunk_count} new chunks indexed "
+            "(new version)"
+        )
+    else:
+        typer.echo(f"Ingested {target.name} -> {result.chunk_count} chunks indexed")
 
 
 async def _ingest_folder(target: Path, service: IngestService) -> None:
@@ -160,7 +171,22 @@ async def _ingest_folder(target: Path, service: IngestService) -> None:
             typer.echo(f"Error ingesting {file_path.name}: {exc}", err=True)
             continue
 
-        typer.echo(f"Ingested {file_path.name} -> {result.chunk_count} chunks indexed")
+        if result.outcome == "unchanged":
+            typer.echo(f"No change detected in {file_path.name} — already up to date")
+        elif result.outcome == "new_source_known_content":
+            typer.echo(
+                f"Recorded {file_path.name} as new source — content already indexed"
+            )
+        elif result.outcome == "changed_content":
+            typer.echo(
+                "Updated "
+                f"{file_path.name} -> {result.chunk_count} new chunks indexed "
+                "(new version)"
+            )
+        else:
+            typer.echo(
+                f"Ingested {file_path.name} -> {result.chunk_count} chunks indexed"
+            )
         total_files += 1
         total_chunks += result.chunk_count
 
