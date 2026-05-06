@@ -5,7 +5,7 @@ import psycopg
 from conftest import TEST_DSN, make_test_config
 
 from cos.ingestion.identity import IngestOutcome
-from cos.ingestion.pipeline import PipelineResult, run_pipeline
+from cos.ingestion.pipeline import PipelineResult, run_pipeline, run_pipeline_from_source
 
 
 async def test_run_pipeline_markdown_creates_document(
@@ -298,3 +298,101 @@ async def test_run_pipeline_changed_content_links_source_version_to_new_document
 
     assert second.outcome is IngestOutcome.CHANGED_CONTENT
     assert sv_row == (2,)
+
+
+async def test_run_pipeline_from_source_accepts_explicit_source_metadata(
+    migrated_db: None,
+    tmp_path: Path,
+    mock_embed: None,
+) -> None:
+    staged = tmp_path / "staged.md"
+    staged.write_text("Connector-staged content", encoding="utf-8")
+    config = make_test_config(tmp_path)
+
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        result = await run_pipeline_from_source(
+            staged_path=staged,
+            source_type="gmail_attachment",
+            source_locator="gmail://message/abc/attachment/xyz",
+            source_alias="board-pack.pdf",
+            config=config,
+            conn=conn,
+        )
+
+    assert isinstance(result, PipelineResult)
+    assert str(uuid.UUID(result.document_id)) == result.document_id
+    assert result.chunk_count >= 1
+    assert result.outcome is IngestOutcome.NEW_CONTENT
+
+
+async def test_run_pipeline_from_source_uses_source_locator_for_identity(
+    migrated_db: None,
+    tmp_path: Path,
+    mock_embed: None,
+    monkeypatch,
+) -> None:
+    """Re-staging same content at a different path but same source_locator is UNCHANGED."""
+    staged_first = tmp_path / "first_stage.md"
+    staged_second = tmp_path / "second_stage.md"
+    content = "Same content staged twice"
+    staged_first.write_text(content, encoding="utf-8")
+    staged_second.write_text(content, encoding="utf-8")
+    config = make_test_config(tmp_path)
+    source_locator = "gmail://message/abc/attachment/xyz"
+
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        first = await run_pipeline_from_source(
+            staged_path=staged_first,
+            source_type="gmail_attachment",
+            source_locator=source_locator,
+            source_alias="board-pack.pdf",
+            config=config,
+            conn=conn,
+        )
+
+    async def _fail_extract(*args, **kwargs):
+        raise AssertionError("extract should not run for unchanged content")
+
+    monkeypatch.setattr("cos.ingestion.pipeline.extract", _fail_extract)
+
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        second = await run_pipeline_from_source(
+            staged_path=staged_second,
+            source_type="gmail_attachment",
+            source_locator=source_locator,
+            source_alias="board-pack.pdf",
+            config=config,
+            conn=conn,
+        )
+
+    assert second.document_id == first.document_id
+    assert second.outcome is IngestOutcome.UNCHANGED
+    assert second.chunk_count == 0
+
+
+async def test_run_pipeline_wrapper_preserves_file_source_behaviour(
+    migrated_db: None,
+    tmp_path: Path,
+    mock_embed: None,
+) -> None:
+    """run_pipeline must remain a thin wrapper with no user-visible behaviour change."""
+    source_path = tmp_path / "cli-ingest.md"
+    source_path.write_text("CLI-ingested document", encoding="utf-8")
+    config = make_test_config(tmp_path)
+
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        result = await run_pipeline(source_path, config, conn)
+
+    assert result.outcome is IngestOutcome.NEW_CONTENT
+    assert result.chunk_count >= 1
+
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        source_result = await conn.execute(
+            "SELECT source_type, source_locator, source_alias FROM sources"
+        )
+        row = await source_result.fetchone()
+
+    assert row is not None
+    assert row[0] == "file"
+    assert row[1] == str(source_path)
+    assert row[2] == source_path.name

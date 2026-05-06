@@ -21,7 +21,7 @@ async def clean_tables(migrated_db: None) -> AsyncIterator[None]:
     yield
     async with await psycopg.AsyncConnection.connect(TEST_DSN, autocommit=True) as conn:
         await conn.execute(
-            "TRUNCATE source_versions, embeddings, chunks, document_versions, "
+            "TRUNCATE jobs, source_versions, embeddings, chunks, document_versions, "
             "content_blobs, sources, documents "
             "RESTART IDENTITY CASCADE"
         )

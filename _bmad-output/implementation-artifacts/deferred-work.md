@@ -1,5 +1,9 @@
 # Deferred Work
 
+## Deferred from: code review of 6-7-jobs-queue-and-background-ingestion-worker.md (2026-05-06)
+
+- `gen_random_uuid()` remains an implicit migration dependency in `002_jobs.sql`; this story follows a pre-existing repo-wide pattern rather than introducing a new extension-management strategy
+
 ## Deferred from: code review of 1-1-project-scaffold-containerised-services-and-core-interfaces (2026-04-20)
 
 - `uv:latest` Dockerfile tag unpinned — pin to a specific version for reproducible builds; not spec-mandated for Story 1.1

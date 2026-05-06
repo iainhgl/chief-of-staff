@@ -30,17 +30,18 @@ class PipelineResult:
     message: str
 
 
-async def run_pipeline(
-    source_path: Path,
+async def run_pipeline_from_source(
+    staged_path: Path,
+    source_type: str,
+    source_locator: str,
+    source_alias: str,
     config: CosConfig,
     conn: psycopg.AsyncConnection[Any],
 ) -> PipelineResult:
-    source_bytes = source_path.read_bytes()
+    """Source-aware ingest core. Uses source_* fields for provenance identity."""
+    source_bytes = staged_path.read_bytes()
     file_hash = hashlib.sha256(source_bytes).hexdigest()
     byte_size = len(source_bytes)
-    source_type = "file"
-    source_locator = str(source_path)
-    source_alias = source_path.name
 
     logging.info(
         json.dumps(
@@ -49,7 +50,7 @@ async def run_pipeline(
                 "level": "INFO",
                 "component": "ingestion",
                 "message": "pipeline start",
-                "source_path": str(source_path),
+                "source_locator": source_locator,
             }
         )
     )
@@ -114,7 +115,7 @@ async def run_pipeline(
         )
 
     extraction = await extract(
-        source_path,
+        staged_path,
         tika_url=config.tika.url,
         originals_dir=config.storage.originals_dir,
         markdown_dir=config.storage.markdown_dir,
@@ -165,7 +166,7 @@ async def run_pipeline(
     ]
     document_id = await store_document_canonical(
         conn,
-        source_path=str(source_path),
+        source_path=source_locator,
         sha256=file_hash,
         byte_size=byte_size,
         source_type=source_type,
@@ -193,4 +194,20 @@ async def run_pipeline(
         chunk_count=len(chunks),
         outcome=identity.outcome,
         message=identity.message,
+    )
+
+
+async def run_pipeline(
+    source_path: Path,
+    config: CosConfig,
+    conn: psycopg.AsyncConnection[Any],
+) -> PipelineResult:
+    """CLI-facing ingest. Thin wrapper over run_pipeline_from_source."""
+    return await run_pipeline_from_source(
+        staged_path=source_path,
+        source_type="file",
+        source_locator=str(source_path),
+        source_alias=source_path.name,
+        config=config,
+        conn=conn,
     )

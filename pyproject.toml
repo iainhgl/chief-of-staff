@@ -28,6 +28,7 @@ dependencies = [
 [project.scripts]
 cos = "cos.cli:app"
 cos-mcp = "cos.mcp_server.server:run"
+cos-worker = "cos.worker:run"
 
 [build-system]
 requires = ["uv_build>=0.10.8,<0.11.0"]

@@ -1,6 +1,7 @@
 """Database helpers — migration runner and connection pool support."""
 import json
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,7 @@ from cos.store.models import (
     ContentBlobRecord,
     DocumentSummary,
     EmbeddingRecord,
+    JobRecord,
     SourceRecord,
     SourceVersionRecord,
     VersionSummary,
@@ -611,3 +613,141 @@ async def store_document_canonical(
             )
 
     return str(document_id)
+
+
+def _row_to_job(row: tuple[Any, ...]) -> JobRecord:
+    return JobRecord(
+        id=str(row[0]),
+        job_type=row[1],
+        status=row[2],
+        payload=row[3],
+        attempt_count=row[4],
+        max_attempts=row[5],
+        available_at=row[6],
+        started_at=row[7],
+        completed_at=row[8],
+        last_error=row[9],
+        created_at=row[10],
+        updated_at=row[11],
+    )
+
+
+_JOB_COLUMNS = (
+    "id::text, job_type, status, payload, attempt_count, max_attempts, "
+    "available_at, started_at, completed_at, last_error, created_at, updated_at"
+)
+
+
+async def enqueue_job(
+    conn: psycopg.AsyncConnection[Any],
+    job_type: str,
+    payload: dict[str, Any],
+    max_attempts: int = 3,
+    available_at: datetime | None = None,
+) -> JobRecord:
+    if available_at is None:
+        # Let the database supply available_at so clock skew between Python and
+        # Postgres doesn't cause the row to be invisible to claim_next_job.
+        result = await conn.execute(
+            f"INSERT INTO jobs (job_type, payload, max_attempts) "
+            f"VALUES (%s, %s, %s) "
+            f"RETURNING {_JOB_COLUMNS}",
+            (job_type, json.dumps(payload), max_attempts),
+        )
+    else:
+        result = await conn.execute(
+            f"INSERT INTO jobs (job_type, payload, max_attempts, available_at) "
+            f"VALUES (%s, %s, %s, %s) "
+            f"RETURNING {_JOB_COLUMNS}",
+            (job_type, json.dumps(payload), max_attempts, available_at),
+        )
+    row = await result.fetchone()
+    if row is None:
+        raise RuntimeError("enqueue_job returned no row")
+    return _row_to_job(row)
+
+
+async def claim_next_job(
+    conn: psycopg.AsyncConnection[Any],
+    job_type: str,
+) -> JobRecord | None:
+    result = await conn.execute(
+        """
+        WITH candidate AS (
+            SELECT id
+            FROM jobs
+            WHERE job_type = %s
+              AND status = 'queued'
+              AND available_at <= now()
+            ORDER BY created_at ASC
+            FOR UPDATE SKIP LOCKED
+            LIMIT 1
+        )
+        UPDATE jobs j
+        SET status = 'running',
+            attempt_count = j.attempt_count + 1,
+            started_at = now(),
+            updated_at = now()
+        FROM candidate
+        WHERE j.id = candidate.id
+        RETURNING j.id::text, j.job_type, j.status, j.payload, j.attempt_count,
+                  j.max_attempts, j.available_at, j.started_at, j.completed_at,
+                  j.last_error, j.created_at, j.updated_at
+        """,
+        (job_type,),
+    )
+    row = await result.fetchone()
+    return _row_to_job(row) if row is not None else None
+
+
+async def mark_job_succeeded(
+    conn: psycopg.AsyncConnection[Any],
+    job_id: str,
+) -> None:
+    await conn.execute(
+        "UPDATE jobs SET status = 'succeeded', "
+        "completed_at = now(), updated_at = now() "
+        "WHERE id = %s::uuid",
+        (job_id,),
+    )
+
+
+async def mark_job_retryable_failure(
+    conn: psycopg.AsyncConnection[Any],
+    job_id: str,
+    error: str,
+    backoff_seconds: int = 60,
+) -> None:
+    await conn.execute(
+        "UPDATE jobs SET status = 'queued', last_error = %s, "
+        "available_at = clock_timestamp() + (%s * INTERVAL '1 second'), "
+        "updated_at = clock_timestamp() "
+        "WHERE id = %s::uuid",
+        (error, backoff_seconds, job_id),
+    )
+
+
+async def mark_job_terminal_failure(
+    conn: psycopg.AsyncConnection[Any],
+    job_id: str,
+    error: str,
+) -> None:
+    await conn.execute(
+        "UPDATE jobs SET status = 'failed', last_error = %s, "
+        "completed_at = now(), updated_at = now() "
+        "WHERE id = %s::uuid",
+        (error, job_id),
+    )
+
+
+async def requeue_stale_jobs(
+    conn: psycopg.AsyncConnection[Any],
+    older_than_seconds: int = 300,
+) -> int:
+    result = await conn.execute(
+        "UPDATE jobs SET status = 'queued', started_at = NULL, updated_at = now() "
+        "WHERE status = 'running' "
+        "AND started_at < now() - (%s * INTERVAL '1 second')",
+        (older_than_seconds,),
+    )
+    return result.rowcount if result.rowcount is not None else 0
