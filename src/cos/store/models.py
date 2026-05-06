@@ -79,7 +79,8 @@ class SourceVersionRecord:
 @dataclass
 class DocumentSummary:
     id: str = ""
-    source_path: str = ""
+    source_alias: str = ""
+    source_locator: str = ""
     ingested_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     current_version: int = 1
     chunk_count: int = 0

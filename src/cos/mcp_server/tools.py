@@ -83,7 +83,9 @@ async def retrieve(query: str) -> str:
 
     citations_data = [
         {
-            "source_path": citation.source_path,
+            "source_alias": citation.source_alias,
+            "source_locator": citation.source_locator,
+            "document_version_id": citation.document_version_id,
             "chunk_index": citation.chunk_index,
             "score": citation.score,
         }
@@ -181,7 +183,8 @@ async def list_documents() -> str:
     docs_data = [
         {
             "id": doc.id,
-            "source_path": doc.source_path,
+            "source_alias": doc.source_alias,
+            "source_locator": doc.source_locator,
             "ingested_at": doc.ingested_at.isoformat(),
             "current_version": doc.current_version,
             "chunk_count": doc.chunk_count,

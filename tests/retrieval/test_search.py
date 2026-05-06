@@ -75,13 +75,15 @@ async def test_hybrid_search_keyword_match_returns_result(
     assert isinstance(results[0], CitedChunk)
     assert results[0].content == "workforce segmentation framework"
     assert results[0].source_document_id
-    assert results[0].source_path == "/test/hr-framework.md"
+    assert results[0].source_alias == "/test/hr-framework.md"
+    assert results[0].source_locator == "/test/hr-framework.md"
+    assert isinstance(results[0].document_version_id, str)
     assert results[0].chunk_index == 0
     assert results[0].score > 0
 
 
 @pytest.mark.asyncio
-async def test_hybrid_search_result_has_correct_source_path(
+async def test_hybrid_search_result_has_correct_source_alias(
     migrated_db: None,
     mock_embed: None,
     tmp_path: Path,
@@ -100,7 +102,7 @@ async def test_hybrid_search_result_has_correct_source_path(
 
         results = await hybrid_search("planning", conn, config)
 
-    assert results[0].source_path == "/test/leadership-notes.md"
+    assert results[0].source_alias == "/test/leadership-notes.md"
 
 
 @pytest.mark.asyncio
