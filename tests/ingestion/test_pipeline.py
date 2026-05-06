@@ -218,3 +218,83 @@ async def test_run_pipeline_new_source_known_content_returns_zero_chunk_count(
 
     assert result.outcome is IngestOutcome.NEW_SOURCE_KNOWN_CONTENT
     assert result.chunk_count == 0
+
+
+async def test_run_pipeline_changed_content_preserves_document_version_history(
+    migrated_db: None,
+    tmp_path: Path,
+    mock_embed: None,
+) -> None:
+    source_path = tmp_path / "history.md"
+    source_path.write_text("Version one content", encoding="utf-8")
+    config = make_test_config(tmp_path)
+
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        first = await run_pipeline(source_path, config, conn)
+
+    source_path.write_text("Version two content with different bytes", encoding="utf-8")
+
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        second = await run_pipeline(source_path, config, conn)
+        counts_result = await conn.execute(
+            "SELECT "
+            "(SELECT COUNT(*) FROM documents), "
+            "(SELECT COUNT(*) FROM document_versions WHERE document_id = %s::uuid), "
+            "(SELECT current_version FROM documents WHERE id = %s::uuid)",
+            (first.document_id, first.document_id),
+        )
+        row = await counts_result.fetchone()
+
+    assert second.document_id == first.document_id
+    assert second.outcome is IngestOutcome.CHANGED_CONTENT
+    assert row == (1, 2, 2)
+
+
+async def test_run_pipeline_changed_content_creates_second_content_blob(
+    migrated_db: None,
+    tmp_path: Path,
+    mock_embed: None,
+) -> None:
+    source_path = tmp_path / "blob-change.md"
+    source_path.write_text("Initial bytes", encoding="utf-8")
+    config = make_test_config(tmp_path)
+
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        await run_pipeline(source_path, config, conn)
+
+    source_path.write_text("Changed bytes with distinct hash", encoding="utf-8")
+
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        await run_pipeline(source_path, config, conn)
+        result = await conn.execute("SELECT COUNT(*) FROM content_blobs")
+        row = await result.fetchone()
+
+    assert row == (2,)
+
+
+async def test_run_pipeline_changed_content_links_source_version_to_new_document_version(  # noqa: E501
+    migrated_db: None,
+    tmp_path: Path,
+    mock_embed: None,
+) -> None:
+    source_path = tmp_path / "sv-link.md"
+    source_path.write_text("First version content", encoding="utf-8")
+    config = make_test_config(tmp_path)
+
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        first = await run_pipeline(source_path, config, conn)
+
+    source_path.write_text("Second version content with new bytes", encoding="utf-8")
+
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        second = await run_pipeline(source_path, config, conn)
+        sv_result = await conn.execute(
+            "SELECT COUNT(*) FROM source_versions sv "
+            "JOIN document_versions dv ON dv.id = sv.document_version_id "
+            "WHERE dv.document_id = %s::uuid",
+            (first.document_id,),
+        )
+        sv_row = await sv_result.fetchone()
+
+    assert second.outcome is IngestOutcome.CHANGED_CONTENT
+    assert sv_row == (2,)

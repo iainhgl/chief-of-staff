@@ -72,3 +72,43 @@ async def test_ingest_folder_skips_unsupported_files(
 
     assert [Path(result.source_path).name for result in results] == ["alpha.md"]
     assert skipped == ["report.xlsx"]
+
+
+async def test_ingest_file_unchanged_returns_unchanged_outcome(
+    migrated_db: None,
+    tmp_path: Path,
+    mock_embed: None,
+) -> None:
+    source_path = tmp_path / "stable.md"
+    source_path.write_text("Stable document content", encoding="utf-8")
+    service = IngestService(make_test_config(tmp_path))
+
+    await service.ingest_file(str(source_path))
+    second = await service.ingest_file(str(source_path))
+
+    assert second.outcome == "unchanged"
+    assert second.chunk_count == 0
+    assert "unchanged" in second.message.lower()
+
+
+async def test_ingest_file_changed_returns_changed_content_outcome(
+    migrated_db: None,
+    tmp_path: Path,
+    mock_embed: None,
+) -> None:
+    source_path = tmp_path / "changing.md"
+    source_path.write_text("Original content", encoding="utf-8")
+    service = IngestService(make_test_config(tmp_path))
+
+    first = await service.ingest_file(str(source_path))
+
+    source_path.write_text("Revised content with new bytes", encoding="utf-8")
+    second = await service.ingest_file(str(source_path))
+
+    assert second.document_id == first.document_id
+    assert second.outcome == "changed_content"
+    assert second.chunk_count >= 1
+    assert (
+        "changed" in second.message.lower()
+        or "new version" in second.message.lower()
+    )

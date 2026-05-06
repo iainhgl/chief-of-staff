@@ -235,6 +235,14 @@
 - source_alias NOT NULL column has no existence test — `sources.source_alias TEXT NOT NULL` is mandatory (no default) but has no column-existence migration test equivalent to those for `content_blob_id` and `document_version_id`; add `test_sources_has_source_alias_column()` in a future story [`tests/store/test_migrations.py`]
 - No test for ON DELETE behavior of nullable FK columns — `document_versions.content_blob_id` and `chunks.document_version_id` tests verify column existence only; ON DELETE semantics are untested; add FK behavior assertions once the ON DELETE decision (RESTRICT vs SET NULL) is resolved [`tests/store/test_migrations.py`]
 
+## Deferred from: code review of 6-3-re-ingest-semantics-and-no-op-handling (2026-05-06)
+
+- `store_document_canonical` deletes ALL chunks across all historical document versions on `CHANGED_CONTENT` — version-level chunk history is lost; pre-existing from Story 2.4/6.2; Phase 2 concern [`src/cos/store/db.py`]
+- Partially-failed prior ingest leaves orphan source row with no `source_version` link, causing `NEW_SOURCE_KNOWN_CONTENT` on retry — `link_new_source_to_existing_blob` heals implicitly but the mismatch is uncovered by tests [`src/cos/ingestion/identity.py`]
+- `link_new_source_to_existing_blob` uses oldest-first `ORDER BY created_at ASC` with no tiebreaker — same-microsecond inserts produce non-deterministic document_id; deferred from 6.2 review [`src/cos/store/db.py`]
+- Content revert scenario (v1→v2→v1) produces undefined/untested behavior — outcome depends on whether source_version link was retained; add test when version-revert semantics are defined [`src/cos/ingestion/identity.py`]
+- `CHANGED_CONTENT` with empty extraction body shows misleading "0 new chunks indexed (new version)" — confusing operator message for empty-file edge case [`src/cos/cli.py`]
+
 ## Deferred from: code review of 6-2-hash-first-ingest-and-exact-byte-deduplication (2026-05-06)
 
 - `_repair_existing_schema` DDL deadlock risk — `ALTER TABLE … ADD CONSTRAINT` on `source_versions` acquires a `ShareLock`; concurrent in-flight ingests at startup are blocked until the lock is acquired; under autocommit the DDL cannot be rolled back on failure; intentional design choice (spec: "no new migrations"); single-user startup context makes deadlock theoretical [`src/cos/store/db.py`]
