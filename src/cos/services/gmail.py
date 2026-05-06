@@ -24,6 +24,13 @@ from cos.services.ingestion import SUPPORTED_SUFFIXES
 from cos.services.jobs import submit_ingest_job
 
 _CONNECTOR = "gmail"
+_BODY_MIME_TYPES = frozenset({"text/plain", "text/html"})
+_SUPPORTED_MIME_SUFFIXES = {
+    "text/plain": ".txt",
+    "text/markdown": ".md",
+    "application/pdf": ".pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+}
 
 
 @dataclass
@@ -89,24 +96,30 @@ async def poll_gmail(
 
         # Stage supported attachments
         payload = message.get("payload", {})
-        for part in walk_mime_parts(payload):
-            filename = part.get("filename", "")
-            if not filename:
+        for part_index, part in enumerate(walk_mime_parts(payload)):
+            body_info = part.get("body", {})
+            attachment_id = body_info.get("attachmentId")
+            inline_data = body_info.get("data", "")
+            if not _is_attachment_part(part, attachment_id, inline_data):
                 continue
 
-            suffix = Path(filename).suffix.lower()
+            filename = str(part.get("filename", ""))
+            mime_type = str(part.get("mimeType", ""))
+            attachment_slug = _attachment_slug(part, attachment_id, part_index)
+            suffix = (
+                Path(filename).suffix.lower()
+                if filename
+                else _SUPPORTED_MIME_SUFFIXES.get(mime_type, "")
+            )
             if suffix not in SUPPORTED_SUFFIXES:
+                display_name = filename or f"attachment-{attachment_slug}"
                 _log_connector_info(
-                    f"skipping unsupported attachment {filename!r} "
-                    f"(mime_type={part.get('mimeType', 'unknown')}) "
+                    f"skipping unsupported attachment {display_name!r} "
+                    f"(mime_type={mime_type or 'unknown'}) "
                     f"in message {message_id}"
                 )
                 attachments_skipped += 1
                 continue
-
-            body_info = part.get("body", {})
-            attachment_id = body_info.get("attachmentId")
-            inline_data = body_info.get("data", "")
 
             try:
                 if attachment_id:
@@ -129,24 +142,18 @@ async def poll_gmail(
                 attachments_skipped += 1
                 continue
 
-            att_id_slug = attachment_id or "inline"
-            staged_name = f"{message_id}_{att_id_slug}{suffix}"
+            source_alias = filename or f"attachment-{attachment_slug}{suffix}"
+            staged_name = f"{message_id}_{attachment_slug}{suffix}"
             att_staged = staging_dir / staged_name
             att_staged.write_bytes(att_bytes)
-
-            locator = (
-                f"gmail://message/{message_id}/attachment/{att_id_slug}"
-                if attachment_id
-                else f"gmail://message/{message_id}/body/{filename}"
-            )
 
             await submit_ingest_job(
                 conn,
                 staged_path=str(att_staged),
                 source_type="gmail_attachment",
-                source_locator=locator,
-                source_alias=filename,
-                metadata={**base_metadata, "mime_type": part.get("mimeType", "")},
+                source_locator=f"gmail://message/{message_id}/attachment/{attachment_slug}",
+                source_alias=source_alias,
+                metadata={**base_metadata, "mime_type": mime_type},
             )
             attachment_jobs += 1
 
@@ -188,6 +195,41 @@ def _body_alias(subject: str, message_id: str) -> str:
     clean = re.sub(r"[^\w\s\-]", "", subject)
     clean = re.sub(r"\s+", "_", clean.strip())[:80]
     return f"{clean}.md" if clean else f"{message_id}.md"
+
+
+def _is_attachment_part(
+    part: dict[str, Any],
+    attachment_id: Any,
+    inline_data: Any,
+) -> bool:
+    if part.get("filename") or attachment_id:
+        return True
+
+    if not inline_data:
+        return False
+
+    disposition = _header_value(part.get("headers", []), "Content-Disposition").lower()
+    if "attachment" in disposition or "inline" in disposition:
+        return True
+
+    return str(part.get("mimeType", "")) not in _BODY_MIME_TYPES
+
+
+def _attachment_slug(part: dict[str, Any], attachment_id: Any, part_index: int) -> str:
+    raw_slug = str(attachment_id or part.get("partId") or f"part-{part_index}")
+    clean = re.sub(r"[^A-Za-z0-9._-]", "-", raw_slug).strip("-")
+    return clean or f"part-{part_index}"
+
+
+def _header_value(headers: Any, name: str) -> str:
+    if not isinstance(headers, list):
+        return ""
+    for header in headers:
+        if not isinstance(header, dict):
+            continue
+        if str(header.get("name", "")).lower() == name.lower():
+            return str(header.get("value", ""))
+    return ""
 
 
 def _log_connector_info(message: str) -> None:

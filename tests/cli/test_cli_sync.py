@@ -117,3 +117,15 @@ def test_sync_gmail_fails_gracefully_on_api_error() -> None:
 
     assert result.exit_code == 1
     assert "gmail sync failed" in result.output.lower()
+
+
+def test_sync_gmail_reports_configuration_error() -> None:
+    with patch(
+        "cos.cli.CosConfig.load",
+        side_effect=SystemExit("Invalid config.yaml:\nmax_results must be <= 500"),
+    ):
+        result = runner.invoke(app, ["sync", "gmail"])
+
+    assert result.exit_code == 1
+    assert "configuration error" in result.output.lower()
+    assert "max_results must be <= 500" in result.output

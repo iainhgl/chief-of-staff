@@ -13,6 +13,9 @@ from cos.config import CosConfig, GmailConnectorConfig
 from cos.connectors.google_auth import load_credentials
 
 _TRANSIENT_HTTP_CODES = frozenset({429, 500, 502, 503, 504})
+_RETRYABLE_403_REASONS = frozenset(
+    {"ratelimitexceeded", "userratelimitexceeded", "quotaexceeded", "backenderror"}
+)
 _MAX_RETRIES = 5
 _INITIAL_BACKOFF = 1.0
 
@@ -81,7 +84,12 @@ def extract_body_text(message: dict[str, Any]) -> str:
 
     for preferred in ("text/plain", "text/html"):
         part = next(
-            (p for p in all_parts if p.get("mimeType") == preferred), None
+            (
+                p
+                for p in all_parts
+                if p.get("mimeType") == preferred and not _is_attachment_part(p)
+            ),
+            None,
         )
         if part:
             data = part.get("body", {}).get("data", "")
@@ -93,11 +101,7 @@ def extract_body_text(message: dict[str, Any]) -> str:
 
 def get_message_header(message: dict[str, Any], name: str) -> str:
     """Return the value of the named header from a Gmail message, or empty string."""
-    headers = message.get("payload", {}).get("headers", [])
-    for h in headers:
-        if h.get("name", "").lower() == name.lower():
-            return str(h.get("value", ""))
-    return ""
+    return _get_header_value(message.get("payload", {}).get("headers", []), name)
 
 
 def _decode_b64url(data: str) -> bytes:
@@ -115,7 +119,7 @@ def _execute_with_retry(request: Any) -> dict[str, Any]:
             result: dict[str, Any] = request.execute()
             return result
         except HttpError as exc:
-            if exc.resp.status not in _TRANSIENT_HTTP_CODES:
+            if not _is_retryable_http_error(exc):
                 raise
             last_exc = exc
             _log_connector_warning(
@@ -126,6 +130,65 @@ def _execute_with_retry(request: Any) -> dict[str, Any]:
                 time.sleep(delay)
                 delay *= 2
     raise last_exc  # type: ignore[misc]
+
+
+def _is_attachment_part(part: dict[str, Any]) -> bool:
+    if part.get("filename"):
+        return True
+
+    body = part.get("body", {})
+    if isinstance(body, dict) and body.get("attachmentId"):
+        return True
+
+    disposition = _get_header_value(part.get("headers", []), "Content-Disposition")
+    lowered = disposition.lower()
+    return "attachment" in lowered or "inline" in lowered
+
+
+def _get_header_value(headers: Any, name: str) -> str:
+    if not isinstance(headers, list):
+        return ""
+    for header in headers:
+        if not isinstance(header, dict):
+            continue
+        if str(header.get("name", "")).lower() == name.lower():
+            return str(header.get("value", ""))
+    return ""
+
+
+def _is_retryable_http_error(exc: HttpError) -> bool:
+    if exc.resp.status in _TRANSIENT_HTTP_CODES:
+        return True
+    if exc.resp.status != 403:
+        return False
+
+    try:
+        payload = json.loads(exc.content.decode("utf-8"))
+    except (AttributeError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+
+    candidates: list[str] = []
+    error = payload.get("error")
+    if isinstance(error, dict):
+        for key in ("message", "status"):
+            value = error.get(key)
+            if isinstance(value, str):
+                candidates.append(value.lower())
+        errors = error.get("errors")
+        if isinstance(errors, list):
+            for item in errors:
+                if not isinstance(item, dict):
+                    continue
+                reason = item.get("reason")
+                if isinstance(reason, str):
+                    candidates.append(reason.lower())
+
+    candidate_text = " ".join(candidates)
+    return bool(
+        set(candidates) & _RETRYABLE_403_REASONS
+        or "rate limit" in candidate_text
+        or "quota" in candidate_text
+    )
 
 
 def _log_connector_warning(message: str) -> None:

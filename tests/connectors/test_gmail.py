@@ -22,10 +22,10 @@ def _b64url(text: str | bytes) -> str:
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
 
 
-def _http_error(status: int) -> HttpError:
+def _http_error(status: int, content: bytes = b"error") -> HttpError:
     resp = MagicMock()
     resp.status = status
-    return HttpError(resp=resp, content=b"error")
+    return HttpError(resp=resp, content=content)
 
 
 # ── list_message_ids ──────────────────────────────────────────────────────────
@@ -172,6 +172,26 @@ def test_extract_body_text_returns_empty_when_no_body() -> None:
     assert extract_body_text(message) == ""
 
 
+def test_extract_body_text_ignores_filename_bearing_text_attachment() -> None:
+    message = {
+        "payload": {
+            "mimeType": "multipart/mixed",
+            "parts": [
+                {
+                    "mimeType": "text/plain",
+                    "filename": "notes.txt",
+                    "body": {"data": _b64url("attachment text")},
+                },
+                {
+                    "mimeType": "text/plain",
+                    "body": {"data": _b64url("actual body")},
+                },
+            ],
+        }
+    }
+    assert extract_body_text(message) == "actual body"
+
+
 # ── base64url decoding ────────────────────────────────────────────────────────
 
 def test_decode_b64url_no_padding() -> None:
@@ -234,6 +254,29 @@ def test_execute_with_retry_exhausts_attempts(monkeypatch: pytest.MonkeyPatch) -
     with pytest.raises(HttpError):
         _execute_with_retry(request)
     assert request.execute.call_count == 5
+
+
+def test_execute_with_retry_retries_on_rate_limited_403(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("cos.connectors.gmail.time.sleep", lambda s: None)
+    payload = (
+        b'{"error":{"errors":[{"reason":"userRateLimitExceeded"}],'
+        b'"message":"User rate limit exceeded"}}'
+    )
+    call_count = 0
+
+    class _FakeRequest:
+        def execute(self) -> dict[str, object]:
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                raise _http_error(403, payload)
+            return {"messages": []}
+
+    result = _execute_with_retry(_FakeRequest())
+    assert result == {"messages": []}
+    assert call_count == 3
 
 
 # ── fetch_attachment_bytes ────────────────────────────────────────────────────

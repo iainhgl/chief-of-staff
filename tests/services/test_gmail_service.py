@@ -284,6 +284,126 @@ async def test_poll_gmail_attachment_staged_with_unique_name(
     assert "msg-030" in staged_files[0].name
 
 
+async def test_poll_gmail_filename_less_supported_attachment_gets_fallback_alias(
+    migrated_db: None,
+    tmp_path: Path,
+) -> None:
+    config = make_test_config(tmp_path)
+    config = config.model_copy(
+        update={
+            "connectors": ["gmail"],
+            "gmail": GmailConnectorConfig(staging_dir=tmp_path / "staging"),
+        }
+    )
+
+    pdf_bytes = b"%PDF filename-less"
+    msg = {
+        "id": "msg-031",
+        "threadId": "thread-msg-031",
+        "internalDate": "1746518400000",
+        "payload": {
+            "mimeType": "multipart/mixed",
+            "headers": [{"name": "Subject", "value": "No filename"}],
+            "parts": [
+                {"mimeType": "text/plain", "body": {"data": _b64url(b"body")}},
+                {
+                    "mimeType": "application/pdf",
+                    "partId": "2",
+                    "body": {"attachmentId": "att-no-name"},
+                },
+            ],
+        },
+    }
+
+    with _patch_gmail(
+        ["msg-031"],
+        {"msg-031": msg},
+        {("msg-031", "att-no-name"): pdf_bytes},
+    ):
+        async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+            result = await poll_gmail(config, conn)
+
+    assert result.attachment_jobs_enqueued == 1
+
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        row = await (
+            await conn.execute(
+                "SELECT payload FROM jobs "
+                "WHERE payload->>'source_type' = 'gmail_attachment'"
+            )
+        ).fetchone()
+
+    assert row is not None
+    payload = row[0]
+    assert payload["source_locator"] == "gmail://message/msg-031/attachment/att-no-name"
+    assert payload["source_alias"] == "attachment-att-no-name.pdf"
+
+
+async def test_poll_gmail_inline_attachments_without_ids_get_unique_paths(
+    migrated_db: None,
+    tmp_path: Path,
+) -> None:
+    staging_dir = tmp_path / "staging"
+    config = make_test_config(tmp_path)
+    config = config.model_copy(
+        update={
+            "connectors": ["gmail"],
+            "gmail": GmailConnectorConfig(staging_dir=staging_dir),
+        }
+    )
+
+    msg = {
+        "id": "msg-032",
+        "threadId": "thread-msg-032",
+        "internalDate": "1746518400000",
+        "payload": {
+            "mimeType": "multipart/mixed",
+            "headers": [{"name": "Subject", "value": "Inline attachments"}],
+            "parts": [
+                {"mimeType": "text/plain", "body": {"data": _b64url(b"body")}},
+                {
+                    "mimeType": "text/plain",
+                    "partId": "1.2",
+                    "filename": "a.txt",
+                    "headers": [{"name": "Content-Disposition", "value": "inline"}],
+                    "body": {"data": _b64url(b"first attachment")},
+                },
+                {
+                    "mimeType": "text/plain",
+                    "partId": "1.3",
+                    "filename": "b.txt",
+                    "headers": [{"name": "Content-Disposition", "value": "inline"}],
+                    "body": {"data": _b64url(b"second attachment")},
+                },
+            ],
+        },
+    }
+
+    with _patch_gmail(["msg-032"], {"msg-032": msg}):
+        async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+            result = await poll_gmail(config, conn)
+
+    assert result.attachment_jobs_enqueued == 2
+
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        rows = await (
+            await conn.execute(
+                "SELECT payload->>'staged_path', payload->>'source_locator' "
+                "FROM jobs WHERE payload->>'source_type' = 'gmail_attachment' "
+                "ORDER BY payload->>'source_alias'"
+            )
+        ).fetchall()
+
+    assert len(rows) == 2
+    staged_paths = {row[0] for row in rows}
+    locators = {row[1] for row in rows}
+    assert len(staged_paths) == 2
+    assert locators == {
+        "gmail://message/msg-032/attachment/1.2",
+        "gmail://message/msg-032/attachment/1.3",
+    }
+
+
 # ── empty poll ────────────────────────────────────────────────────────────────
 
 async def test_poll_gmail_returns_zero_counts_for_empty_inbox(

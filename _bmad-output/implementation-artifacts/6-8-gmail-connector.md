@@ -1,6 +1,6 @@
 # Story 6.8: Gmail Connector
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -219,6 +219,13 @@ Use these implementation facts; they are more precise than guesswork:
 - No new ingest pipeline separate from [src/cos/ingestion/pipeline.py](/Users/iain.livingstone/Development/CoS/cos/src/cos/ingestion/pipeline.py)
 - No support for unsupported Gmail attachment types beyond clean skip logging
 - No broad documentation rewrite; reserve major doc consolidation for Story 6.12
+
+### Review Findings
+
+- [x] [Review][Patch] Inline attachments can collide and filename-less attachments are skipped instead of getting a deterministic fallback identity [src/cos/services/gmail.py:93]
+- [x] [Review][Patch] `extract_body_text(...)` can ingest a text attachment as the message body because it does not exclude filename-bearing MIME parts [src/cos/connectors/gmail.py:77]
+- [x] [Review][Patch] Retry logic does not treat Gmail 403 rate-limit responses as retryable, so quota throttling can fail fast without backoff [src/cos/connectors/gmail.py:117]
+- [x] [Review][Patch] `cos sync gmail` loads config outside its recovery handling, so malformed Gmail config exits before printing an operator-friendly error [src/cos/cli.py:47]
 
 ### Source References
 

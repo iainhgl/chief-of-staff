@@ -44,17 +44,21 @@ def auth_calendar() -> None:
 @sync_app.command("gmail")
 def sync_gmail() -> None:
     """Poll Gmail for new messages and enqueue background ingest jobs."""
-    config = CosConfig.load()
-    if "gmail" not in config.connectors:
-        typer.echo(
-            'Error: "gmail" is not enabled. Add "gmail" to the connectors list in '
-            "config.yaml and try again.",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-
     try:
+        config = CosConfig.load()
+        if "gmail" not in config.connectors:
+            typer.echo(
+                'Error: "gmail" is not enabled. Add "gmail" to the connectors list in '
+                "config.yaml and try again.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
         result = asyncio.run(_do_sync_gmail(config))
+    except SystemExit as exc:
+        typer.echo(f"Gmail sync configuration error: {exc}", err=True)
+        raise typer.Exit(code=1)
+    except typer.Exit:
+        raise
     except AuthError as exc:
         typer.echo(f"Authentication error: {exc}", err=True)
         raise typer.Exit(code=1)
