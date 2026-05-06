@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from cos.config import CosConfig
+from cos.config import CosConfig, GoogleOAuthConfig
 
 VALID_CONFIG_YAML = """\
 llm:
@@ -165,3 +165,48 @@ def test_chunking_config_defaults(tmp_path):
     config = CosConfig.load(cfg_file)
     assert config.chunking.chunk_size == 1024
     assert config.chunking.chunk_overlap == 100
+
+
+# ── Google OAuth config tests (Story 6.6) ──────────────────────────────────
+
+_GOOGLE_OAUTH_BLOCK = """\
+google_oauth:
+  client_id: my-client-id.apps.googleusercontent.com
+  client_secret: GOCSPX-supersecret
+"""
+
+
+def test_google_oauth_block_is_optional(tmp_path):
+    cfg_file = _write_config(tmp_path, VALID_CONFIG_YAML)
+    config = CosConfig.load(cfg_file)
+    assert config.google_oauth is None
+
+
+def test_google_oauth_block_loads_when_present(tmp_path):
+    cfg_file = _write_config(tmp_path, VALID_CONFIG_YAML + _GOOGLE_OAUTH_BLOCK)
+    config = CosConfig.load(cfg_file)
+    assert config.google_oauth is not None
+    assert config.google_oauth.client_id == "my-client-id.apps.googleusercontent.com"
+
+
+def test_google_oauth_client_secret_is_masked(tmp_path):
+    cfg_file = _write_config(tmp_path, VALID_CONFIG_YAML + _GOOGLE_OAUTH_BLOCK)
+    config = CosConfig.load(cfg_file)
+
+    assert config.google_oauth is not None
+    config_repr = repr(config)
+    config_str = str(config)
+    assert "GOCSPX-supersecret" not in config_repr
+    assert "GOCSPX-supersecret" not in config_str
+
+
+def test_google_oauth_client_secret_accessible_via_get_secret_value(tmp_path):
+    cfg_file = _write_config(tmp_path, VALID_CONFIG_YAML + _GOOGLE_OAUTH_BLOCK)
+    config = CosConfig.load(cfg_file)
+
+    assert config.google_oauth is not None
+    assert config.google_oauth.client_secret.get_secret_value() == "GOCSPX-supersecret"
+
+
+def test_google_oauth_model_is_exported():
+    assert GoogleOAuthConfig is not None

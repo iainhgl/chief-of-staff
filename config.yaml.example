@@ -126,3 +126,20 @@ storage:
 chunking:
   chunk_size: 1024
   chunk_overlap: 100
+
+# ─────────────────────────────────────────────
+# Google OAuth (required for Epic 6 connected-source auth only)
+# Needed to run `cos auth gmail` and `cos auth calendar`.
+# Leave this block absent or commented out for Epic 1–5 local-only deployments.
+#
+# How to obtain these values:
+#   1. Go to Google Cloud Console → APIs & Services → Credentials
+#   2. Create an OAuth 2.0 Client ID (Application type: Desktop app)
+#   3. Copy the client_id and client_secret values here
+#
+# The client_secret is masked in all log output and repr() calls.
+# Token files (tokens/gmail.json, tokens/google_calendar.json) are gitignored.
+# ─────────────────────────────────────────────
+# google_oauth:
+#   client_id: YOUR_GOOGLE_OAUTH_CLIENT_ID.apps.googleusercontent.com
+#   client_secret: YOUR_GOOGLE_OAUTH_CLIENT_SECRET
