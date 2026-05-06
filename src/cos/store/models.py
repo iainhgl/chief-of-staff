@@ -77,6 +77,12 @@ class SourceVersionRecord:
 
 
 @dataclass
+class BackfillResult:
+    backfilled: int = 0
+    already_canonical: int = 0
+
+
+@dataclass
 class DocumentSummary:
     id: str = ""
     source_alias: str = ""
