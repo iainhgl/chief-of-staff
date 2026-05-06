@@ -3,13 +3,13 @@ import json
 import subprocess
 import time
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import psycopg
 import typer
 
 from cos.config import CosConfig
-from cos.connectors.google_auth import run_oauth_flow
+from cos.connectors.google_auth import AuthError, run_oauth_flow
 from cos.services.health import ComponentStatus, HealthService
 from cos.services.ingestion import SUPPORTED_SUFFIXES, IngestService
 from cos.services.provenance import DocumentSummary, ProvenanceService, VersionSummary
@@ -18,7 +18,9 @@ from cos.store.models import BackfillResult
 
 app = typer.Typer(name="cos", help="CoS platform CLI")
 auth_app = typer.Typer(name="auth", help="Authenticate external service connectors.")
+sync_app = typer.Typer(name="sync", help="Sync external connectors.")
 app.add_typer(auth_app, name="auth")
+app.add_typer(sync_app, name="sync")
 
 _RESTART_TIMEOUT = 30
 _POLL_INTERVAL = 2
@@ -37,6 +39,47 @@ def auth_gmail() -> None:
 def auth_calendar() -> None:
     """Authenticate Google Calendar — saves tokens/google_calendar.json."""
     _run_connector_auth("google_calendar", "tokens/google_calendar.json")
+
+
+@sync_app.command("gmail")
+def sync_gmail() -> None:
+    """Poll Gmail for new messages and enqueue background ingest jobs."""
+    try:
+        config = CosConfig.load()
+        if "gmail" not in config.connectors:
+            typer.echo(
+                'Error: "gmail" is not enabled. Add "gmail" to the connectors list in '
+                "config.yaml and try again.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        result = asyncio.run(_do_sync_gmail(config))
+    except SystemExit as exc:
+        typer.echo(f"Gmail sync configuration error: {exc}", err=True)
+        raise typer.Exit(code=1)
+    except typer.Exit:
+        raise
+    except AuthError as exc:
+        typer.echo(f"Authentication error: {exc}", err=True)
+        raise typer.Exit(code=1)
+    except Exception as exc:
+        typer.echo(f"Gmail sync failed: {exc}", err=True)
+        raise typer.Exit(code=1)
+
+    typer.echo("Gmail sync complete:")
+    typer.echo(f"  {result.messages_scanned} messages scanned")
+    typer.echo(f"  {result.body_jobs_enqueued} body jobs enqueued")
+    typer.echo(f"  {result.attachment_jobs_enqueued} attachment jobs enqueued")
+    typer.echo(f"  {result.attachments_skipped} unsupported attachments skipped")
+
+
+async def _do_sync_gmail(config: CosConfig) -> Any:
+    from cos.services.gmail import poll_gmail
+
+    async with await psycopg.AsyncConnection.connect(
+        config.database.libpq_dsn
+    ) as conn:
+        return await poll_gmail(config, conn)
 
 
 def _run_connector_auth(connector: str, token_path: str) -> None:  # type: ignore[type-arg]

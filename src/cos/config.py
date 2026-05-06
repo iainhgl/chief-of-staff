@@ -81,6 +81,14 @@ class GoogleOAuthConfig(BaseModel):
     client_secret: SecretStr
 
 
+class GmailConnectorConfig(BaseModel):
+    query: str | None = None
+    label_ids: list[str] = []
+    max_results: int = Field(default=25, ge=1, le=500)
+    include_spam_trash: bool = False
+    staging_dir: Path = Path("/data/connector-staging/gmail")
+
+
 class CosConfig(BaseModel):
     llm: LLMConfig
     embedding: EmbeddingConfig
@@ -92,6 +100,7 @@ class CosConfig(BaseModel):
     storage: StorageConfig = StorageConfig()
     chunking: ChunkingConfig = ChunkingConfig()
     google_oauth: GoogleOAuthConfig | None = None
+    gmail: GmailConnectorConfig | None = None
 
     @classmethod
     def load(cls, path: str | Path = "config.yaml") -> "CosConfig":

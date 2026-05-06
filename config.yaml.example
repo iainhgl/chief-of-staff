@@ -143,3 +143,26 @@ chunking:
 # google_oauth:
 #   client_id: YOUR_GOOGLE_OAUTH_CLIENT_ID.apps.googleusercontent.com
 #   client_secret: YOUR_GOOGLE_OAUTH_CLIENT_SECRET
+
+# ─────────────────────────────────────────────
+# Gmail Connector (optional — requires google_oauth block above and "gmail" in connectors)
+# Controls how the Gmail connector polls for new messages when you run `cos sync gmail`.
+# Omit this block entirely to use all defaults (inbox, last 25 messages, no spam/trash).
+#
+# query: Gmail search query string (same syntax as the Gmail search box).
+#   Example: "is:unread newer_than:1d" polls only recent unread messages.
+#   Leave null to fetch the most recent messages with no filter.
+# label_ids: restrict polling to specific labels (e.g. ["INBOX", "IMPORTANT"]).
+#   Leave empty to search across all labels.
+# max_results: maximum messages per poll cycle (1–500, default 25).
+# include_spam_trash: set to true to include Spam and Trash folders (default false).
+# staging_dir: shared volume path where the connector stages files before enqueueing.
+#   Must be on the shared Docker volume so the background worker can read it.
+#   Default: /data/connector-staging/gmail
+# ─────────────────────────────────────────────
+# gmail:
+#   query: null
+#   label_ids: []
+#   max_results: 25
+#   include_spam_trash: false
+#   staging_dir: /data/connector-staging/gmail
