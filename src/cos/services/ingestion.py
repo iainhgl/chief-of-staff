@@ -15,6 +15,8 @@ class IngestResult:
     document_id: str
     chunk_count: int
     source_path: str
+    outcome: str
+    message: str
 
 
 class IngestService:
@@ -32,6 +34,8 @@ class IngestService:
             document_id=result.document_id,
             chunk_count=result.chunk_count,
             source_path=str(source_path),
+            outcome=result.outcome.value,
+            message=result.message,
         )
 
     async def ingest_note(self, text: str) -> IngestResult:

@@ -14,7 +14,11 @@ from cos.config import CosConfig
 from cos.ingestion.chunker import chunk
 from cos.ingestion.embedder import VoyageTransportConfig, embed
 from cos.ingestion.extractor import extract
-from cos.store.db import store_document
+from cos.ingestion.identity import IngestOutcome, check_canonical_identity
+from cos.store.db import (
+    link_new_source_to_existing_blob,
+    store_document_canonical,
+)
 from cos.store.models import ChunkRecord, EmbeddingRecord
 
 
@@ -22,6 +26,8 @@ from cos.store.models import ChunkRecord, EmbeddingRecord
 class PipelineResult:
     document_id: str
     chunk_count: int
+    outcome: IngestOutcome
+    message: str
 
 
 async def run_pipeline(
@@ -29,6 +35,13 @@ async def run_pipeline(
     config: CosConfig,
     conn: psycopg.AsyncConnection[Any],
 ) -> PipelineResult:
+    source_bytes = source_path.read_bytes()
+    file_hash = hashlib.sha256(source_bytes).hexdigest()
+    byte_size = len(source_bytes)
+    source_type = "file"
+    source_locator = str(source_path)
+    source_alias = source_path.name
+
     logging.info(
         json.dumps(
             {
@@ -41,7 +54,65 @@ async def run_pipeline(
         )
     )
 
-    file_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    identity = await check_canonical_identity(
+        conn,
+        file_hash,
+        source_type,
+        source_locator,
+    )
+    if identity.outcome is IngestOutcome.UNCHANGED:
+        if identity.document_id is None:
+            raise RuntimeError(
+                "Canonical identity returned unchanged without document_id"
+            )
+        logging.info(
+            json.dumps(
+                {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "level": "INFO",
+                    "component": "ingestion",
+                    "message": identity.message,
+                    "document_id": identity.document_id,
+                    "chunk_count": 0,
+                    "outcome": identity.outcome.value,
+                }
+            )
+        )
+        return PipelineResult(
+            document_id=identity.document_id,
+            chunk_count=0,
+            outcome=identity.outcome,
+            message=identity.message,
+        )
+
+    if identity.outcome is IngestOutcome.NEW_SOURCE_KNOWN_CONTENT:
+        document_id = await link_new_source_to_existing_blob(
+            conn,
+            file_hash,
+            source_type,
+            source_locator,
+            source_alias,
+        )
+        logging.info(
+            json.dumps(
+                {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "level": "INFO",
+                    "component": "ingestion",
+                    "message": identity.message,
+                    "document_id": document_id,
+                    "chunk_count": 0,
+                    "outcome": identity.outcome.value,
+                }
+            )
+        )
+        return PipelineResult(
+            document_id=document_id,
+            chunk_count=0,
+            outcome=identity.outcome,
+            message=identity.message,
+        )
+
     extraction = await extract(
         source_path,
         tika_url=config.tika.url,
@@ -92,10 +163,14 @@ async def run_pipeline(
         )
         for item in embedding_results
     ]
-    document_id = await store_document(
+    document_id = await store_document_canonical(
         conn,
         source_path=str(source_path),
-        file_hash=file_hash,
+        sha256=file_hash,
+        byte_size=byte_size,
+        source_type=source_type,
+        source_locator=source_locator,
+        source_alias=source_alias,
         chunks=chunk_records,
         embeddings=embedding_records,
     )
@@ -109,7 +184,13 @@ async def run_pipeline(
                 "message": "pipeline complete",
                 "document_id": document_id,
                 "chunk_count": len(chunks),
+                "outcome": identity.outcome.value,
             }
         )
     )
-    return PipelineResult(document_id=document_id, chunk_count=len(chunks))
+    return PipelineResult(
+        document_id=document_id,
+        chunk_count=len(chunks),
+        outcome=identity.outcome,
+        message=identity.message,
+    )

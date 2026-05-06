@@ -20,6 +20,8 @@ async def test_ingest_file_markdown_returns_result(
     assert str(uuid.UUID(result.document_id)) == result.document_id
     assert result.chunk_count >= 1
     assert result.source_path == str(source_path.resolve())
+    assert result.outcome == "new_content"
+    assert "full ingest" in result.message.lower()
 
 
 async def test_ingest_folder_processes_supported_files(
