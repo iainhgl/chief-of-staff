@@ -38,6 +38,7 @@ services:
       - ./config.yaml:/app/config.yaml:ro
       - ./role_packs:/app/role_packs:ro
       - ./local/certs:/certs:ro
+      - ./tokens:/app/tokens
     healthcheck:
       test: ["CMD-SHELL", "/app/.venv/bin/python -c 'import cos' 2>/dev/null && echo ok"]
       interval: 10s

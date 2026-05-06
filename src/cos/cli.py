@@ -9,6 +9,7 @@ import psycopg
 import typer
 
 from cos.config import CosConfig
+from cos.connectors.google_auth import run_oauth_flow
 from cos.services.health import ComponentStatus, HealthService
 from cos.services.ingestion import SUPPORTED_SUFFIXES, IngestService
 from cos.services.provenance import DocumentSummary, ProvenanceService, VersionSummary
@@ -16,12 +17,46 @@ from cos.store.db import backfill_legacy_documents
 from cos.store.models import BackfillResult
 
 app = typer.Typer(name="cos", help="CoS platform CLI")
+auth_app = typer.Typer(name="auth", help="Authenticate external service connectors.")
+app.add_typer(auth_app, name="auth")
 
 _RESTART_TIMEOUT = 30
 _POLL_INTERVAL = 2
 _SERVICES = ("postgres", "tika", "cos")
 _DISPLAY_NAMES = {"postgres": "Postgres", "tika": "Tika", "cos": "MCP server"}
 _VALID_COMPONENTS = frozenset(_SERVICES)
+
+
+@auth_app.command("gmail")
+def auth_gmail() -> None:
+    """Authenticate Gmail — runs browser consent flow and saves tokens/gmail.json."""
+    _run_connector_auth("gmail", "tokens/gmail.json")
+
+
+@auth_app.command("calendar")
+def auth_calendar() -> None:
+    """Authenticate Google Calendar — saves tokens/google_calendar.json."""
+    _run_connector_auth("google_calendar", "tokens/google_calendar.json")
+
+
+def _run_connector_auth(connector: str, token_path: str) -> None:  # type: ignore[type-arg]
+    config = CosConfig.load()
+    if config.google_oauth is None:
+        typer.echo(
+            "Error: google_oauth block is missing from config.yaml.\n"
+            "Add client_id and client_secret under google_oauth: and try again.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    try:
+        run_oauth_flow(connector, config.google_oauth)  # type: ignore[arg-type]
+        typer.echo(
+            f"Authenticated {connector.replace('_', ' ')} successfully.\n"
+            f"Token saved to {token_path}"
+        )
+    except Exception as exc:
+        typer.echo(f"Authentication failed: {exc}", err=True)
+        raise typer.Exit(code=1)
 
 
 @app.command()

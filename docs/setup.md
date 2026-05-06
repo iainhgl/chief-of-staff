@@ -124,6 +124,63 @@ role_pack:
 
 To use a different role or author your own, see [role-packs.md](role-packs.md) for the full authoring guide and field reference.
 
+## Google OAuth Setup (Gmail and Calendar Connectors)
+
+This section is only needed if you are enabling the Gmail or Google Calendar connectors (Epic 6). For a local-only Epic 1–5 deployment, skip this section entirely.
+
+### 1. Create OAuth credentials in Google Cloud Console
+
+1. Open [Google Cloud Console](https://console.cloud.google.com/) → **APIs & Services → Credentials**
+2. Click **Create Credentials → OAuth 2.0 Client ID**
+3. Set **Application type** to **Desktop app**
+4. Copy the **Client ID** and **Client Secret**
+
+### 2. Add credentials to config.yaml
+
+```yaml
+google_oauth:
+  client_id: YOUR_CLIENT_ID.apps.googleusercontent.com
+  client_secret: YOUR_CLIENT_SECRET
+```
+
+The `client_secret` is masked in all logs and repr() output. The `google_oauth` block is optional — existing configs without it continue to work.
+
+### 3. Authenticate on the host (first time)
+
+Run the following commands from the `cos/` directory on the **host** (not inside the container), so the browser can open on your machine:
+
+```bash
+uv run cos auth gmail
+uv run cos auth calendar
+```
+
+Each command opens a browser tab for Google's consent screen. After you grant access:
+
+- `tokens/gmail.json` is written for Gmail
+- `tokens/google_calendar.json` is written for Google Calendar
+
+A plain-language confirmation is printed naming the connector and the token file:
+
+```text
+Authenticated gmail successfully.
+Token saved to tokens/gmail.json
+```
+
+### 4. Token storage and refresh
+
+- Token files live in `tokens/` which is **gitignored** — they are never committed
+- The `docker-compose.yml` mounts `./tokens` into the container as `/app/tokens` so connector-side token refresh survives container rebuilds
+- Tokens refresh automatically in the background when they expire — no manual re-consent is needed as long as the refresh token is valid
+
+### 5. Recovery: token missing or revoked
+
+If a connector cannot authenticate, the platform logs a structured error and leaves the MCP retrieval path available. To recover, re-run the auth command for the affected connector:
+
+```bash
+uv run cos auth gmail       # re-authorise Gmail
+uv run cos auth calendar    # re-authorise Google Calendar
+```
+
 ## Ingest Documents
 
 Load documents into the knowledge base using the `cos ingest` command, run inside the `cos` container.

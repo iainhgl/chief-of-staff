@@ -76,6 +76,11 @@ class ChunkingConfig(BaseModel):
     chunk_overlap: int = 100
 
 
+class GoogleOAuthConfig(BaseModel):
+    client_id: str
+    client_secret: SecretStr
+
+
 class CosConfig(BaseModel):
     llm: LLMConfig
     embedding: EmbeddingConfig
@@ -86,6 +91,7 @@ class CosConfig(BaseModel):
     tika: TikaConfig = TikaConfig()
     storage: StorageConfig = StorageConfig()
     chunking: ChunkingConfig = ChunkingConfig()
+    google_oauth: GoogleOAuthConfig | None = None
 
     @classmethod
     def load(cls, path: str | Path = "config.yaml") -> "CosConfig":
