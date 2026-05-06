@@ -5,12 +5,15 @@ import time
 from pathlib import Path
 from typing import cast
 
+import psycopg
 import typer
 
 from cos.config import CosConfig
 from cos.services.health import ComponentStatus, HealthService
 from cos.services.ingestion import SUPPORTED_SUFFIXES, IngestService
 from cos.services.provenance import DocumentSummary, ProvenanceService, VersionSummary
+from cos.store.db import backfill_legacy_documents
+from cos.store.models import BackfillResult
 
 app = typer.Typer(name="cos", help="CoS platform CLI")
 
@@ -222,6 +225,22 @@ def docs(
         asyncio.run(_docs_list(service, json_output))
 
 
+@app.command()
+def migrate() -> None:
+    """Backfill legacy documents onto the canonical identity model."""
+    try:
+        result = asyncio.run(_run_migrate())
+        typer.echo(
+            f"Migration complete: {result.backfilled} document(s) backfilled, "
+            f"{result.already_canonical} already canonical."
+        )
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        typer.echo(f"Migration failed: {exc}", err=True)
+        raise typer.Exit(code=1)
+
+
 async def _docs_list(service: ProvenanceService, json_output: bool) -> None:
     documents = await service.list_documents()
     if not documents:
@@ -306,6 +325,14 @@ def _print_versions_table(versions: list[VersionSummary]) -> None:
             f"{version.ingested_at.isoformat(timespec='seconds'):<26}  "
             f"{version.file_hash}"
         )
+
+
+async def _run_migrate() -> BackfillResult:
+    config = CosConfig.load()
+    async with await psycopg.AsyncConnection.connect(
+        config.database.libpq_dsn
+    ) as conn:
+        return await backfill_legacy_documents(conn)
 
 
 async def _check_status(config: CosConfig) -> list[ComponentStatus]:

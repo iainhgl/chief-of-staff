@@ -9,6 +9,7 @@ from pgvector.psycopg import register_vector_async  # type: ignore[import-untype
 from psycopg_pool import AsyncConnectionPool
 
 from cos.store.models import (
+    BackfillResult,
     ChunkRecord,
     ContentBlobRecord,
     DocumentSummary,
@@ -140,6 +141,144 @@ async def create_pool(dsn: str) -> AsyncConnectionPool:
     pool = AsyncConnectionPool(dsn, open=False)
     await pool.open(wait=True, timeout=30.0)
     return pool
+
+
+async def backfill_legacy_documents(
+    conn: psycopg.AsyncConnection[Any],
+) -> BackfillResult:
+    total_result = await conn.execute("SELECT COUNT(*) FROM documents")
+    total_row = await total_result.fetchone()
+    total_documents = total_row[0] if total_row is not None else 0
+
+    result = await conn.execute(
+        """
+        SELECT d.id::text, d.source_path, d.current_version
+        FROM documents d
+        WHERE EXISTS (
+            SELECT 1
+            FROM document_versions dv
+            WHERE dv.document_id = d.id
+              AND dv.content_blob_id IS NULL
+        )
+        OR EXISTS (
+            SELECT 1
+            FROM document_versions dv
+            WHERE dv.document_id = d.id
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM source_versions sv
+                  WHERE sv.document_version_id = dv.id
+              )
+        )
+        OR EXISTS (
+            SELECT 1
+            FROM chunks c
+            WHERE c.document_id = d.id
+              AND c.document_version_id IS NULL
+        )
+        ORDER BY d.ingested_at ASC, d.id ASC
+        """
+    )
+    legacy_docs = await result.fetchall()
+    if not legacy_docs:
+        return BackfillResult(backfilled=0, already_canonical=total_documents)
+
+    actually_backfilled = 0
+    for document_id, source_path, current_version in legacy_docs:
+        source_alias = Path(source_path).name or source_path
+        made_new_work = False
+
+        async with conn.transaction():
+            source_insert = await conn.execute(
+                "INSERT INTO sources (source_type, source_locator, source_alias) "
+                "VALUES ('file', %s, %s) "
+                "ON CONFLICT ON CONSTRAINT sources_type_locator_unique DO NOTHING",
+                (source_path, source_alias),
+            )
+            if source_insert.rowcount > 0:
+                made_new_work = True
+
+            source_result = await conn.execute(
+                "SELECT id::text, source_alias FROM sources "
+                "WHERE source_type = 'file' AND source_locator = %s",
+                (source_path,),
+            )
+            source_row = await source_result.fetchone()
+            if source_row is None:
+                raise RuntimeError(f"Failed to find source for {source_path!r}")
+            source_id = source_row[0]
+
+            dv_result = await conn.execute(
+                "SELECT id::text, content_hash, content_blob_id::text "
+                "FROM document_versions "
+                "WHERE document_id = %s::uuid "
+                "ORDER BY version ASC",
+                (document_id,),
+            )
+            version_rows = await dv_result.fetchall()
+
+            for document_version_id, content_hash, existing_blob_id in version_rows:
+                if existing_blob_id is None:
+                    blob_insert = await conn.execute(
+                        "INSERT INTO content_blobs (sha256, byte_size) "
+                        "VALUES (%s, 0) "
+                        "ON CONFLICT ON CONSTRAINT "
+                        "content_blobs_sha256_unique DO NOTHING",
+                        (content_hash,),
+                    )
+                    if blob_insert.rowcount > 0:
+                        made_new_work = True
+
+                blob_result = await conn.execute(
+                    "SELECT id::text FROM content_blobs WHERE sha256 = %s",
+                    (content_hash,),
+                )
+                blob_row = await blob_result.fetchone()
+                if blob_row is None:
+                    raise RuntimeError(
+                        f"Failed to find content_blob for hash {content_hash!r}"
+                    )
+                blob_id = blob_row[0]
+
+                await conn.execute(
+                    "UPDATE document_versions SET content_blob_id = %s::uuid "
+                    "WHERE id = %s::uuid AND content_blob_id IS NULL",
+                    (blob_id, document_version_id),
+                )
+
+                source_version_insert = await conn.execute(
+                    "INSERT INTO source_versions "
+                    "(source_id, document_version_id, content_blob_id) "
+                    "VALUES (%s::uuid, %s::uuid, %s::uuid) "
+                    "ON CONFLICT ON CONSTRAINT "
+                    "source_versions_source_document_unique DO NOTHING",
+                    (source_id, document_version_id, blob_id),
+                )
+                if source_version_insert.rowcount > 0:
+                    made_new_work = True
+
+            current_version_result = await conn.execute(
+                "SELECT id::text FROM document_versions "
+                "WHERE document_id = %s::uuid AND version = %s",
+                (document_id, current_version),
+            )
+            current_version_row = await current_version_result.fetchone()
+            if current_version_row is not None:
+                chunk_update = await conn.execute(
+                    "UPDATE chunks SET document_version_id = %s::uuid "
+                    "WHERE document_id = %s::uuid AND document_version_id IS NULL",
+                    (current_version_row[0], document_id),
+                )
+                if chunk_update.rowcount > 0:
+                    made_new_work = True
+
+        if made_new_work:
+            actually_backfilled += 1
+
+    return BackfillResult(
+        backfilled=actually_backfilled,
+        already_canonical=total_documents - actually_backfilled,
+    )
 
 
 async def list_documents(
