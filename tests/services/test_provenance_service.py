@@ -7,7 +7,7 @@ import psycopg
 from conftest import TEST_DSN, make_test_config
 
 from cos.services.provenance import ProvenanceService
-from cos.store.db import store_document
+from cos.store.db import store_document, store_document_canonical
 from cos.store.models import ChunkRecord, EmbeddingRecord
 
 
@@ -58,7 +58,8 @@ async def test_list_documents_returns_correct_fields(
     assert len(result) == 1
     document = result[0]
     assert document.id == doc_id
-    assert document.source_path == "docs/report.md"
+    assert document.source_alias == "docs/report.md"
+    assert document.source_locator == "docs/report.md"
     assert document.ingested_at.utcoffset() == timedelta(0)
     assert document.current_version == 1
     assert document.chunk_count == 2
@@ -147,3 +148,75 @@ async def test_list_document_versions_invalid_id_string(
     versions = await service.list_document_versions("missing-id")
 
     assert versions == []
+
+
+async def test_list_documents_canonical_record_uses_source_alias(
+    migrated_db: None,
+    tmp_path: Path,
+) -> None:
+    del migrated_db
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        await store_document_canonical(
+            conn,
+            source_path="/canonical/notes.md",
+            sha256="a" * 64,
+            byte_size=100,
+            source_type="file",
+            source_locator="/canonical/notes.md",
+            source_alias="notes.md",
+            chunks=[
+                ChunkRecord(
+                    content="canonical content",
+                    chunk_index=0,
+                    token_count=5,
+                )
+            ],
+            embeddings=[
+                EmbeddingRecord(
+                    vector=[0.1] * 1024,
+                    model="voyage-3",
+                    provider="anthropic",
+                )
+            ],
+        )
+    service = ProvenanceService(make_test_config(tmp_path))
+
+    result = await service.list_documents()
+
+    assert len(result) == 1
+    assert result[0].source_alias == "notes.md"
+    assert result[0].source_locator == "/canonical/notes.md"
+
+
+async def test_list_documents_legacy_record_falls_back_to_source_path(
+    migrated_db: None,
+    tmp_path: Path,
+) -> None:
+    del migrated_db
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        await store_document(
+            conn,
+            source_path="/legacy/report.md",
+            file_hash="bbb",
+            chunks=[
+                ChunkRecord(
+                    content="legacy content",
+                    chunk_index=0,
+                    token_count=5,
+                )
+            ],
+            embeddings=[
+                EmbeddingRecord(
+                    vector=[0.2] * 1024,
+                    model="voyage-3",
+                    provider="anthropic",
+                )
+            ],
+        )
+    service = ProvenanceService(make_test_config(tmp_path))
+
+    result = await service.list_documents()
+
+    assert len(result) == 1
+    assert result[0].source_alias == "/legacy/report.md"
+    assert result[0].source_locator == "/legacy/report.md"

@@ -37,7 +37,9 @@ def _make_chunk(content: str = "workforce segmentation framework") -> CitedChunk
     return CitedChunk(
         content=content,
         source_document_id="12345678-1234-1234-1234-123456789012",
-        source_path="/test/hr-framework.md",
+        source_alias="hr-framework.md",
+        source_locator="/test/hr-framework.md",
+        document_version_id="",
         chunk_index=0,
         score=0.9,
     )

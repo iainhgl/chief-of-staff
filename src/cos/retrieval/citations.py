@@ -8,7 +8,9 @@ from dataclasses import dataclass
 class CitedChunk:
     content: str
     source_document_id: str  # UUID-format string
-    source_path: str
+    source_alias: str
+    source_locator: str
+    document_version_id: str
     chunk_index: int
     score: float
 
@@ -27,7 +29,7 @@ class CitedResponse:
 
 def format_citations(results: CitedResults) -> str:
     return "\n".join(
-        f"[{index}] {chunk.source_path} "
+        f"[{index}] {chunk.source_alias} "
         f"(chunk {chunk.chunk_index}, score {chunk.score:.3f})"
         for index, chunk in enumerate(results, start=1)
     )

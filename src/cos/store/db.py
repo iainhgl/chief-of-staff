@@ -149,7 +149,28 @@ async def list_documents(
         """
         SELECT
             d.id::text,
-            d.source_path,
+            -- Deterministic alias: first source by created_at ASC; fallback to
+            -- source_path for legacy records without canonical source rows.
+            COALESCE(
+                (SELECT s.source_alias
+                 FROM sources s
+                 JOIN source_versions sv ON sv.source_id = s.id
+                 JOIN document_versions dv ON dv.id = sv.document_version_id
+                 WHERE dv.document_id = d.id
+                 ORDER BY s.created_at ASC, s.id ASC
+                 LIMIT 1),
+                d.source_path
+            ) AS source_alias,
+            COALESCE(
+                (SELECT s.source_locator
+                 FROM sources s
+                 JOIN source_versions sv ON sv.source_id = s.id
+                 JOIN document_versions dv ON dv.id = sv.document_version_id
+                 WHERE dv.document_id = d.id
+                 ORDER BY s.created_at ASC, s.id ASC
+                 LIMIT 1),
+                d.source_path
+            ) AS source_locator,
             d.ingested_at,
             d.current_version,
             COUNT(c.id)::int AS chunk_count
@@ -163,10 +184,11 @@ async def list_documents(
     return [
         DocumentSummary(
             id=row[0],
-            source_path=row[1],
-            ingested_at=row[2],
-            current_version=row[3],
-            chunk_count=row[4],
+            source_alias=row[1],
+            source_locator=row[2],
+            ingested_at=row[3],
+            current_version=row[4],
+            chunk_count=row[5],
         )
         for row in rows
     ]
@@ -348,9 +370,11 @@ async def link_new_source_to_existing_blob(
     async with conn.transaction():
         source = await upsert_source(conn, source_type, source_locator, source_alias)
         await conn.execute(
-            "INSERT INTO source_versions (source_id, document_version_id, content_blob_id) "
+            "INSERT INTO source_versions "
+            "(source_id, document_version_id, content_blob_id) "
             "VALUES (%s::uuid, %s::uuid, %s::uuid) "
-            "ON CONFLICT ON CONSTRAINT source_versions_source_document_unique DO NOTHING",
+            "ON CONFLICT ON CONSTRAINT "
+            "source_versions_source_document_unique DO NOTHING",
             (source.id, document_version_id, blob.id),
         )
     return document_id

@@ -234,7 +234,8 @@ async def _docs_list(service: ProvenanceService, json_output: bool) -> None:
                 [
                     {
                         "id": document.id,
-                        "source_path": document.source_path,
+                        "source_alias": document.source_alias,
+                        "source_locator": document.source_locator,
                         "ingested_at": document.ingested_at.isoformat(),
                         "current_version": document.current_version,
                         "chunk_count": document.chunk_count,
@@ -280,7 +281,7 @@ async def _docs_versions(
 
 def _print_documents_table(documents: list[DocumentSummary]) -> None:
     header = (
-        f"{'ID':<36}  {'SOURCE PATH':<40}  {'INGESTED AT':<26}  {'VER':>3}  "
+        f"{'ID':<36}  {'SOURCE ALIAS':<40}  {'INGESTED AT':<26}  {'VER':>3}  "
         f"{'CHUNKS':>6}"
     )
     typer.echo(header)
@@ -288,7 +289,7 @@ def _print_documents_table(documents: list[DocumentSummary]) -> None:
     for document in documents:
         typer.echo(
             f"{document.id:<36}  "
-            f"{document.source_path[-40:]:<40}  "
+            f"{document.source_alias[-40:]:<40}  "
             f"{document.ingested_at.isoformat(timespec='seconds'):<26}  "
             f"{document.current_version:>3}  "
             f"{document.chunk_count:>6}"

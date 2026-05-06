@@ -24,7 +24,9 @@ def _make_chunk() -> CitedChunk:
     return CitedChunk(
         content="test content",
         source_document_id="12345678-1234-1234-1234-123456789012",
-        source_path="/test/doc.md",
+        source_alias="doc.md",
+        source_locator="/test/doc.md",
+        document_version_id="",
         chunk_index=0,
         score=0.9,
     )
@@ -241,7 +243,8 @@ async def test_list_documents_returns_ok_envelope(monkeypatch):
     docs = [
         DocumentSummary(
             id="abc123",
-            source_path="/test/doc.md",
+            source_alias="doc.md",
+            source_locator="/test/doc.md",
             ingested_at=datetime(2026, 4, 27, tzinfo=timezone.utc),
             current_version=1,
             chunk_count=5,
@@ -270,7 +273,8 @@ async def test_list_documents_document_fields_present(monkeypatch):
     docs = [
         DocumentSummary(
             id="abc123",
-            source_path="/test/doc.md",
+            source_alias="doc.md",
+            source_locator="/test/doc.md",
             ingested_at=datetime(2026, 4, 27, tzinfo=timezone.utc),
             current_version=1,
             chunk_count=5,
@@ -284,10 +288,50 @@ async def test_list_documents_document_fields_present(monkeypatch):
 
     doc = result["data"]["documents"][0]
     assert "id" in doc
-    assert "source_path" in doc
+    assert "source_alias" in doc
+    assert "source_locator" in doc
+    assert "source_path" not in doc
     assert "ingested_at" in doc
     assert "current_version" in doc
     assert "chunk_count" in doc
+
+
+async def test_retrieve_citations_include_source_alias_and_locator(monkeypatch):
+    monkeypatch.setattr(_server, "_retrieval_service", _make_mock_retrieval_service())
+    monkeypatch.setattr(_server, "_output_service", _make_mock_output_service())
+    result = json.loads(await retrieve(query="workforce segmentation"))
+
+    assert result["status"] == "ok"
+    citations = result["citations"]
+    assert len(citations) == 1
+    assert "source_alias" in citations[0]
+    assert "source_locator" in citations[0]
+    assert "document_version_id" in citations[0]
+    assert "source_path" not in citations[0]
+
+
+async def test_list_documents_response_includes_source_alias_and_locator(monkeypatch):
+    monkeypatch.setattr(_server, "_config", _make_mock_config())
+    docs = [
+        DocumentSummary(
+            id="abc123",
+            source_alias="doc.md",
+            source_locator="/test/doc.md",
+            ingested_at=datetime(2026, 4, 27, tzinfo=timezone.utc),
+            current_version=1,
+            chunk_count=5,
+        )
+    ]
+    with patch(
+        "cos.services.provenance.ProvenanceService.list_documents",
+        new=AsyncMock(return_value=docs),
+    ):
+        result = json.loads(await list_documents())
+
+    doc = result["data"]["documents"][0]
+    assert doc["source_alias"] == "doc.md"
+    assert doc["source_locator"] == "/test/doc.md"
+    assert "source_path" not in doc
 
 
 async def test_get_role_context_returns_live_role_pack_data(monkeypatch):

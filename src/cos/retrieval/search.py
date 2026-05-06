@@ -15,10 +15,10 @@ from cos.rolepack.loader import RolePackConfig
 _RRF_K = 60
 
 
-def _coerce_priority_weight(retrieval_priorities: Any, source_path: str) -> float:
+def _coerce_priority_weight(retrieval_priorities: Any, source_alias: str) -> float:
     if isinstance(retrieval_priorities, dict):
         for candidate, weight in retrieval_priorities.items():
-            if isinstance(candidate, str) and source_path.startswith(candidate):
+            if isinstance(candidate, str) and source_alias.startswith(candidate):
                 if isinstance(weight, int | float):
                     return float(weight)
 
@@ -27,7 +27,7 @@ def _coerce_priority_weight(retrieval_priorities: Any, source_path: str) -> floa
     ):
         priorities_list = list(retrieval_priorities)
         total_priorities = len(priorities_list)
-        path_lower = source_path.lower()
+        path_lower = source_alias.lower()
 
         for index, item in enumerate(priorities_list):
             if isinstance(item, dict):
@@ -37,7 +37,7 @@ def _coerce_priority_weight(retrieval_priorities: Any, source_path: str) -> floa
                 weight = item.get("weight")
                 if (
                     isinstance(candidate, str)
-                    and source_path.startswith(candidate)
+                    and source_alias.startswith(candidate)
                     and isinstance(weight, int | float)
                 ):
                     return float(weight)
@@ -85,6 +85,7 @@ async def hybrid_search(
             c.document_id::text AS document_id,
             c.chunk_index,
             c.content,
+            c.document_version_id::text AS document_version_id,
             ts_rank_cd(c.content_tsv, websearch_to_tsquery('english', %s)) AS score
         FROM chunks c
         WHERE c.content_tsv @@ websearch_to_tsquery('english', %s)
@@ -100,7 +101,8 @@ async def hybrid_search(
             "document_id": row[1],
             "chunk_index": row[2],
             "content": row[3],
-            "score": float(row[4]),
+            "document_version_id": row[4],
+            "score": float(row[5]),
         }
         for row in keyword_rows
     ]
@@ -112,6 +114,7 @@ async def hybrid_search(
             c.document_id::text AS document_id,
             c.chunk_index,
             c.content,
+            c.document_version_id::text AS document_version_id,
             1 - (e.vector <=> %s) AS score
         FROM embeddings e
         JOIN chunks c ON c.id = e.chunk_id
@@ -127,10 +130,11 @@ async def hybrid_search(
             "document_id": row[1],
             "chunk_index": row[2],
             "content": row[3],
-            "score": float(row[4]),
+            "document_version_id": row[4],
+            "score": float(row[5]),
         }
         for row in semantic_rows
-        if float(row[4]) > 0.0
+        if float(row[5]) > 0.0
     ]
 
     if not keyword_hits and not semantic_hits:
@@ -149,19 +153,41 @@ async def hybrid_search(
             )
             merged_scores[chunk_id]["score"] += 1.0 / (_RRF_K + rank)
 
+    document_version_ids = [
+        entry["hit"]["document_version_id"]
+        for entry in merged_scores.values()
+        if entry["hit"].get("document_version_id") is not None
+    ]
+    source_info_by_version: dict[str, dict[str, str]] = {}
+    if document_version_ids:
+        source_version_result = await conn.execute(
+            """
+            SELECT DISTINCT ON (sv.document_version_id)
+                sv.document_version_id::text,
+                s.source_alias,
+                s.source_locator
+            FROM source_versions sv
+            JOIN sources s ON s.id = sv.source_id
+            WHERE sv.document_version_id = ANY(%s::uuid[])
+            ORDER BY sv.document_version_id, s.created_at ASC, s.id ASC
+            """,
+            (document_version_ids,),
+        )
+        source_version_rows = await source_version_result.fetchall()
+        source_info_by_version = {
+            row[0]: {"source_alias": row[1], "source_locator": row[2]}
+            for row in source_version_rows
+        }
+
     document_ids = list(
         {entry["hit"]["document_id"] for entry in merged_scores.values()}
     )
-    source_result = await conn.execute(
-        """
-        SELECT id::text, source_path
-        FROM documents
-        WHERE id = ANY(%s::uuid[])
-        """,
+    fallback_result = await conn.execute(
+        "SELECT id::text, source_path FROM documents WHERE id = ANY(%s::uuid[])",
         (document_ids,),
     )
-    source_rows = await source_result.fetchall()
-    source_paths = {row[0]: row[1] for row in source_rows}
+    fallback_rows = await fallback_result.fetchall()
+    fallback_paths = {row[0]: row[1] for row in fallback_rows}
 
     retrieval_priorities = (
         getattr(role_pack, "retrieval_priorities", None)
@@ -171,19 +197,30 @@ async def hybrid_search(
     cited_results: CitedResults = []
     for entry in merged_scores.values():
         hit = entry["hit"]
-        source_path = source_paths.get(hit["document_id"])
-        if source_path is None:
-            continue
+        doc_version_id = hit.get("document_version_id")
+
+        if doc_version_id and doc_version_id in source_info_by_version:
+            info = source_info_by_version[doc_version_id]
+            source_alias = info["source_alias"]
+            source_locator = info["source_locator"]
+        else:
+            legacy_path = fallback_paths.get(hit["document_id"])
+            if legacy_path is None:
+                continue
+            source_alias = legacy_path
+            source_locator = legacy_path
 
         final_score = float(entry["score"])
         if retrieval_priorities is not None:
-            final_score *= _coerce_priority_weight(retrieval_priorities, source_path)
+            final_score *= _coerce_priority_weight(retrieval_priorities, source_alias)
 
         cited_results.append(
             CitedChunk(
                 content=hit["content"],
                 source_document_id=hit["document_id"],
-                source_path=source_path,
+                source_alias=source_alias,
+                source_locator=source_locator,
+                document_version_id=doc_version_id or "",
                 chunk_index=hit["chunk_index"],
                 score=final_score,
             )

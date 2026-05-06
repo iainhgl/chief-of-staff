@@ -1,5 +1,5 @@
 # generated: 2026-04-17
-# last_updated: 2026-05-06  # 6-3-re-ingest-semantics-and-no-op-handling -> done
+# last_updated: 2026-05-06  # 6-4-citation-and-listing-updates-using-source-alias -> done
 # project: CoS
 # project_key: NOKEY
 # tracking_system: file-system
@@ -37,7 +37,7 @@
 # - Epics 1-5 represent the implemented baseline; Epic 6 onward reflects the change-course backlog
 
 generated: 2026-04-17
-last_updated: 2026-05-06  # 6-3-re-ingest-semantics-and-no-op-handling -> done
+last_updated: 2026-05-06  # 6-4-citation-and-listing-updates-using-source-alias -> done
 project: CoS
 project_key: NOKEY
 tracking_system: file-system
@@ -119,7 +119,7 @@ development_status:
   6-1-canonical-blob-source-and-version-schema-hardening: done
   6-2-hash-first-ingest-and-exact-byte-deduplication: done
   6-3-re-ingest-semantics-and-no-op-handling: done
-  6-4-citation-and-listing-updates-using-source-alias: backlog
+  6-4-citation-and-listing-updates-using-source-alias: done
   6-5-migration-backfill-and-operator-recovery: backlog
   6-6-oauth-authentication-setup-for-gmail-and-calendar: backlog
   6-7-jobs-queue-and-background-ingestion-worker: backlog
