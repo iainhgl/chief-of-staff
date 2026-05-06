@@ -163,13 +163,50 @@ async def test_canonical_identity_migration_is_idempotent(
     await run_migrations(TEST_DSN)
 
 
-def test_jobs_migration_has_no_executable_sql() -> None:
-    base = Path(__file__).parent.parent.parent / "src" / "cos" / "store"
-    sql = (base / "migrations" / "002_jobs.sql").read_text()
-    for line in sql.splitlines():
-        stripped = line.strip()
-        if stripped:
-            assert stripped.startswith("--"), f"Unexpected executable SQL: {line!r}"
+async def test_jobs_table_exists_after_migrations(migrated_db, db_conn) -> None:
+    result = await db_conn.execute(
+        "SELECT table_name FROM information_schema.tables "
+        "WHERE table_schema = 'public' AND table_name = 'jobs'"
+    )
+    assert await result.fetchone() is not None
+
+
+async def test_jobs_table_has_required_columns(migrated_db, db_conn) -> None:
+    result = await db_conn.execute(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_name = 'jobs' AND column_name = ANY(%s)",
+        (
+            [
+                "id",
+                "job_type",
+                "status",
+                "payload",
+                "attempt_count",
+                "max_attempts",
+                "available_at",
+                "started_at",
+                "completed_at",
+                "last_error",
+                "created_at",
+                "updated_at",
+            ],
+        ),
+    )
+    columns = {row[0] for row in await result.fetchall()}
+    assert columns == {
+        "id",
+        "job_type",
+        "status",
+        "payload",
+        "attempt_count",
+        "max_attempts",
+        "available_at",
+        "started_at",
+        "completed_at",
+        "last_error",
+        "created_at",
+        "updated_at",
+    }
 
 
 def test_search_indexes_migration_is_idempotent() -> None:

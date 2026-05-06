@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import Any
 
 
 @dataclass
@@ -97,3 +98,28 @@ class VersionSummary:
     version_number: int = 1
     ingested_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     file_hash: str = ""
+
+
+@dataclass
+class JobRecord:
+    id: str = ""
+    job_type: str = ""
+    status: str = "queued"
+    payload: dict[str, Any] = field(default_factory=dict)
+    attempt_count: int = 0
+    max_attempts: int = 3
+    available_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    last_error: str | None = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class IngestJobPayload:
+    staged_path: str = ""
+    source_type: str = ""
+    source_locator: str = ""
+    source_alias: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
