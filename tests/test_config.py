@@ -210,3 +210,80 @@ def test_google_oauth_client_secret_accessible_via_get_secret_value(tmp_path):
 
 def test_google_oauth_model_is_exported():
     assert GoogleOAuthConfig is not None
+
+
+# ── Google Calendar config tests (Story 6.9) ──────────────────────────────
+
+_GOOGLE_CALENDAR_BLOCK = """\
+google_calendar:
+  calendar_ids:
+    - primary
+  lookback_hours: 12
+  lookahead_days: 14
+  max_results: 100
+  staging_dir: /data/connector-staging/google-calendar
+"""
+
+
+def test_google_calendar_config_is_optional(tmp_path):
+    cfg_file = _write_config(tmp_path, VALID_CONFIG_YAML)
+    config = CosConfig.load(cfg_file)
+    assert config.google_calendar is None
+
+
+def test_google_calendar_config_loads_when_present(tmp_path):
+    cfg_file = _write_config(tmp_path, VALID_CONFIG_YAML + _GOOGLE_CALENDAR_BLOCK)
+    config = CosConfig.load(cfg_file)
+    assert config.google_calendar is not None
+    assert config.google_calendar.calendar_ids == ["primary"]
+    assert config.google_calendar.lookback_hours == 12
+    assert config.google_calendar.lookahead_days == 14
+    assert config.google_calendar.max_results == 100
+    assert config.google_calendar.staging_dir == Path(
+        "/data/connector-staging/google-calendar"
+    )
+
+
+def test_google_calendar_config_defaults(tmp_path):
+    from cos.config import GoogleCalendarConnectorConfig
+
+    cal = GoogleCalendarConnectorConfig()
+    assert cal.calendar_ids == ["primary"]
+    assert cal.lookback_hours == 12
+    assert cal.lookahead_days == 14
+    assert cal.max_results == 100
+    assert cal.staging_dir == Path("/data/connector-staging/google-calendar")
+
+
+def test_google_calendar_config_max_results_cap(tmp_path):
+    from cos.config import GoogleCalendarConnectorConfig
+
+    import pytest
+
+    with pytest.raises(Exception):
+        GoogleCalendarConnectorConfig(max_results=2501)
+
+
+def test_google_calendar_config_rejects_negative_lookback_hours(tmp_path):
+    from cos.config import GoogleCalendarConnectorConfig
+
+    import pytest
+
+    with pytest.raises(Exception):
+        GoogleCalendarConnectorConfig(lookback_hours=-1)
+
+
+def test_google_calendar_config_rejects_negative_lookahead_days(tmp_path):
+    from cos.config import GoogleCalendarConnectorConfig
+
+    import pytest
+
+    with pytest.raises(Exception):
+        GoogleCalendarConnectorConfig(lookahead_days=-1)
+
+
+def test_existing_config_loads_unchanged_without_calendar_block(tmp_path):
+    cfg_file = _write_config(tmp_path, VALID_CONFIG_YAML)
+    config = CosConfig.load(cfg_file)
+    assert config.google_calendar is None
+    assert config.gmail is None

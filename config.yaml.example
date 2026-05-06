@@ -71,6 +71,8 @@ channels:
 # Connectors
 # Lists the external data connectors to activate (e.g. gmail, google_calendar).
 # Leave empty in Epic 1 — connectors are implemented in Epic 6.
+# To enable Gmail: add "gmail" and configure the gmail: block below.
+# To enable Google Calendar: add "google_calendar" and configure the google_calendar: block below.
 # ─────────────────────────────────────────────
 connectors: []
 
@@ -166,3 +168,24 @@ chunking:
 #   max_results: 25
 #   include_spam_trash: false
 #   staging_dir: /data/connector-staging/gmail
+
+# ─────────────────────────────────────────────
+# Google Calendar Connector (optional — requires google_oauth block above and "google_calendar" in connectors)
+# Controls how the Calendar connector fetches upcoming events when you run `cos sync calendar`.
+# Omit this block entirely to use all defaults.
+#
+# calendar_ids: list of calendar IDs to sync (use "primary" for the authenticated user's primary calendar).
+# lookback_hours: how many hours in the past to include (default 12, covers events that started recently).
+# lookahead_days: how many days ahead to fetch (default 14).
+# max_results: maximum events per calendar per sync cycle (1–2500, default 100).
+# staging_dir: shared volume path where the connector stages event files before enqueueing.
+#   Must be on the shared Docker volume so the background worker can read it.
+#   Default: /data/connector-staging/google-calendar
+# ─────────────────────────────────────────────
+# google_calendar:
+#   calendar_ids:
+#     - primary
+#   lookback_hours: 12
+#   lookahead_days: 14
+#   max_results: 100
+#   staging_dir: /data/connector-staging/google-calendar

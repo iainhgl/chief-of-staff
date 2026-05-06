@@ -1,4 +1,4 @@
-"""Tests for `cos sync gmail` CLI command."""
+"""Tests for `cos sync gmail` and `cos sync calendar` CLI commands."""
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from pydantic import SecretStr
@@ -8,9 +8,11 @@ from cos.cli import app
 from cos.config import (
     CosConfig,
     GmailConnectorConfig,
+    GoogleCalendarConnectorConfig,
     GoogleOAuthConfig,
 )
 from cos.connectors.google_auth import AuthError
+from cos.services.calendar import CalendarSyncDegradedError, CalendarSyncResult
 from cos.services.gmail import GmailPollResult
 
 runner = CliRunner()
@@ -129,3 +131,146 @@ def test_sync_gmail_reports_configuration_error() -> None:
     assert result.exit_code == 1
     assert "configuration error" in result.output.lower()
     assert "max_results must be <= 500" in result.output
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# cos sync calendar
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _config_with_calendar(staging_dir: str = "/tmp/staging") -> CosConfig:
+    cfg = MagicMock(spec=CosConfig)
+    cfg.connectors = ["google_calendar"]
+    cfg.google_calendar = GoogleCalendarConnectorConfig(staging_dir=staging_dir)
+    cfg.google_oauth = GoogleOAuthConfig(
+        client_id="test.apps.googleusercontent.com",
+        client_secret=SecretStr("secret"),
+    )
+    cfg.database = MagicMock()
+    cfg.database.libpq_dsn = "postgresql://postgres:postgres@localhost:5432/cos_test"
+    return cfg
+
+
+def _config_without_calendar() -> CosConfig:
+    cfg = MagicMock(spec=CosConfig)
+    cfg.connectors = []
+    return cfg
+
+
+# ── success path ──────────────────────────────────────────────────────────────
+
+def test_sync_calendar_prints_summary_on_success() -> None:
+    sync_result = CalendarSyncResult(
+        calendars_scanned=2,
+        events_discovered=15,
+        jobs_enqueued=15,
+    )
+    with (
+        patch("cos.cli.CosConfig.load", return_value=_config_with_calendar()),
+        patch("cos.cli._do_sync_calendar", new=AsyncMock(return_value=sync_result)),
+    ):
+        result = runner.invoke(app, ["sync", "calendar"])
+
+    assert result.exit_code == 0
+    assert "2 calendar" in result.output
+    assert "15 event" in result.output
+    assert "15 job" in result.output
+
+
+def test_sync_calendar_exit_0_on_empty_calendar() -> None:
+    sync_result = CalendarSyncResult(
+        calendars_scanned=1,
+        events_discovered=0,
+        jobs_enqueued=0,
+    )
+    with (
+        patch("cos.cli.CosConfig.load", return_value=_config_with_calendar()),
+        patch("cos.cli._do_sync_calendar", new=AsyncMock(return_value=sync_result)),
+    ):
+        result = runner.invoke(app, ["sync", "calendar"])
+
+    assert result.exit_code == 0
+    assert "0 event" in result.output
+
+
+# ── disabled connector ────────────────────────────────────────────────────────
+
+def test_sync_calendar_fails_when_not_in_connectors() -> None:
+    with patch("cos.cli.CosConfig.load", return_value=_config_without_calendar()):
+        result = runner.invoke(app, ["sync", "calendar"])
+
+    assert result.exit_code == 1
+    assert "google_calendar" in result.output.lower()
+
+
+# ── auth error ────────────────────────────────────────────────────────────────
+
+def test_sync_calendar_fails_gracefully_on_auth_error() -> None:
+    with (
+        patch("cos.cli.CosConfig.load", return_value=_config_with_calendar()),
+        patch(
+            "cos.cli._do_sync_calendar",
+            new=AsyncMock(
+                side_effect=AuthError(
+                    "No token. Run: uv run cos auth calendar"
+                )
+            ),
+        ),
+    ):
+        result = runner.invoke(app, ["sync", "calendar"])
+
+    assert result.exit_code == 1
+    assert "authentication error" in result.output.lower()
+    assert "uv run cos auth calendar" in result.output
+
+
+# ── degraded Calendar API ─────────────────────────────────────────────────────
+
+def test_sync_calendar_fails_gracefully_on_api_error() -> None:
+    with (
+        patch("cos.cli.CosConfig.load", return_value=_config_with_calendar()),
+        patch(
+            "cos.cli._do_sync_calendar",
+            new=AsyncMock(side_effect=RuntimeError("Calendar API unavailable")),
+        ),
+    ):
+        result = runner.invoke(app, ["sync", "calendar"])
+
+    assert result.exit_code == 1
+    assert "calendar sync failed" in result.output.lower()
+
+
+def test_sync_calendar_surfaces_degraded_partial_failure() -> None:
+    degraded = CalendarSyncDegradedError(
+        result=CalendarSyncResult(
+            calendars_scanned=2,
+            events_discovered=4,
+            jobs_enqueued=4,
+        ),
+        failed_calendars=["team@example.com"],
+    )
+    with (
+        patch("cos.cli.CosConfig.load", return_value=_config_with_calendar()),
+        patch("cos.cli._do_sync_calendar", new=AsyncMock(side_effect=degraded)),
+    ):
+        result = runner.invoke(app, ["sync", "calendar"])
+
+    assert result.exit_code == 1
+    assert "calendar sync degraded" in result.output.lower()
+    assert "team@example.com" in result.output
+    assert "partial results" in result.output.lower()
+    assert "4 events discovered" in result.output
+
+
+# ── configuration error ───────────────────────────────────────────────────────
+
+def test_sync_calendar_reports_configuration_error() -> None:
+    with patch(
+        "cos.cli.CosConfig.load",
+        side_effect=SystemExit("Invalid config.yaml:\nmax_results must be <= 2500"),
+    ):
+        result = runner.invoke(app, ["sync", "calendar"])
+
+    assert result.exit_code == 1
+    assert "configuration error" in result.output.lower()
+    assert "max_results must be <= 2500" in result.output
