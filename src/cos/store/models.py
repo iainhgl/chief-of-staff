@@ -51,6 +51,32 @@ class ProvenanceRecord:
 
 
 @dataclass
+class ContentBlobRecord:
+    id: str = ""
+    sha256: str = ""
+    byte_size: int = 0
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class SourceRecord:
+    id: str = ""
+    source_type: str = ""
+    source_locator: str = ""
+    source_alias: str = ""
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class SourceVersionRecord:
+    id: str = ""
+    source_id: str = ""
+    document_version_id: str = ""
+    content_blob_id: str = ""
+    observed_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
 class DocumentSummary:
     id: str = ""
     source_path: str = ""
