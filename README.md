@@ -2,28 +2,34 @@
 
 A personal AI platform that acts as a Chief of Staff for a specific role — retaining knowledge in a structured store and reasoning over it to answer questions grounded in source material.
 
-## Current Capabilities (Epic 5)
+## Current Capabilities (Epic 6)
 
 What is working today:
 
-- **Three-container platform** (postgres/pgvector, Tika, cos) that starts with `docker compose up -d`
+- **Four-service platform** (postgres/pgvector, Tika, cos, worker) that starts with `docker compose up -d`
 - **Config validation at startup** — human-readable errors for missing or invalid config values
 - **Database schema applied automatically** — idempotent migrations run on every startup
 - **MCP server** accessible via `docker compose exec` stdio transport (Claude Code and Claude Desktop)
-- **`cos ingest <path>`** — ingest a single file or folder of documents (PDF, .docx, .md, .txt); per-file progress and final summary printed
-- **`cos docs`** — list all ingested documents with provenance metadata (source path, ingested timestamp, version, chunk count)
+- **`cos ingest <path>`** — ingest a single file or folder of documents (PDF, .docx, .md, .txt); per-file progress and final summary printed; resolves to one of four deterministic outcomes (`new_content`, `unchanged`, `changed_content`, `new_source_known_content`)
+- **`cos docs`** — list all ingested documents with provenance metadata (source alias, source locator, ingested timestamp, version, chunk count); shows content from all source types (local files, Gmail, Calendar, MCP notes)
 - **`cos docs --versions <id>`** — show version history for a specific document
-- **`cos docs --json`** — machine-readable JSON output
+- **`cos docs --json`** — machine-readable JSON; each object includes `id`, `source_alias`, `source_locator`, `ingested_at`, `current_version`, `chunk_count`
 - **Originals preserved** — every ingested file is stored byte-for-byte in `/data/originals/` (in-container path); Markdown working copies in `/data/markdown/`
-- **`retrieve`** — ask questions about ingested documents; returns a synthesised answer grounded in source material with citations in both `data.citations` and top-level `citations` (`source_path`, `chunk_index`, `score` per citation); handles the no-content case without fabrication
-- **`list_documents`** — returns a JSON envelope with `data.documents`, where each document includes `id`, `source_path`, `ingested_at`, `current_version`, and `chunk_count`; the document rows match `cos docs --json`
+- **`cos auth gmail`** / **`cos auth calendar`** — OAuth browser consent flow; run from the **host** so the browser can open; writes token files to `tokens/`
+- **`cos sync gmail`** / **`cos sync calendar`** — poll the connected source for new content and enqueue background ingest jobs; run inside the `cos` container
+- **`cos migrate`** — backfill legacy Phase 1 path-centric documents onto the canonical identity model; safe to rerun; idempotent
+- **Background `worker` service** — drains the ingest job queue; connector failures are fault-isolated and do not affect the MCP server or retrieval path
+- **Exact-byte deduplication** — a file, Gmail attachment, Calendar event, and MCP note with identical bytes share one canonical content record; each is preserved as a distinct provenance entry
+- **`retrieve`** — ask questions about ingested documents; returns a synthesised answer grounded in source material with citations in both `data.citations` and top-level `citations` (`source_alias`, `source_locator`, `document_version_id`, `chunk_index`, `score` per citation); handles the no-content case without fabrication
+- **`list_documents`** — returns a JSON envelope with `data.documents`; each document includes `id`, `source_alias`, `source_locator`, `ingested_at`, `current_version`, `chunk_count`; matches `cos docs --json`
+- **`ingest_document`** — MCP tool for direct note capture from a Claude session; accepts `content` and optional `metadata` (including a stable `external_id`); returns `outcome`, `source_alias`, `source_locator`; emits a near-duplicate warning if enabled
 - **`get_role_context`** — returns the active role summary from the loaded role pack; `data.role_name` is the role's display name and the response also includes `goals`, `tone`, `knowledge_taxonomy`, and `active_workflows`
 - **`get_status`** — returns a JSON envelope with health of all six components (cos, postgres, tika, MCP server, role pack, database) and a `ready` flag
 - **`cos status`** — plain-language health table for all five components; identifies exactly which component failed and states the recovery action; exit code 1 when any component is unhealthy; run from the host: `docker compose exec cos uv run cos status`
 - **`cos restart`** — single command that restarts all services and polls until every container is healthy; prints confirmation or names the stuck component; run from the host: `uv run cos restart`
 - **`cos logs`** — single command log export; supports optional component filter and `--since <duration>` for time filtering; run from the host: `uv run cos logs`
 
-Knowledge retrieval and Q&A with citations are working. Role identity is configuration-only — author a YAML file and point `config.yaml` at it; no code changes are required. See [docs/role-packs.md](docs/role-packs.md) for the authoring guide. The platform can be monitored, restarted, and diagnosed using plain-language CLI commands — see [docs/setup.md](docs/setup.md) for the operations reference. Connected sources (email, calendar) are planned for Epic 6.
+Knowledge retrieval and Q&A with citations are working. Role identity is configuration-only — author a YAML file and point `config.yaml` at it; no code changes are required. See [docs/role-packs.md](docs/role-packs.md) for the authoring guide. The platform can be monitored, restarted, and diagnosed using plain-language CLI commands — see [docs/setup.md](docs/setup.md) for the operations reference.
 
 ## How it Works
 
@@ -52,28 +58,30 @@ Python · PostgreSQL · pgvector · MCP (model context protocol) · Docker
 ```
 cos/
 ├── config.yaml.example       # config template — copy to config.yaml and fill in
-├── docker-compose.yml        # postgres, tika, cos services
-├── Dockerfile                # cos container image
+├── docker-compose.yml        # postgres, tika, cos, worker services
+├── Dockerfile                # cos and worker container image (shared build)
 ├── role_packs/               # role pack YAML files — define who the platform serves
 │   ├── chro.yaml             # CHRO example (default)
 │   └── enterprise_architect.yaml  # Enterprise Architect example
+├── tokens/                   # OAuth token files (gitignored) — gmail.json, google_calendar.json
 ├── docs/
 │   ├── setup.md              # setup, operations, and querying guide
+│   ├── migration.md          # migration/backfill guide for existing Phase 1 stores
 │   ├── role-packs.md         # role pack authoring guide and field reference
-│   └── manual-testing.md     # end-to-end operator validation tests
+│   └── manual-testing.md     # end-to-end Epic 6 operator UAT guide
 ├── src/
 │   └── cos/
-│       ├── cli.py            # `cos` CLI entry point (status, restart, logs, ingest, docs)
+│       ├── cli.py            # `cos` CLI entry point (status, restart, logs, ingest, docs, auth, sync, migrate)
 │       ├── config.py         # CosConfig — Pydantic model reads config.yaml at startup
 │       ├── mcp_server/       # FastMCP server — tools and startup sequence
-│       ├── services/         # thin service layer — only cross-module import path
+│       ├── services/         # thin service layer — ingestion, provenance, health, gmail, calendar
 │       ├── store/            # Postgres schema, migrations, data models
-│       ├── ingestion/        # extraction, chunking, embedding pipeline (Epic 2)
-│       ├── retrieval/        # hybrid keyword + semantic search (Epic 3)
-│       ├── rolepack/         # role pack YAML loader (Epic 4)
+│       ├── ingestion/        # extraction, chunking, embedding pipeline
+│       ├── retrieval/        # hybrid keyword + semantic search
+│       ├── rolepack/         # role pack YAML loader
 │       ├── output/           # OutputRouter — sole exit point for all user-facing output
 │       ├── llm/              # LLM provider adapter (provider-agnostic interface)
-│       └── connectors/       # external source connectors (Epic 6 — stubs only)
+│       └── connectors/       # Gmail, Google Calendar OAuth and sync connectors
 └── tests/
     └── ...                   # pytest test suite
 ```
