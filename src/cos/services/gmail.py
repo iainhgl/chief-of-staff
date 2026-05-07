@@ -1,4 +1,5 @@
 """Gmail connector service — staging, deduplication, and job enqueue orchestration."""
+import hashlib
 import json
 import logging
 import re
@@ -143,7 +144,7 @@ async def poll_gmail(
                 continue
 
             source_alias = filename or f"attachment-{attachment_slug}{suffix}"
-            staged_name = f"{message_id}_{attachment_slug}{suffix}"
+            staged_name = _staged_attachment_name(message_id, attachment_slug, suffix)
             att_staged = staging_dir / staged_name
             att_staged.write_bytes(att_bytes)
 
@@ -219,6 +220,17 @@ def _attachment_slug(part: dict[str, Any], attachment_id: Any, part_index: int) 
     raw_slug = str(attachment_id or part.get("partId") or f"part-{part_index}")
     clean = re.sub(r"[^A-Za-z0-9._-]", "-", raw_slug).strip("-")
     return clean or f"part-{part_index}"
+
+
+def _staged_attachment_name(message_id: str, attachment_slug: str, suffix: str) -> str:
+    base = f"{message_id}_{attachment_slug}"
+    candidate = f"{base}{suffix}"
+    if len(candidate) <= 240:
+        return candidate
+
+    digest = hashlib.sha256(base.encode("utf-8")).hexdigest()[:16]
+    truncated_slug = attachment_slug[:80].rstrip("._-") or "attachment"
+    return f"{message_id}_{truncated_slug}_{digest}{suffix}"
 
 
 def _header_value(headers: Any, name: str) -> str:

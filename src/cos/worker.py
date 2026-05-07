@@ -59,5 +59,6 @@ async def _run_loop(dsn: str, config: CosConfig) -> None:
 
 def run() -> None:
     """Entry point for the cos-worker script."""
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     config = CosConfig.load()
     asyncio.run(_run_loop(config.database.libpq_dsn, config))
