@@ -4,10 +4,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import cos.mcp_server.server as _server
 import cos.mcp_server.tools  # noqa: F401 — ensure decorators run
-from cos.mcp_server.tools import get_role_context, get_status, list_documents, retrieve
+from cos.mcp_server.tools import (
+    get_role_context,
+    get_status,
+    ingest_document,
+    list_documents,
+    retrieve,
+)
 from cos.retrieval.citations import CitedChunk, CitedResponse
 from cos.rolepack.loader import RolePackConfig
 from cos.services.health import ComponentStatus
+from cos.services.ingestion import IngestResult
 from cos.services.rolepack import RolePackService
 from cos.store.models import DocumentSummary
 
@@ -373,3 +380,129 @@ async def test_retrieve_passes_role_pack_to_service(monkeypatch):
         retrieval_service.query.call_args.kwargs["role_pack"]
         == role_pack_service.get_active()
     )
+
+
+# ─────────────────────────────────────────────
+# ingest_document tool tests
+# ─────────────────────────────────────────────
+
+
+def _make_ingest_result(
+    outcome: str = "new_content",
+    message: str = "New content detected - full ingest will proceed.",
+    warning: str | None = None,
+    chunk_count: int = 3,
+) -> IngestResult:
+    return IngestResult(
+        document_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        chunk_count=chunk_count,
+        source_path="/data/connector-staging/mcp/test-note.md",
+        outcome=outcome,
+        message=message,
+        source_alias="test-note.md",
+        source_locator="mcp_note://mcp/test-id-123",
+        warning=warning,
+    )
+
+
+async def test_ingest_document_success_envelope(monkeypatch):
+    monkeypatch.setattr(_server, "_config", _make_mock_config())
+    with patch(
+        "cos.services.ingestion.IngestService.ingest_note",
+        new=AsyncMock(return_value=_make_ingest_result()),
+    ):
+        result = json.loads(
+            await ingest_document(content="A strategic planning note.")
+        )
+
+    assert result["status"] == "ok"
+    assert result["citations"] == []
+    data = result["data"]
+    assert "document_id" in data
+    assert "chunk_count" in data
+    assert "outcome" in data
+    assert "message" in data
+    assert "source_alias" in data
+    assert "source_locator" in data
+    assert "warning" not in data
+
+
+async def test_ingest_document_duplicate_content_message(monkeypatch):
+    monkeypatch.setattr(_server, "_config", _make_mock_config())
+    with patch(
+        "cos.services.ingestion.IngestService.ingest_note",
+        new=AsyncMock(
+            return_value=_make_ingest_result(
+                outcome="new_source_known_content",
+                message=(
+                    "Known content from a new source - provenance will be"
+                    " linked without reprocessing."
+                ),
+                chunk_count=0,
+            )
+        ),
+    ):
+        result = json.loads(
+            await ingest_document(content="Duplicate bytes content.")
+        )
+
+    assert result["status"] == "ok"
+    data = result["data"]
+    assert data["outcome"] == "new_source_known_content"
+    assert "linked" in data["message"].lower() or "known" in data["message"].lower()
+    assert data["chunk_count"] == 0
+
+
+async def test_ingest_document_near_duplicate_warning_in_response(monkeypatch):
+    monkeypatch.setattr(_server, "_config", _make_mock_config())
+    with patch(
+        "cos.services.ingestion.IngestService.ingest_note",
+        new=AsyncMock(
+            return_value=_make_ingest_result(
+                warning=(
+                    "Semantically similar content already exists:"
+                    " 'existing-doc.md' (similarity: 0.97)"
+                )
+            )
+        ),
+    ):
+        result = json.loads(
+            await ingest_document(content="A note very similar to an existing one.")
+        )
+
+    assert result["status"] == "ok"
+    data = result["data"]
+    assert "warning" in data
+    assert "existing-doc.md" in data["warning"]
+    assert data["outcome"] == "new_content"
+
+
+async def test_ingest_document_empty_content_returns_error(monkeypatch):
+    monkeypatch.setattr(_server, "_config", _make_mock_config())
+    result = json.loads(await ingest_document(content="   "))
+
+    assert result["status"] == "error"
+    assert "error" in result
+    assert "detail" in result
+
+
+async def test_ingest_document_server_not_initialized(monkeypatch):
+    monkeypatch.setattr(_server, "_config", None)
+    result = json.loads(await ingest_document(content="Some note content."))
+
+    assert result["status"] == "error"
+    assert "Server not initialized" in result["error"]
+
+
+async def test_ingest_document_service_exception_returns_error(monkeypatch):
+    monkeypatch.setattr(_server, "_config", _make_mock_config())
+    with patch(
+        "cos.services.ingestion.IngestService.ingest_note",
+        new=AsyncMock(side_effect=RuntimeError("DB connection lost")),
+    ):
+        result = json.loads(await ingest_document(content="Some note content."))
+
+    assert result["status"] == "error"
+    assert result["error"] == "Ingest failed"
+    assert "DB connection lost" not in result["detail"]
+    assert "cos logs" in result["detail"]

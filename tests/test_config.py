@@ -256,27 +256,27 @@ def test_google_calendar_config_defaults(tmp_path):
 
 
 def test_google_calendar_config_max_results_cap(tmp_path):
-    from cos.config import GoogleCalendarConnectorConfig
-
     import pytest
+
+    from cos.config import GoogleCalendarConnectorConfig
 
     with pytest.raises(Exception):
         GoogleCalendarConnectorConfig(max_results=2501)
 
 
 def test_google_calendar_config_rejects_negative_lookback_hours(tmp_path):
-    from cos.config import GoogleCalendarConnectorConfig
-
     import pytest
+
+    from cos.config import GoogleCalendarConnectorConfig
 
     with pytest.raises(Exception):
         GoogleCalendarConnectorConfig(lookback_hours=-1)
 
 
 def test_google_calendar_config_rejects_negative_lookahead_days(tmp_path):
-    from cos.config import GoogleCalendarConnectorConfig
-
     import pytest
+
+    from cos.config import GoogleCalendarConnectorConfig
 
     with pytest.raises(Exception):
         GoogleCalendarConnectorConfig(lookahead_days=-1)
@@ -287,3 +287,45 @@ def test_existing_config_loads_unchanged_without_calendar_block(tmp_path):
     config = CosConfig.load(cfg_file)
     assert config.google_calendar is None
     assert config.gmail is None
+
+
+def test_mcp_note_config_absent_by_default(tmp_path):
+    cfg_file = _write_config(tmp_path, VALID_CONFIG_YAML)
+    config = CosConfig.load(cfg_file)
+    assert config.mcp_note is None
+
+
+def test_mcp_note_config_optional_block_loads(tmp_path):
+    yaml_with_mcp_note = VALID_CONFIG_YAML + (
+        "\nmcp_note:\n"
+        "  staging_dir: /data/connector-staging/mcp\n"
+        "  near_duplicate_threshold: 0.90\n"
+    )
+    cfg_file = _write_config(tmp_path, yaml_with_mcp_note)
+    config = CosConfig.load(cfg_file)
+
+    assert config.mcp_note is not None
+    assert config.mcp_note.staging_dir == Path("/data/connector-staging/mcp")
+    assert config.mcp_note.near_duplicate_threshold == pytest.approx(0.90)
+
+
+def test_mcp_note_config_defaults_when_block_empty(tmp_path):
+    from cos.config import McpNoteIngestConfig
+
+    cfg = McpNoteIngestConfig()
+    assert cfg.staging_dir == Path("/data/connector-staging/mcp")
+    assert cfg.near_duplicate_threshold == pytest.approx(0.95)
+
+
+def test_mcp_note_config_rejects_threshold_above_one(tmp_path):
+    from cos.config import McpNoteIngestConfig
+
+    with pytest.raises(Exception):
+        McpNoteIngestConfig(near_duplicate_threshold=1.1)
+
+
+def test_mcp_note_config_rejects_negative_threshold(tmp_path):
+    from cos.config import McpNoteIngestConfig
+
+    with pytest.raises(Exception):
+        McpNoteIngestConfig(near_duplicate_threshold=-0.1)

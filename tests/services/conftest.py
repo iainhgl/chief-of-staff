@@ -49,3 +49,4 @@ def mock_embed(monkeypatch: pytest.MonkeyPatch) -> None:
         ]
 
     monkeypatch.setattr("cos.ingestion.pipeline.embed", _fake_embed)
+    monkeypatch.setattr("cos.retrieval.near_duplicate.embed", _fake_embed)
