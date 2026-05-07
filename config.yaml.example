@@ -189,3 +189,18 @@ chunking:
 #   lookahead_days: 14
 #   max_results: 100
 #   staging_dir: /data/connector-staging/google-calendar
+
+# ─────────────────────────────────────────────
+# MCP Note Ingest (optional — controls ingest_document tool behaviour)
+# Omit this block entirely to use all defaults.
+#
+# staging_dir: shared volume path where MCP notes are staged before ingest.
+#   Must be on the shared Docker volume for compatibility with future message-channel paths.
+#   Default: /data/connector-staging/mcp
+# near_duplicate_threshold: cosine similarity score at or above which a warning is
+#   returned alongside a successful ingest (0.0–1.0, default 0.95).
+#   Only used when semantic similarity checking can run (embedding key required).
+# ─────────────────────────────────────────────
+# mcp_note:
+#   staging_dir: /data/connector-staging/mcp
+#   near_duplicate_threshold: 0.95

@@ -97,6 +97,11 @@ class GoogleCalendarConnectorConfig(BaseModel):
     staging_dir: Path = Path("/data/connector-staging/google-calendar")
 
 
+class McpNoteIngestConfig(BaseModel):
+    staging_dir: Path = Path("/data/connector-staging/mcp")
+    near_duplicate_threshold: float = Field(default=0.95, ge=0.0, le=1.0)
+
+
 class CosConfig(BaseModel):
     llm: LLMConfig
     embedding: EmbeddingConfig
@@ -110,6 +115,7 @@ class CosConfig(BaseModel):
     google_oauth: GoogleOAuthConfig | None = None
     gmail: GmailConnectorConfig | None = None
     google_calendar: GoogleCalendarConnectorConfig | None = None
+    mcp_note: McpNoteIngestConfig | None = None
 
     @classmethod
     def load(cls, path: str | Path = "config.yaml") -> "CosConfig":

@@ -2,6 +2,7 @@ import json
 import logging
 from dataclasses import asdict
 from datetime import datetime, timezone
+from typing import Any
 
 from cos.mcp_server.server import (
     get_config,
@@ -11,6 +12,7 @@ from cos.mcp_server.server import (
     mcp,
 )
 from cos.services.health import ComponentStatus, HealthService
+from cos.services.ingestion import IngestService
 from cos.services.provenance import ProvenanceService
 
 
@@ -141,6 +143,81 @@ async def get_role_context() -> str:
                 "knowledge_taxonomy": role_pack.knowledge_taxonomy,
                 "active_workflows": role_pack.active_workflows,
             },
+            "citations": [],
+        }
+    )
+
+
+@mcp.tool()
+async def ingest_document(
+    content: str,
+    metadata: dict[str, Any] | None = None,
+) -> str:
+    """Ingest a note or short document directly through MCP."""
+    config = get_config()
+    if config is None:
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "Server not initialized",
+                "detail": "config not loaded yet",
+            }
+        )
+
+    if not content or not content.strip():
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "Invalid input",
+                "detail": "content must not be empty or whitespace-only",
+            }
+        )
+
+    svc = IngestService(config)
+    try:
+        result = await svc.ingest_note(text=content, metadata=metadata)
+    except ValueError as exc:
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "Invalid input",
+                "detail": str(exc),
+            }
+        )
+    except Exception:
+        logging.error(
+            json.dumps(
+                {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "level": "ERROR",
+                    "component": "mcp_server",
+                    "message": "ingest_document tool failed",
+                }
+            )
+        )
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "Ingest failed",
+                "detail": "An internal error occurred. Run cos logs for diagnostics.",
+            }
+        )
+
+    data: dict[str, object] = {
+        "document_id": result.document_id,
+        "chunk_count": result.chunk_count,
+        "outcome": result.outcome,
+        "message": result.message,
+        "source_alias": result.source_alias,
+        "source_locator": result.source_locator,
+    }
+    if result.warning is not None:
+        data["warning"] = result.warning
+
+    return json.dumps(
+        {
+            "status": "ok",
+            "data": data,
             "citations": [],
         }
     )
