@@ -1,6 +1,6 @@
 # Story 6.10: `ingest_document` MCP Tool
 
-Status: review
+Status: done
 
 ## Story
 
@@ -86,6 +86,11 @@ So that synthetic note capture also uses the same canonical identity and provena
   - [x] Extend [tests/test_config.py](/Users/iain.livingstone/Development/CoS/cos/tests/test_config.py) if a new optional MCP ingest config block is introduced
   - [x] Add or extend lower-level tests around the near-duplicate helper so the threshold and warning behaviour are deterministic and testable
   - [x] Keep all tests offline and local: no live MCP client, no external APIs, and no network dependency
+
+### Review Findings
+
+- [x] [Review][Patch] Validate `metadata` shape and field types before dereferencing `.get()` or coercing arbitrary objects to strings [src/cos/services/ingestion.py:62]
+- [x] [Review][Patch] Provide non-empty fallbacks after slug sanitisation so punctuation-only `title` / `client` / `external_id` values cannot collapse into `.md`, `mcp_note:///...`, or shared staging filenames [src/cos/services/ingestion.py:68]
 
 ## Dev Notes
 

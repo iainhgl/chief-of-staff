@@ -167,6 +167,25 @@ async def test_ingest_note_empty_string_raises_value_error(
         await service.ingest_note("")
 
 
+async def test_ingest_note_rejects_non_object_metadata(
+    tmp_path: Path,
+) -> None:
+    service = IngestService(_make_note_config(tmp_path))
+    with pytest.raises(ValueError, match="metadata must be an object"):
+        await service.ingest_note("Valid note content.", metadata=["bad"])  # type: ignore[arg-type]
+
+
+async def test_ingest_note_rejects_non_string_metadata_fields(
+    tmp_path: Path,
+) -> None:
+    service = IngestService(_make_note_config(tmp_path))
+    with pytest.raises(ValueError, match="metadata.external_id must be a string"):
+        await service.ingest_note(
+            "Valid note content.",
+            metadata={"external_id": 123},  # type: ignore[dict-item]
+        )
+
+
 async def test_ingest_note_exact_byte_duplicate_returns_new_source_known_content(
     migrated_db: None,
     tmp_path: Path,
@@ -281,3 +300,27 @@ async def test_ingest_note_without_metadata_uses_generated_alias(
     assert result.source_alias.endswith(".md")
     assert result.source_locator.startswith("mcp_note://mcp/")
     assert str(uuid.UUID(result.document_id)) == result.document_id
+
+
+async def test_ingest_note_punctuation_only_metadata_uses_stable_non_empty_fallbacks(
+    migrated_db: None,
+    tmp_path: Path,
+    mock_embed: None,
+) -> None:
+    service = IngestService(_make_note_config(tmp_path))
+    metadata = {"title": "!!!", "external_id": "###", "client": "@@@"}
+
+    with patch(
+        "cos.services.ingestion.find_near_duplicate",
+        new=AsyncMock(return_value=None),
+    ):
+        first = await service.ingest_note("A note with odd metadata.", metadata=metadata)
+        second = await service.ingest_note("A note with odd metadata.", metadata=metadata)
+
+    assert first.source_alias.endswith(".md")
+    assert first.source_alias != ".md"
+    assert first.source_locator.startswith("mcp_note://")
+    assert "///" not in first.source_locator
+    assert Path(first.source_path).name != ".md"
+    assert second.outcome == "unchanged"
+    assert second.source_locator == first.source_locator

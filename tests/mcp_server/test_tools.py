@@ -486,6 +486,17 @@ async def test_ingest_document_empty_content_returns_error(monkeypatch):
     assert "detail" in result
 
 
+async def test_ingest_document_invalid_metadata_returns_error(monkeypatch):
+    monkeypatch.setattr(_server, "_config", _make_mock_config())
+    result = json.loads(
+        await ingest_document(content="Some note content.", metadata=["bad"])  # type: ignore[arg-type]
+    )
+
+    assert result["status"] == "error"
+    assert result["error"] == "Invalid input"
+    assert "metadata must be an object" in result["detail"]
+
+
 async def test_ingest_document_server_not_initialized(monkeypatch):
     monkeypatch.setattr(_server, "_config", None)
     result = json.loads(await ingest_document(content="Some note content."))
