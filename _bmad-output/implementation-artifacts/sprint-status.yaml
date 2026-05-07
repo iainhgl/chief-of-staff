@@ -1,5 +1,5 @@
 # generated: 2026-04-17
-# last_updated: 2026-05-07  # 6-10-ingest-document-mcp-tool -> done
+# last_updated: 2026-05-07  # 6-11-operator-validation-connected-sources-live -> done
 # project: CoS
 # project_key: NOKEY
 # tracking_system: file-system
@@ -37,7 +37,7 @@
 # - Epics 1-5 represent the implemented baseline; Epic 6 onward reflects the change-course backlog
 
 generated: 2026-04-17
-last_updated: 2026-05-07  # 6-10-ingest-document-mcp-tool -> done
+last_updated: 2026-05-07  # 6-11-operator-validation-connected-sources-live -> done
 project: CoS
 project_key: NOKEY
 tracking_system: file-system
@@ -126,7 +126,7 @@ development_status:
   6-8-gmail-connector: done
   6-9-google-calendar-connector: done
   6-10-ingest-document-mcp-tool: done
-  6-11-operator-validation-connected-sources-live: backlog
+  6-11-operator-validation-connected-sources-live: done
   6-12-documentation-and-housekeeping: backlog
   epic-6-retrospective: optional
 
