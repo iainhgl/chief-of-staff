@@ -1,6 +1,6 @@
 # Story 6.11: Operator Validation — Connected Sources Live
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -214,3 +214,9 @@ None — no code changes required. All implementation is documentation.
 ### Change Log
 
 - 2026-05-07: Updated Epic 6 UAT guide with cross-source dedupe proof, changed-content validation, restart/token-persistence section, and four-proof pass criteria (Story 6.11)
+
+### Review Findings
+
+- [x] [Review][Patch] Cross-source dedupe proof does not exercise one byte-identical artifact across local file, Gmail attachment, and MCP note paths [docs/manual-testing.md:140]
+- [x] [Review][Patch] Post-restart sync expectations assume unchanged content enqueues zero jobs, but Gmail and Calendar sync always enqueue jobs before dedupe [docs/manual-testing.md:590]
+- [x] [Review][Patch] Section 7.3 prompt is underspecified and incorrectly expects distinct `source_alias` values for both MCP-note sources [docs/manual-testing.md:409]
