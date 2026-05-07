@@ -32,6 +32,8 @@ This runbook verifies the full Epic 6 surface end to end:
 - `cos docs` and MCP tool responses expose `source_alias` / `source_locator`
 - canonical dedupe works across repeated and cross-source ingest
 - live MCP note capture works from a real client session
+- changed-content re-ingest for a stable `external_id` produces a new version with intact history
+- connector tokens survive a platform restart without requiring fresh browser authorisation
 - grounded retrieval still works after connected data lands
 
 ---
@@ -47,7 +49,7 @@ This runbook verifies the full Epic 6 surface end to end:
 
 Important runtime rule:
 
-- use `uv run cos auth ...` on the **host**
+- use `uv run cos auth ...` and `uv run cos restart` on the **host**
 - use `docker compose exec cos uv run cos ...` for commands that need the app's Docker network and `database.host: postgres`
 
 ---
@@ -135,10 +137,20 @@ In Google Calendar:
 2. Use a distinctive title such as `Epic 6 UAT Calendar Event`
 3. Put a unique marker in the description, for example `epic-6-uat-calendar-description`
 
-For MCP note capture:
+For MCP note capture — prepare these three notes before Section 7:
 
-- prepare one short note you will ingest via `ingest_document`
-- prepare a second very similar version of that note for the near-duplicate warning test
+- **Note A (first ingest, Section 7.1):** use this exact content:
+  ```
+  Epic 6 UAT note. This note tracks workforce planning for the quarterly board review. Marker: epic-6-uat-note-a.
+  ```
+- **Note B (near-duplicate warning, Section 7.4):** slightly rephrased version:
+  ```
+  Epic 6 UAT note. This note tracks workforce planning for the upcoming board review and executive prep. Marker: epic-6-uat-note-b.
+  ```
+- **Note A v2 (changed-content re-ingest, Section 7.5):** updated version with visible differences:
+  ```
+  Epic 6 UAT note — updated. This note tracks workforce planning and succession planning for the quarterly board review. Marker: epic-6-uat-note-a-v2.
+  ```
 
 ---
 
@@ -374,10 +386,12 @@ Show me the raw JSON response.
 Expected:
 
 - `status` is `ok`
-- `data.outcome` is usually `new_content`
+- `data.outcome` is `new_content`
 - `data.source_alias` is present
 - `data.source_locator` starts with `mcp_note://`
 - `citations` is an empty list
+
+Note the `data.document_id` from this response — you will need it in Section 7.5.
 
 ### 7.2 Retry/idempotency check
 
@@ -406,6 +420,33 @@ Expected:
 - `data.outcome` is `new_source_known_content`
 - the message explains the content was linked rather than reprocessed
 
+Now verify the cross-source dedupe using SQL — two distinct `mcp_note` sources should share one canonical document and content blob:
+
+```bash
+docker compose exec postgres psql -U postgres -d cos -c "
+SELECT
+  s.source_alias,
+  s.source_locator,
+  cb.sha256,
+  dv.document_id
+FROM sources s
+JOIN source_versions sv ON sv.source_id = s.id
+JOIN content_blobs cb ON cb.id = sv.content_blob_id
+JOIN document_versions dv ON dv.id = sv.document_version_id
+WHERE s.source_type = 'mcp_note'
+  AND s.source_locator LIKE 'mcp_note://claude-code/epic-6-uat-note-00%'
+ORDER BY s.created_at;
+"
+```
+
+Expected:
+
+- two rows (one for `epic-6-uat-note-001`, one for `epic-6-uat-note-002`)
+- both rows have the **same** `sha256` and `document_id`
+- both rows have **different** `source_alias` and `source_locator`
+
+This proves distinct source identities collapse to one shared canonical content record while each source's provenance row is preserved.
+
 ### 7.4 Near-duplicate warning
 
 Ask the client:
@@ -431,6 +472,46 @@ If no warning appears and you want to force this part of the UAT:
 - lower `mcp_note.near_duplicate_threshold` in `config.yaml`
 - restart the platform
 - rerun only this note-ingest step
+
+### 7.5 Changed-content re-ingest with version history
+
+Ask the client:
+
+```text
+Call ingest_document with updated content for the same source identity:
+- content: "Epic 6 UAT note — updated. This note tracks workforce planning and succession planning for the quarterly board review. Marker: epic-6-uat-note-a-v2."
+- metadata:
+  - title: "Epic 6 UAT Note"
+  - external_id: "epic-6-uat-note-001"
+  - client: "claude-code"
+Show me the raw JSON response.
+```
+
+Expected:
+
+- `status` is `ok`
+- `data.outcome` is `changed_content`
+- `data.message` references a new version
+
+Now verify that version history is intact. Use the `document_id` you noted in Section 7.1:
+
+```bash
+docker compose exec cos uv run cos docs --versions <document_id>
+```
+
+Expected:
+
+- at least **2 versions** listed for this document
+- version numbers increase from `1` to `2` (or higher)
+- each version has a distinct `ingested_at` timestamp and `file_hash`
+
+To inspect version history as JSON:
+
+```bash
+docker compose exec cos uv run cos docs --versions <document_id> --json
+```
+
+This confirms that updated content for a stable `external_id` creates a new `document_version` while keeping prior history intact.
 
 ---
 
@@ -461,7 +542,82 @@ Expected:
 
 ---
 
-## 9. Final Operator Spot Checks
+## 9. Restart And Token Persistence Validation
+
+This section confirms that connector tokens survive a platform restart and that post-restart syncs remain deterministic without fresh browser authorisation.
+
+### 9.1 Restart the platform
+
+Run the restart command from the **host** (not inside the container):
+
+```bash
+uv run cos restart
+```
+
+Expected:
+
+- the command reports `Platform restarted. All components healthy.`
+
+If `cos restart` is unavailable from the host path, use Docker Compose directly:
+
+```bash
+docker compose restart
+```
+
+Then confirm all services recover:
+
+```bash
+docker compose ps
+```
+
+Expected:
+
+- `postgres` is `healthy`
+- `tika` is `healthy`
+- `cos` is `healthy`
+- `worker` is `Up`
+
+### 9.2 Verify token files survive restart
+
+```bash
+ls -la tokens/gmail.json tokens/google_calendar.json
+```
+
+Expected:
+
+- both token files exist with modification timestamps from before the restart
+
+### 9.3 Re-run connected-source syncs without re-authorising
+
+```bash
+docker compose exec cos uv run cos sync gmail
+docker compose exec cos uv run cos sync calendar
+```
+
+Expected:
+
+- both commands complete **without** opening a browser auth flow
+- Gmail sync output shows messages scanned; if all content was already indexed, `body_jobs_enqueued` and `attachment_jobs_enqueued` should be `0`
+- Calendar sync output shows calendars scanned; if event content is unchanged, `jobs_enqueued` should be `0`
+
+This proves token persistence: connectors resumed without re-authorisation.
+
+### 9.4 Confirm deterministic outcomes after restart
+
+```bash
+docker compose exec postgres psql -U postgres -d cos -c "
+SELECT status, COUNT(*) FROM jobs GROUP BY status ORDER BY status;
+"
+```
+
+Expected:
+
+- no new build-up of `queued` or `running` jobs from the post-restart sync
+- `cos docs` still lists all records ingested before the restart
+
+---
+
+## 10. Final Operator Spot Checks
 
 Run these from the host or container as shown:
 
@@ -484,24 +640,55 @@ Expected:
   - `mcp_note`
 - `content_blobs` count is less than or equal to the total number of sources when dedupe has occurred
 
+Run the cross-source dedupe summary to confirm blobs are shared across distinct sources:
+
+```bash
+docker compose exec postgres psql -U postgres -d cos -c "
+SELECT
+  COUNT(DISTINCT s.id) AS total_sources,
+  COUNT(DISTINCT cb.id) AS total_blobs,
+  COUNT(DISTINCT dv.document_id) AS total_documents
+FROM sources s
+JOIN source_versions sv ON sv.source_id = s.id
+JOIN content_blobs cb ON cb.id = sv.content_blob_id
+JOIN document_versions dv ON dv.id = sv.document_version_id;
+"
+```
+
+Expected:
+
+- `total_sources` is greater than `total_blobs` and `total_documents` if any dedupe occurred across sources
+
 ---
 
-## 10. Pass Criteria
+## 11. Pass Criteria
 
-Epic 6 UAT is a pass when all of the following are true:
+Epic 6 UAT is a pass when all four proofs are confirmed:
 
-- local ingest still works
-- Google OAuth succeeds and token files are created
-- Gmail sync enqueues and the worker processes Gmail jobs
-- Calendar sync enqueues and the worker processes Calendar jobs
-- `cos docs` exposes `source_alias` / `source_locator`
-- Gmail shared attachments deduplicate to one canonical document/blob while preserving multiple source rows
-- MCP `ingest_document` supports:
-  - first ingest
-  - unchanged retry
-  - new source known content
-  - optional warning-bearing near-duplicate success
-- retrieval remains grounded with citations after connected data is indexed
+**1. Connected-source visibility:**
+
+- local, Gmail, Calendar, and MCP-note records all appear in `cos docs` output
+- all records expose `source_alias` and `source_locator`
+- no `source_path` appears as a primary provenance field for connected sources
+
+**2. Cross-source exact-byte dedupe:**
+
+- the Section 7.3 SQL query shows two `mcp_note` sources with distinct `source_alias`/`source_locator` sharing one `sha256` and `document_id`
+- the Section 5 Gmail attachment dedupe query (if attachments were seeded) shows `distinct_sources ≥ 2` and `distinct_documents = 1` for shared attachment bytes
+- the Section 10 summary query shows `total_sources > total_blobs`
+
+**3. Unchanged vs changed content with version history:**
+
+- Section 7.2 (unchanged retry) returns `data.outcome = unchanged`
+- Section 7.5 (changed content) returns `data.outcome = changed_content`
+- `cos docs --versions <document_id>` shows at least 2 versions with distinct `file_hash` values
+
+**4. Restart and token persistence:**
+
+- `uv run cos restart` (or `docker compose restart`) recovers all services to healthy
+- `tokens/gmail.json` and `tokens/google_calendar.json` persist across the restart
+- post-restart Gmail and Calendar syncs complete without browser re-authorisation
+- post-restart re-syncs produce no new ingest jobs for already-indexed content
 
 ---
 
