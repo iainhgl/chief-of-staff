@@ -50,7 +50,7 @@ def list_message_ids(service: Any, gmail_config: GmailConnectorConfig) -> list[s
 def fetch_message(service: Any, message_id: str) -> dict[str, Any]:
     """Fetch the full message payload for a given message ID."""
     return _execute_with_retry(
-        service.users().messages().get(userId="me", id=message_id, format="FULL")
+        service.users().messages().get(userId="me", id=message_id, format="full")
     )
 
 
