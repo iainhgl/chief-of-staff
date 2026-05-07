@@ -19,7 +19,7 @@ backfill is idempotent and uses conflict-safe inserts.
 Record the current document inventory before you migrate:
 
 ```bash
-docker compose run cos cos docs
+docker compose exec cos uv run cos docs
 ```
 
 Note the total document count. You will compare this count again after the
@@ -28,7 +28,7 @@ migration completes.
 ## Run The Migration
 
 ```bash
-docker compose run cos cos migrate
+docker compose exec cos uv run cos migrate
 ```
 
 Expected success output:
@@ -45,14 +45,26 @@ documents that were already canonical before the run started.
 Run the document listing again:
 
 ```bash
-docker compose run cos cos docs
+docker compose exec cos uv run cos docs
 ```
 
 Verify all of the following:
 
 - The total document count matches the pre-migration baseline.
-- Every row shows a readable `SOURCE ALIAS`.
+- Every row shows a readable `SOURCE ALIAS` — no row should be blank or show a raw UUID.
 - Previously ingested documents are still visible through `cos docs`.
+
+For a machine-readable check, confirm the JSON fields match the Epic 6 contract:
+
+```bash
+docker compose exec cos uv run cos docs --json
+```
+
+Each object must include `id`, `source_alias`, `source_locator`, `ingested_at`,
+`current_version`, and `chunk_count`. No `source_path` field should appear as a
+primary provenance field — legacy records that were not backfilled will fall back
+to using the stored file path as their locator, which is the expected pre-migration
+compatibility behaviour and not an error.
 
 ## Recovery
 
@@ -61,7 +73,7 @@ Verify all of the following:
 Rerun the same command:
 
 ```bash
-docker compose run cos cos migrate
+docker compose exec cos uv run cos migrate
 ```
 
 The migration is safe to rerun. Inserts use conflict-safe behavior, so already
@@ -69,18 +81,21 @@ backfilled records are reused and only unfinished legacy documents are migrated.
 
 ### If Counts Differ Or A Document Still Looks Legacy
 
-Run these diagnostic queries inside Postgres:
+Run these diagnostic queries inside Postgres to pinpoint what is uncanonical:
 
 ```sql
+-- document versions with no canonical blob link
 SELECT COUNT(*)
 FROM document_versions
 WHERE content_blob_id IS NULL;
 
+-- chunks not linked to a document version
 SELECT COUNT(*)
 FROM chunks
 WHERE document_version_id IS NULL;
 
-SELECT d.source_path
+-- documents with at least one version not linked to a source record
+SELECT COUNT(*)
 FROM documents d
 WHERE EXISTS (
     SELECT 1
@@ -94,9 +109,20 @@ WHERE EXISTS (
 );
 ```
 
-If any of these queries return unexpected rows, rerun `cos migrate` first. If
-the same rows remain, capture `cos logs cos` and inspect the affected document
-paths before making manual changes.
+If any of these queries return non-zero counts, rerun `cos migrate` first. The
+migration is safe to rerun — it only touches records that still need backfill.
+
+If the same rows remain after a second migration run, capture the logs and
+inspect before making manual changes:
+
+```bash
+docker compose logs cos --tail=100
+```
+
+Identify any error messages referencing specific documents, then decide whether
+to rerun migration or proceed to the full rollback procedure below. Do not
+attempt manual SQL repair unless rerunning the migration cannot resolve the
+issue.
 
 ### Full Rollback
 
@@ -121,7 +147,7 @@ TRUNCATE sources;
 4. Rerun the migration:
 
 ```bash
-docker compose run cos cos migrate
+docker compose exec cos uv run cos migrate
 ```
 
 Because the canonical tables are derived from `documents`, `document_versions`,

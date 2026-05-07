@@ -79,7 +79,7 @@ docker compose up -d --build --force-recreate cos
 docker compose up -d
 ```
 
-All three services (postgres, tika, cos) will start and reach a healthy state within 60 seconds.
+All four services (postgres, tika, cos, worker) will start. The postgres, tika, and cos containers reach a healthy state within 60 seconds; the worker container starts alongside them and begins draining any queued ingest jobs.
 
 ## Configure the MCP Server
 
@@ -126,7 +126,7 @@ To use a different role or author your own, see [role-packs.md](role-packs.md) f
 
 ## Google OAuth Setup (Gmail and Calendar Connectors)
 
-This section is only needed if you are enabling the Gmail or Google Calendar connectors (Epic 6). For a local-only Epic 1–5 deployment, skip this section entirely.
+This section is only needed if you are enabling the Gmail or Google Calendar connectors. For a local-only deployment that uses only `cos ingest` and local files, skip this section entirely.
 
 ### 1. Create OAuth credentials in Google Cloud Console
 
@@ -144,6 +144,16 @@ google_oauth:
 ```
 
 The `client_secret` is masked in all logs and repr() output. The `google_oauth` block is optional — existing configs without it continue to work.
+
+Also enable whichever connectors you plan to use in the `connectors:` list:
+
+```yaml
+connectors:
+  - gmail
+  - google_calendar
+```
+
+Connector-specific settings (`gmail:`, `google_calendar:`) can be added as well; omitting them leaves all defaults in place. See `config.yaml.example` for the full set of options.
 
 ### 3. Authenticate on the host (first time)
 
@@ -180,6 +190,81 @@ If a connector cannot authenticate, the platform logs a structured error and lea
 uv run cos auth gmail       # re-authorise Gmail
 uv run cos auth calendar    # re-authorise Google Calendar
 ```
+
+## Sync Connected Sources
+
+This section applies only when the Gmail and/or Google Calendar connectors are enabled. Skip it for local-only deployments.
+
+After completing the OAuth steps above, run the relevant sync commands inside the `cos` container. These commands poll the connector for new content and enqueue ingest jobs for the background `worker` service to process.
+
+### Sync Gmail
+
+```bash
+docker compose exec cos uv run cos sync gmail
+```
+
+Expected output:
+
+```text
+Gmail sync complete:
+  14 messages scanned
+  12 body jobs enqueued
+  3 attachment jobs enqueued
+  1 unsupported attachments skipped
+```
+
+### Sync Google Calendar
+
+```bash
+docker compose exec cos uv run cos sync calendar
+```
+
+Expected output:
+
+```text
+Calendar sync complete:
+  1 calendars scanned
+  8 events discovered
+  8 jobs enqueued
+```
+
+### How the Worker Processes Jobs
+
+Gmail and Calendar sync commands enqueue background ingest jobs. The `worker` service (a separate container) drains those jobs asynchronously. To confirm jobs are being processed:
+
+```bash
+docker compose logs worker --tail=50
+```
+
+Worker logs show each job being picked up and completed. After the worker catches up, all queued content will be searchable through `retrieve` and visible in `cos docs`.
+
+### Degraded Mode
+
+If a connector fails before jobs are enqueued (for example, a revoked OAuth token, an expired credential, or a Google API outage), the failure appears in the `cos sync gmail` or `cos sync calendar` command output and in the `cos` service logs:
+
+```bash
+docker compose logs cos --tail=100
+```
+
+If the sync command succeeds but a staged ingest job later fails, the `worker` logs the error while processing that queued job:
+
+```bash
+docker compose logs worker --tail=100
+```
+
+In both cases, the MCP server and retrieval path remain available. Recover by re-running the auth command for the affected connector if needed (see the token recovery step in the Google OAuth section above), then re-run the sync command.
+
+### Connector Provenance Examples
+
+After sync, `cos docs --json` shows ingested connector content alongside local files. Example provenance for each source type:
+
+| Source Type | `source_alias` example | `source_locator` example |
+|---|---|---|
+| Local file | `strategy.pdf` | `/data/uat-docs/local/strategy.pdf` |
+| Gmail message body | `Epic_6_UAT_Gmail_Body_A.md` | `gmail://message/msg-001/body` |
+| Gmail attachment | `report.pdf` | `gmail://message/msg-010/attachment/att-id-001` |
+| Calendar event | `Q3_Planning_Review_primary_evt123.md` | `google-calendar://calendar/primary/event/evt123` |
+| MCP note | `Board-Prep-Q3.md` | `mcp_note://claude-code/board-prep-q3-2026` |
 
 ## Ingest Documents
 
@@ -220,6 +305,19 @@ Unsupported file types are skipped with a notice and do not cause the command to
 
 A plain-language error is shown for the failed file. In folder mode, ingestion continues for the remaining files. The error message identifies the file and the reason — no stack trace is shown.
 
+### Ingest Outcomes
+
+Every ingest operation — whether through `cos ingest`, `cos sync`, or the `ingest_document` MCP tool — resolves to one of four deterministic outcomes:
+
+| Outcome | Meaning |
+|---------|---------|
+| `new_content` | New bytes, new source — content indexed for the first time |
+| `unchanged` | Same bytes, same source — no-op; nothing written |
+| `changed_content` | Same source, different bytes — new document version created; prior versions kept |
+| `new_source_known_content` | New source, identical bytes to existing content — provenance recorded; content not reprocessed |
+
+The `new_source_known_content` outcome is how exact-byte deduplication works across sources: a Gmail attachment and a local file with identical bytes are each recorded as distinct provenance entries while sharing one canonical content record and embedding set.
+
 ## Verify Ingestion
 
 After ingesting documents, confirm they are indexed using the `cos docs` command.
@@ -235,7 +333,7 @@ Prints a table with one row per document:
 | Column | Description |
 |--------|-------------|
 | `ID` | UUID for the document — use this with `--versions` |
-| `SOURCE PATH` | The in-container path where the file was ingested from |
+| `SOURCE ALIAS` | Human-readable source label: filename for local files, slugged subject for Gmail bodies, attachment filename for Gmail attachments, slugged event title plus calendar and event ID for Calendar, and usually the note title slug for MCP notes |
 | `INGESTED AT` | ISO 8601 timestamp of the most recent ingest |
 | `VER` | Current version number (1 on first ingest; increments on re-ingest) |
 | `CHUNKS` | Number of text chunks indexed for this document |
@@ -256,9 +354,16 @@ Copy the document ID from the `ID` column in the `cos docs` table output. Each r
 docker compose run --rm --entrypoint /app/.venv/bin/cos cos docs --json
 ```
 
-Returns a JSON array. Each object has: `id`, `source_path`, `ingested_at`, `current_version`, `chunk_count`.
+Returns a JSON array. Each object has: `id`, `source_alias`, `source_locator`, `ingested_at`, `current_version`, `chunk_count`.
 
-> **Note:** The `source_path` stored in the database is the **in-container** absolute path. When using `docker compose run --rm --entrypoint /app/.venv/bin/cos -v "$(pwd)/test-docs:/test-docs" cos ...`, the stored path will be `/test-docs/report.pdf` (the container path), not the host path. This is expected behaviour.
+| Field | Description |
+|-------|-------------|
+| `id` | Document UUID |
+| `source_alias` | Human-readable source label |
+| `source_locator` | Unique source URI — for local files, this is the in-container path; for Gmail and Calendar, it is a connector-specific URI; for MCP notes, it begins with `mcp_note://` |
+| `ingested_at` | ISO 8601 timestamp |
+| `current_version` | Current document version number |
+| `chunk_count` | Number of indexed text chunks |
 
 ## Query the Knowledge Base
 
@@ -284,11 +389,11 @@ Every successful `retrieve` response includes a `citations` field. When relevant
 
 | Field | Description |
 |-------|-------------|
-| `source_path` | In-container path of the document the answer draws from |
+| `source_alias` | Human-readable source label — matches the `SOURCE ALIAS` column in `cos docs` |
+| `source_locator` | Unique source URI — matches the `source_locator` field in `cos docs --json` |
+| `document_version_id` | The specific document version the cited chunk came from |
 | `chunk_index` | Which chunk within that document was used |
 | `score` | Relevance score — higher is a closer match |
-
-The `source_path` values match what `cos docs` shows in the `SOURCE PATH` column.
 
 If no relevant content exists in the knowledge base, the answer says `No relevant content found in the knowledge base.` This is not an error. In that case, both `data.citations` and top-level `citations` are empty lists.
 
@@ -300,7 +405,25 @@ To see all ingested documents, type this prompt into your Claude session:
 Call list_documents and show me the raw JSON response.
 ```
 
-This returns a standard JSON envelope. The document rows live in `data.documents` and match the output of `cos docs --json`. Each document includes `id`, `source_path`, `ingested_at`, `current_version`, and `chunk_count`.
+This returns a standard JSON envelope. The document rows live in `data.documents` and match the output of `cos docs --json`. Each document includes `id`, `source_alias`, `source_locator`, `ingested_at`, `current_version`, and `chunk_count`.
+
+### Capture Notes via MCP
+
+Use the `ingest_document` MCP tool to capture notes or short documents directly from a Claude session without staging files on disk:
+
+```text
+Call ingest_document with:
+- content: "Quarterly board prep note: key themes are workforce planning and succession."
+- metadata:
+  - title: "Board Prep Q3"
+  - external_id: "board-prep-q3-2026"
+  - client: "claude-code"
+Show me the raw JSON response.
+```
+
+The response includes `data.outcome` (one of the four ingest outcomes), `data.source_alias`, and `data.source_locator` (which begins with `mcp_note://`). If the same `external_id` is submitted again with updated content, the outcome is `changed_content` and a new document version is created while prior versions are preserved. If the content is byte-identical, the outcome is `unchanged`.
+
+A `data.warning` field may appear if the submitted content is semantically similar to an already-indexed document (controlled by `mcp_note.near_duplicate_threshold` in `config.yaml`). The ingest still succeeds — the warning is informational.
 
 ## Platform Operations
 
