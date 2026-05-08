@@ -180,29 +180,31 @@ def _make_chunk_from_source(
 
 
 @pytest.mark.asyncio
-async def test_query_prunes_per_source_citations(
+async def test_query_passes_retrieval_filters_to_search(
     tmp_path: Path,
     mock_pool: MagicMock,
     mock_llm_adapter: AsyncMock,
 ) -> None:
-    three_same_source = [
+    config = make_test_config(tmp_path)
+    config.retrieval.min_score = 0.02
+    config.retrieval.max_chunks_per_source = 1
+    pruned_results = [
         _make_chunk_from_source("/docs/hr.md", 0.9, 0),
-        _make_chunk_from_source("/docs/hr.md", 0.8, 1),
-        _make_chunk_from_source("/docs/hr.md", 0.7, 2),
     ]
     service = RetrievalService(
-        config=make_test_config(tmp_path),
+        config=config,
         pool=mock_pool,
         llm_adapter=mock_llm_adapter,
     )
+    search_mock = AsyncMock(return_value=pruned_results)
 
-    with patch(
-        "cos.services.retrieval.hybrid_search",
-        new=AsyncMock(return_value=three_same_source),
-    ):
+    with patch("cos.services.retrieval.hybrid_search", new=search_mock):
         response = await service.query("HR planning", role_pack=None)
 
-    assert len(response.citations) == 2
+    assert response.citations == pruned_results
+    call_kwargs = search_mock.await_args.kwargs
+    assert call_kwargs["min_score"] == pytest.approx(0.02)
+    assert call_kwargs["max_chunks_per_source"] == 1
 
 
 @pytest.mark.asyncio
@@ -219,10 +221,9 @@ async def test_query_all_filtered_returns_no_content_response(
 
     with patch(
         "cos.services.retrieval.hybrid_search",
-        new=AsyncMock(return_value=[_make_chunk()]),
+        new=AsyncMock(return_value=[]),
     ):
-        with patch("cos.services.retrieval.prune_citations", return_value=[]):
-            response = await service.query("filtered topic", role_pack=None)
+        response = await service.query("filtered topic", role_pack=None)
 
     assert "no relevant content" in (response.answer or "").lower()
     assert response.citations == []
@@ -235,10 +236,9 @@ async def test_query_llm_receives_only_pruned_context(
     mock_pool: MagicMock,
     mock_llm_adapter: AsyncMock,
 ) -> None:
-    three_same_source = [
+    pruned_results = [
         _make_chunk_from_source("/docs/hr.md", 0.9, 0, "top chunk content"),
-        _make_chunk_from_source("/docs/hr.md", 0.8, 1, "second chunk content"),
-        _make_chunk_from_source("/docs/hr.md", 0.7, 2, "third chunk content"),
+        _make_chunk_from_source("/docs/ops.md", 0.7, 0, "ops chunk content"),
     ]
     service = RetrievalService(
         config=make_test_config(tmp_path),
@@ -248,15 +248,14 @@ async def test_query_llm_receives_only_pruned_context(
 
     with patch(
         "cos.services.retrieval.hybrid_search",
-        new=AsyncMock(return_value=three_same_source),
+        new=AsyncMock(return_value=pruned_results),
     ):
         await service.query("HR planning", role_pack=None)
 
     call_kwargs = mock_llm_adapter.complete.call_args.kwargs
     context = call_kwargs["context"]
     assert "top chunk content" in context
-    assert "second chunk content" in context
-    assert "third chunk content" not in context
+    assert "ops chunk content" in context
 
 
 @pytest.mark.asyncio
@@ -265,10 +264,9 @@ async def test_query_citations_match_pruned_evidence_set(
     mock_pool: MagicMock,
     mock_llm_adapter: AsyncMock,
 ) -> None:
-    three_same_source = [
+    pruned_results = [
         _make_chunk_from_source("/docs/hr.md", 0.9, 0),
-        _make_chunk_from_source("/docs/hr.md", 0.8, 1),
-        _make_chunk_from_source("/docs/hr.md", 0.7, 2),
+        _make_chunk_from_source("/docs/ops.md", 0.7, 0),
     ]
     service = RetrievalService(
         config=make_test_config(tmp_path),
@@ -278,11 +276,11 @@ async def test_query_citations_match_pruned_evidence_set(
 
     with patch(
         "cos.services.retrieval.hybrid_search",
-        new=AsyncMock(return_value=three_same_source),
+        new=AsyncMock(return_value=pruned_results),
     ):
         response = await service.query("HR planning", role_pack=None)
 
-    assert response.citations == three_same_source[:2]
+    assert response.citations == pruned_results
 
 
 @pytest.mark.parametrize(

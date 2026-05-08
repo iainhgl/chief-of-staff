@@ -1,6 +1,6 @@
 # Story 6.13: Retrieval Result Thresholding and Citation Pruning
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -51,6 +51,12 @@ So that grounded answers stay precise in a mixed-source corpus.
   - [x] Add service-layer tests confirming the LLM receives only filtered context and that the returned citations match the pruned evidence set
   - [x] Add MCP tool tests confirming the pruned citations propagate unchanged through the existing JSON envelope
   - [x] Latency: deterministic in-process pruning adds no extra DB round-trips or LLM calls; no automated wall-clock test added (consistent with existing test suite approach)
+
+### Review Findings
+
+- [x] [Review][Patch] Per-source pruning happens after `top_k` truncation, so source-dominated queries can drop alternative supporting evidence instead of admitting the next-best surviving chunks from other sources [src/cos/services/retrieval.py:108]
+- [x] [Review][Patch] Equal-score hits have no deterministic tie-breaker before pruning, so repeated queries can keep different chunks from the same source when scores tie [src/cos/retrieval/search.py:234]
+- [x] [Review][Patch] The new regression suite still lacks a mixed-source threshold test where above-floor and below-floor hits coexist in the same ranked result set [tests/retrieval/test_search.py:175]
 
 ## Dev Notes
 
@@ -235,4 +241,3 @@ gpt-5.4
 - `tests/retrieval/test_search.py` — 3 new tests for `min_score` threshold behavior
 - `tests/services/test_retrieval_service.py` — 4 new tests for pruning integration
 - `tests/mcp_server/test_tools.py` — 1 new test for citation propagation through MCP envelope
-

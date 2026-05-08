@@ -7,7 +7,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from cos.config import CosConfig
 from cos.llm.adapter import LLMAdapter
-from cos.retrieval.citations import CitedResponse, prune_citations
+from cos.retrieval.citations import CitedResponse
 from cos.retrieval.search import hybrid_search
 
 _TASK_INSTRUCTIONS: dict[str, str] = {
@@ -103,21 +103,17 @@ class RetrievalService:
                 self._config,
                 role_pack,
                 min_score=self._config.retrieval.min_score,
+                max_chunks_per_source=self._config.retrieval.max_chunks_per_source,
             )
 
-        pruned = prune_citations(
-            cited_results,
-            max_chunks_per_source=self._config.retrieval.max_chunks_per_source,
-        )
-
-        if not pruned:
+        if not cited_results:
             return CitedResponse(
                 answer="No relevant content found in the knowledge base.",
                 citations=[],
             )
 
         prompt = _build_synthesis_prompt(text, role_pack)
-        context = [chunk.content for chunk in pruned]
+        context = [chunk.content for chunk in cited_results]
 
         try:
             answer = await self._llm_adapter.complete(prompt=prompt, context=context)
@@ -132,6 +128,6 @@ class RetrievalService:
                     }
                 )
             )
-            return CitedResponse(answer=None, citations=pruned)
+            return CitedResponse(answer=None, citations=cited_results)
 
-        return CitedResponse(answer=answer, citations=pruned)
+        return CitedResponse(answer=answer, citations=cited_results)
