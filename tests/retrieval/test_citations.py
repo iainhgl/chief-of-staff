@@ -1,4 +1,9 @@
-from cos.retrieval.citations import CitedChunk, format_citations, prune_citations
+from cos.retrieval.citations import (
+    CitedChunk,
+    format_citations,
+    narrow_to_lineage,
+    prune_citations,
+)
 
 
 def _make_chunk(alias: str = "/tmp/policies/leave.md") -> CitedChunk:
@@ -136,3 +141,79 @@ def test_prune_citations_preserves_interleaved_order() -> None:
     assert result[1].source_locator == "loc://b"
     assert result[2].source_locator == "loc://a"
     assert result[2].score == 0.8
+
+
+# ── Lineage narrowing tests (Story 6.14) ──────────────────────────────────────
+
+
+def _make_versioned_chunk(
+    source_locator: str,
+    document_version_id: str,
+    score: float,
+    chunk_index: int = 0,
+) -> CitedChunk:
+    return CitedChunk(
+        content=f"content from {source_locator}",
+        source_document_id="12345678-1234-1234-1234-123456789012",
+        source_alias=source_locator,
+        source_locator=source_locator,
+        document_version_id=document_version_id,
+        chunk_index=chunk_index,
+        score=score,
+    )
+
+
+def test_narrow_to_lineage_empty_input_returns_empty() -> None:
+    assert narrow_to_lineage([]) == []
+
+
+def test_narrow_to_lineage_single_chunk_returns_it() -> None:
+    chunk = _make_versioned_chunk("loc://a", "ver-001", 0.9)
+    result = narrow_to_lineage([chunk])
+    assert result == [chunk]
+
+
+def test_narrow_to_lineage_prefers_document_version_id_over_source_locator() -> None:
+    # Two chunks share the same source_locator but different version_ids;
+    # only the version_id of the best chunk should be the lineage key.
+    best = _make_versioned_chunk("loc://a", "ver-001", 0.9, 0)
+    sibling = _make_versioned_chunk("loc://a", "ver-002", 0.7, 0)
+    result = narrow_to_lineage([best, sibling])
+    assert len(result) == 1
+    assert result[0].document_version_id == "ver-001"
+
+
+def test_narrow_to_lineage_keeps_all_chunks_of_winning_version() -> None:
+    chunk_a = _make_versioned_chunk("loc://x", "ver-001", 0.9, 0)
+    chunk_b = _make_versioned_chunk("loc://x", "ver-001", 0.8, 1)
+    other = _make_versioned_chunk("loc://y", "ver-002", 0.75, 0)
+    result = narrow_to_lineage([chunk_a, chunk_b, other])
+    assert len(result) == 2
+    assert all(c.document_version_id == "ver-001" for c in result)
+
+
+def test_narrow_to_lineage_excludes_sibling_lineages() -> None:
+    best = _make_versioned_chunk("gmail://msg-001", "ver-aaa", 0.9)
+    sibling_a = _make_versioned_chunk("/docs/policy.md", "ver-bbb", 0.8)
+    sibling_b = _make_versioned_chunk("mcp://note-001", "ver-ccc", 0.7)
+    result = narrow_to_lineage([best, sibling_a, sibling_b])
+    assert len(result) == 1
+    assert result[0].source_locator == "gmail://msg-001"
+
+
+def test_narrow_to_lineage_falls_back_to_source_locator_when_no_version_id() -> None:
+    # Legacy/backfilled chunks have empty document_version_id
+    primary = _make_versioned_chunk("/docs/primary.md", "", 0.9)
+    sibling = _make_versioned_chunk("/docs/sibling.md", "", 0.7)
+    result = narrow_to_lineage([primary, sibling])
+    assert len(result) == 1
+    assert result[0].source_locator == "/docs/primary.md"
+
+
+def test_narrow_to_lineage_legacy_multiple_chunks_same_locator_all_survive() -> None:
+    chunk_a = _make_versioned_chunk("/docs/report.md", "", 0.9, 0)
+    chunk_b = _make_versioned_chunk("/docs/report.md", "", 0.8, 1)
+    sibling = _make_versioned_chunk("/docs/other.md", "", 0.7, 0)
+    result = narrow_to_lineage([chunk_a, chunk_b, sibling])
+    assert len(result) == 2
+    assert all(c.source_locator == "/docs/report.md" for c in result)

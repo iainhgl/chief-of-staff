@@ -545,7 +545,9 @@ async def test_retrieve_envelope_contains_only_service_returned_citations(monkey
     ]
     svc = AsyncMock()
     svc.query = AsyncMock(
-        return_value=CitedResponse(answer="synthesised answer", citations=pruned_citations)
+        return_value=CitedResponse(
+            answer="synthesised answer", citations=pruned_citations
+        )
     )
     monkeypatch.setattr(_server, "_retrieval_service", svc)
     monkeypatch.setattr(_server, "_output_service", _make_mock_output_service())
@@ -562,3 +564,70 @@ async def test_retrieve_envelope_contains_only_service_returned_citations(monkey
         assert "chunk_index" in c
         assert "score" in c
         assert "source_path" not in c
+
+
+# ── Story 6.14: grounded citation lineage in MCP response ────────────────────
+
+
+async def test_retrieve_grounded_citations_share_single_lineage(monkeypatch):
+    # Service returns only the winning lineage after grounding (simulated here)
+    grounded_citation = CitedChunk(
+        content="leave policy from email body",
+        source_document_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        source_alias="gmail://msg-001",
+        source_locator="gmail://msg-001",
+        document_version_id="ver-aaa-001",
+        chunk_index=0,
+        score=0.9,
+    )
+    svc = AsyncMock()
+    svc.query = AsyncMock(
+        return_value=CitedResponse(
+            answer="The leave policy allows 20 days per year.",
+            citations=[grounded_citation],
+        )
+    )
+    monkeypatch.setattr(_server, "_retrieval_service", svc)
+    monkeypatch.setattr(_server, "_output_service", _make_mock_output_service())
+
+    result = json.loads(await retrieve(query="what is the leave policy?"))
+
+    assert result["status"] == "ok"
+    # Top-level citations and data.citations must both reflect the grounded lineage
+    assert len(result["citations"]) == 1
+    assert len(result["data"]["citations"]) == 1
+    top_citation = result["citations"][0]
+    assert top_citation["source_locator"] == "gmail://msg-001"
+    assert top_citation["document_version_id"] == "ver-aaa-001"
+    # data.citations matches top-level exactly
+    assert result["data"]["citations"][0] == top_citation
+
+
+async def test_retrieve_grounded_legacy_citations_use_source_locator(monkeypatch):
+    # Legacy record with no document_version_id — source_locator is the lineage key
+    legacy_citation = CitedChunk(
+        content="leave policy content",
+        source_document_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        source_alias="/docs/leave.md",
+        source_locator="/docs/leave.md",
+        document_version_id="",
+        chunk_index=0,
+        score=0.85,
+    )
+    svc = AsyncMock()
+    svc.query = AsyncMock(
+        return_value=CitedResponse(
+            answer="The leave policy is detailed in docs.",
+            citations=[legacy_citation],
+        )
+    )
+    monkeypatch.setattr(_server, "_retrieval_service", svc)
+    monkeypatch.setattr(_server, "_output_service", _make_mock_output_service())
+
+    result = json.loads(await retrieve(query="what does the leave doc say?"))
+
+    assert result["status"] == "ok"
+    top_citation = result["citations"][0]
+    assert top_citation["document_version_id"] == ""
+    assert top_citation["source_locator"] == "/docs/leave.md"
+    assert result["data"]["citations"][0] == top_citation

@@ -7,8 +7,28 @@ from psycopg_pool import AsyncConnectionPool
 
 from cos.config import CosConfig
 from cos.llm.adapter import LLMAdapter
-from cos.retrieval.citations import CitedResponse
+from cos.retrieval.citations import CitedResponse, narrow_to_lineage
 from cos.retrieval.search import hybrid_search
+
+_MULTI_SOURCE_SIGNALS = (
+    "compare ",
+    "comparison between",
+    "differences between",
+    " vs ",
+    " versus ",
+    "aggregate",
+    "across all",
+    "from all sources",
+    "across sources",
+    "multiple sources",
+)
+
+
+def _is_multi_source_query(text: str) -> bool:
+    """Return True if the query explicitly requests multi-source synthesis."""
+    t = text.lower()
+    return any(kw in t for kw in _MULTI_SOURCE_SIGNALS)
+
 
 _TASK_INSTRUCTIONS: dict[str, str] = {
     "draft": (
@@ -105,6 +125,15 @@ class RetrievalService:
                 min_score=self._config.retrieval.min_score,
                 max_chunks_per_source=self._config.retrieval.max_chunks_per_source,
             )
+
+        if not cited_results:
+            return CitedResponse(
+                answer="No relevant content found in the knowledge base.",
+                citations=[],
+            )
+
+        if not _is_multi_source_query(text):
+            cited_results = narrow_to_lineage(cited_results)
 
         if not cited_results:
             return CitedResponse(
