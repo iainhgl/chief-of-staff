@@ -517,3 +517,48 @@ async def test_ingest_document_service_exception_returns_error(monkeypatch):
     assert result["error"] == "Ingest failed"
     assert "DB connection lost" not in result["detail"]
     assert "cos logs" in result["detail"]
+
+
+# ── Story 6.13: citation pruning propagation ─────────────────────────────────
+
+
+async def test_retrieve_envelope_contains_only_service_returned_citations(monkeypatch):
+    pruned_citations = [
+        CitedChunk(
+            content="first supporting chunk",
+            source_document_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            source_alias="policy.md",
+            source_locator="/docs/policy.md",
+            document_version_id="v1",
+            chunk_index=0,
+            score=0.9,
+        ),
+        CitedChunk(
+            content="second supporting chunk",
+            source_document_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            source_alias="policy.md",
+            source_locator="/docs/policy.md",
+            document_version_id="v1",
+            chunk_index=1,
+            score=0.8,
+        ),
+    ]
+    svc = AsyncMock()
+    svc.query = AsyncMock(
+        return_value=CitedResponse(answer="synthesised answer", citations=pruned_citations)
+    )
+    monkeypatch.setattr(_server, "_retrieval_service", svc)
+    monkeypatch.setattr(_server, "_output_service", _make_mock_output_service())
+
+    result = json.loads(await retrieve(query="what is HR planning?"))
+
+    assert result["status"] == "ok"
+    citations = result["citations"]
+    assert len(citations) == 2
+    for c in citations:
+        assert "source_alias" in c
+        assert "source_locator" in c
+        assert "document_version_id" in c
+        assert "chunk_index" in c
+        assert "score" in c
+        assert "source_path" not in c

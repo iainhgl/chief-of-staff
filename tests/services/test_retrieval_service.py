@@ -159,6 +159,130 @@ async def test_query_includes_role_tone_in_prompt(
     assert "Use a calm executive tone." in prompt
 
 
+# ── Pruning and thresholding tests (Story 6.13) ────────────────────────────
+
+
+def _make_chunk_from_source(
+    source_locator: str,
+    score: float,
+    chunk_index: int = 0,
+    content: str = "",
+) -> CitedChunk:
+    return CitedChunk(
+        content=content or f"content at {source_locator} chunk {chunk_index}",
+        source_document_id="12345678-1234-1234-1234-123456789012",
+        source_alias=source_locator,
+        source_locator=source_locator,
+        document_version_id="",
+        chunk_index=chunk_index,
+        score=score,
+    )
+
+
+@pytest.mark.asyncio
+async def test_query_passes_retrieval_filters_to_search(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+) -> None:
+    config = make_test_config(tmp_path)
+    config.retrieval.min_score = 0.02
+    config.retrieval.max_chunks_per_source = 1
+    pruned_results = [
+        _make_chunk_from_source("/docs/hr.md", 0.9, 0),
+    ]
+    service = RetrievalService(
+        config=config,
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+    search_mock = AsyncMock(return_value=pruned_results)
+
+    with patch("cos.services.retrieval.hybrid_search", new=search_mock):
+        response = await service.query("HR planning", role_pack=None)
+
+    assert response.citations == pruned_results
+    call_kwargs = search_mock.await_args.kwargs
+    assert call_kwargs["min_score"] == pytest.approx(0.02)
+    assert call_kwargs["max_chunks_per_source"] == 1
+
+
+@pytest.mark.asyncio
+async def test_query_all_filtered_returns_no_content_response(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+) -> None:
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with patch(
+        "cos.services.retrieval.hybrid_search",
+        new=AsyncMock(return_value=[]),
+    ):
+        response = await service.query("filtered topic", role_pack=None)
+
+    assert "no relevant content" in (response.answer or "").lower()
+    assert response.citations == []
+    mock_llm_adapter.complete.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_query_llm_receives_only_pruned_context(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+) -> None:
+    pruned_results = [
+        _make_chunk_from_source("/docs/hr.md", 0.9, 0, "top chunk content"),
+        _make_chunk_from_source("/docs/ops.md", 0.7, 0, "ops chunk content"),
+    ]
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with patch(
+        "cos.services.retrieval.hybrid_search",
+        new=AsyncMock(return_value=pruned_results),
+    ):
+        await service.query("HR planning", role_pack=None)
+
+    call_kwargs = mock_llm_adapter.complete.call_args.kwargs
+    context = call_kwargs["context"]
+    assert "top chunk content" in context
+    assert "ops chunk content" in context
+
+
+@pytest.mark.asyncio
+async def test_query_citations_match_pruned_evidence_set(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+) -> None:
+    pruned_results = [
+        _make_chunk_from_source("/docs/hr.md", 0.9, 0),
+        _make_chunk_from_source("/docs/ops.md", 0.7, 0),
+    ]
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with patch(
+        "cos.services.retrieval.hybrid_search",
+        new=AsyncMock(return_value=pruned_results),
+    ):
+        response = await service.query("HR planning", role_pack=None)
+
+    assert response.citations == pruned_results
+
+
 @pytest.mark.parametrize(
     ("query", "expected_fragment"),
     [

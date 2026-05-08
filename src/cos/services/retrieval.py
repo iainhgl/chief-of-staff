@@ -97,7 +97,14 @@ class RetrievalService:
 
     async def query(self, text: str, role_pack: Any) -> CitedResponse:
         async with self._pool.connection() as conn:
-            cited_results = await hybrid_search(text, conn, self._config, role_pack)
+            cited_results = await hybrid_search(
+                text,
+                conn,
+                self._config,
+                role_pack,
+                min_score=self._config.retrieval.min_score,
+                max_chunks_per_source=self._config.retrieval.max_chunks_per_source,
+            )
 
         if not cited_results:
             return CitedResponse(

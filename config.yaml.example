@@ -204,3 +204,19 @@ chunking:
 # mcp_note:
 #   staging_dir: /data/connector-staging/mcp
 #   near_duplicate_threshold: 0.95
+
+# ─────────────────────────────────────────────
+# Retrieval (optional — controls relevance filtering and citation pruning)
+# Omit this block entirely to use all defaults (no floor, 2 chunks per source).
+#
+# min_score: RRF relevance floor applied before role-priority weighting (0.0–1.0, default 0.0).
+#   Chunks scoring below this raw RRF threshold are excluded from synthesis and citations.
+#   RRF scores top out at ~0.033 for a rank-1 result in both keyword and semantic search,
+#   so values in the range 0.001–0.02 are practical; 0.0 (the default) preserves existing behaviour.
+#   Role-priority weights are applied after this floor — they cannot resurrect filtered chunks.
+# max_chunks_per_source: maximum chunks from the same source document included per query
+#   (minimum 1, default 2). Reduces citation spam when a single document dominates search results.
+# ─────────────────────────────────────────────
+# retrieval:
+#   min_score: 0.0
+#   max_chunks_per_source: 2

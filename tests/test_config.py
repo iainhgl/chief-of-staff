@@ -329,3 +329,60 @@ def test_mcp_note_config_rejects_negative_threshold(tmp_path):
 
     with pytest.raises(Exception):
         McpNoteIngestConfig(near_duplicate_threshold=-0.1)
+
+
+# ── Retrieval config tests (Story 6.13) ────────────────────────────────────
+
+
+def test_retrieval_config_default_min_score():
+    from cos.config import RetrievalConfig
+
+    cfg = RetrievalConfig()
+    assert cfg.min_score == 0.0
+
+
+def test_retrieval_config_default_max_chunks_per_source():
+    from cos.config import RetrievalConfig
+
+    cfg = RetrievalConfig()
+    assert cfg.max_chunks_per_source == 2
+
+
+def test_retrieval_config_rejects_negative_min_score():
+    from cos.config import RetrievalConfig
+
+    with pytest.raises(Exception):
+        RetrievalConfig(min_score=-0.1)
+
+
+def test_retrieval_config_rejects_min_score_above_one():
+    from cos.config import RetrievalConfig
+
+    with pytest.raises(Exception):
+        RetrievalConfig(min_score=1.1)
+
+
+def test_retrieval_config_rejects_zero_max_chunks_per_source():
+    from cos.config import RetrievalConfig
+
+    with pytest.raises(Exception):
+        RetrievalConfig(max_chunks_per_source=0)
+
+
+def test_cos_config_has_retrieval_defaults(tmp_path):
+    cfg_file = _write_config(tmp_path, VALID_CONFIG_YAML)
+    config = CosConfig.load(cfg_file)
+
+    assert config.retrieval.min_score == 0.0
+    assert config.retrieval.max_chunks_per_source == 2
+
+
+def test_retrieval_config_loads_from_yaml(tmp_path):
+    yaml_with_retrieval = VALID_CONFIG_YAML + (
+        "\nretrieval:\n  min_score: 0.01\n  max_chunks_per_source: 3\n"
+    )
+    cfg_file = _write_config(tmp_path, yaml_with_retrieval)
+    config = CosConfig.load(cfg_file)
+
+    assert config.retrieval.min_score == pytest.approx(0.01)
+    assert config.retrieval.max_chunks_per_source == 3

@@ -9,7 +9,7 @@ from pgvector.psycopg import register_vector_async  # type: ignore[import-untype
 
 from cos.config import CosConfig
 from cos.ingestion.embedder import VoyageTransportConfig, embed
-from cos.retrieval.citations import CitedChunk, CitedResults
+from cos.retrieval.citations import CitedChunk, CitedResults, prune_citations
 from cos.rolepack.loader import RolePackConfig
 
 _RRF_K = 60
@@ -49,17 +49,39 @@ def _coerce_priority_weight(retrieval_priorities: Any, source_alias: str) -> flo
     return 1.0
 
 
+def _candidate_limit(top_k: int, max_chunks_per_source: int | None) -> int:
+    if max_chunks_per_source is None:
+        return top_k
+
+    # Over-fetch before per-source pruning so lower-ranked results from other
+    # sources can backfill the bounded evidence set.
+    return top_k * max(2, max_chunks_per_source + 1)
+
+
+def _result_sort_key(chunk: CitedChunk) -> tuple[float, str, int, str, str]:
+    return (
+        -chunk.score,
+        chunk.source_locator,
+        chunk.chunk_index,
+        chunk.document_version_id,
+        chunk.source_document_id,
+    )
+
+
 async def hybrid_search(
     query: str,
     conn: psycopg.AsyncConnection[Any],
     config: CosConfig,
     role_pack: RolePackConfig | None = None,
     top_k: int = 10,
+    min_score: float = 0.0,
+    max_chunks_per_source: int | None = None,
 ) -> CitedResults:
     if not query.strip():
         return []
 
     await register_vector_async(conn)
+    candidate_limit = _candidate_limit(top_k, max_chunks_per_source)
 
     query_embeddings = await embed(
         [query],
@@ -92,7 +114,7 @@ async def hybrid_search(
         ORDER BY score DESC
         LIMIT %s
         """,
-        (query, query, top_k),
+        (query, query, candidate_limit),
     )
     keyword_rows = await keyword_result.fetchall()
     keyword_hits = [
@@ -121,7 +143,7 @@ async def hybrid_search(
         ORDER BY score DESC
         LIMIT %s
         """,
-        (query_vector, top_k),
+        (query_vector, candidate_limit),
     )
     semantic_rows = await semantic_result.fetchall()
     semantic_hits = [
@@ -210,7 +232,11 @@ async def hybrid_search(
             source_alias = legacy_path
             source_locator = legacy_path
 
-        final_score = float(entry["score"])
+        raw_rrf_score = float(entry["score"])
+        if raw_rrf_score < min_score:
+            continue
+
+        final_score = raw_rrf_score
         if retrieval_priorities is not None:
             final_score *= _coerce_priority_weight(retrieval_priorities, source_alias)
 
@@ -226,5 +252,8 @@ async def hybrid_search(
             )
         )
 
-    cited_results.sort(key=lambda chunk: chunk.score, reverse=True)
+    cited_results.sort(key=_result_sort_key)
+    if max_chunks_per_source is not None:
+        cited_results = prune_citations(cited_results, max_chunks_per_source)
+
     return cited_results[:top_k]
