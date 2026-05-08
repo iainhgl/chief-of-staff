@@ -751,3 +751,48 @@ async def requeue_stale_jobs(
         (older_than_seconds,),
     )
     return result.rowcount if result.rowcount is not None else 0
+
+
+async def has_processed_artifact(
+    conn: psycopg.AsyncConnection[Any],
+    source_type: str,
+    source_locator: str,
+    fingerprint: str,
+) -> bool:
+    """Return True if this locator+fingerprint has already been successfully ingested."""
+    result = await conn.execute(
+        """
+        SELECT 1
+        FROM sources s
+        JOIN source_versions sv ON sv.source_id = s.id
+        JOIN content_blobs cb ON cb.id = sv.content_blob_id
+        WHERE s.source_type = %s
+          AND s.source_locator = %s
+          AND cb.sha256 = %s
+        LIMIT 1
+        """,
+        (source_type, source_locator, fingerprint),
+    )
+    row = await result.fetchone()
+    return row is not None
+
+
+async def has_pending_job_for_locator(
+    conn: psycopg.AsyncConnection[Any],
+    source_locator: str,
+    fingerprint: str,
+) -> bool:
+    """Return True if a queued or running ingest job exists for this locator+fingerprint."""
+    result = await conn.execute(
+        """
+        SELECT 1 FROM jobs
+        WHERE job_type = 'ingest'
+          AND status IN ('queued', 'running')
+          AND payload->>'source_locator' = %s
+          AND payload->'metadata'->>'content_fingerprint' = %s
+        LIMIT 1
+        """,
+        (source_locator, fingerprint),
+    )
+    row = await result.fetchone()
+    return row is not None

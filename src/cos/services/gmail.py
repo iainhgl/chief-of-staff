@@ -23,6 +23,7 @@ from cos.connectors.gmail import (
 )
 from cos.services.ingestion import SUPPORTED_SUFFIXES
 from cos.services.jobs import submit_ingest_job
+from cos.store.db import has_pending_job_for_locator, has_processed_artifact
 
 _CONNECTOR = "gmail"
 _BODY_MIME_TYPES = frozenset({"text/plain", "text/html"})
@@ -40,13 +41,21 @@ class GmailPollResult:
     body_jobs_enqueued: int
     attachment_jobs_enqueued: int
     attachments_skipped: int
+    artifacts_already_processed: int = 0
+    artifacts_already_queued: int = 0
 
 
 async def poll_gmail(
     config: CosConfig,
     conn: psycopg.AsyncConnection[Any],
+    force: bool = False,
 ) -> GmailPollResult:
-    """Poll Gmail for new messages, stage artifacts, and enqueue ingest jobs."""
+    """Poll Gmail for new messages, stage artifacts, and enqueue ingest jobs.
+
+    By default, artifacts that have already been successfully processed or that
+    already have a queued/running job with the same content are skipped.  Pass
+    ``force=True`` to bypass those checks for the current run only.
+    """
     gmail_config = config.gmail or GmailConnectorConfig()
     staging_dir = gmail_config.staging_dir
     staging_dir.mkdir(parents=True, exist_ok=True)
@@ -57,6 +66,8 @@ async def poll_gmail(
     body_jobs = 0
     attachment_jobs = 0
     attachments_skipped = 0
+    already_processed = 0
+    already_queued = 0
 
     for message_id in message_ids:
         try:
@@ -82,22 +93,30 @@ async def poll_gmail(
         # Stage message body
         body_text = extract_body_text(message)
         body_content = _format_body_md(from_addr, subject, internal_date, body_text)
-        body_staged = staging_dir / f"{message_id}_body.md"
-        body_staged.write_text(body_content, encoding="utf-8")
+        body_locator = f"gmail://message/{message_id}/body"
+        body_fingerprint = _compute_fingerprint(body_content.encode("utf-8"))
 
-        await submit_ingest_job(
-            conn,
-            staged_path=str(body_staged),
-            source_type="gmail_message_body",
-            source_locator=f"gmail://message/{message_id}/body",
-            source_alias=_body_alias(subject, message_id),
-            metadata={**base_metadata},
-        )
-        body_jobs += 1
+        skip = await _check_skip(conn, "gmail_message_body", body_locator, body_fingerprint, force)
+        if skip == "processed":
+            already_processed += 1
+        elif skip == "pending":
+            already_queued += 1
+        else:
+            body_staged = staging_dir / f"{message_id}_body.md"
+            body_staged.write_text(body_content, encoding="utf-8")
+            await submit_ingest_job(
+                conn,
+                staged_path=str(body_staged),
+                source_type="gmail_message_body",
+                source_locator=body_locator,
+                source_alias=_body_alias(subject, message_id),
+                metadata={**base_metadata, "content_fingerprint": body_fingerprint},
+            )
+            body_jobs += 1
 
         # Stage supported attachments
-        payload = message.get("payload", {})
-        for part_index, part in enumerate(walk_mime_parts(payload)):
+        msg_payload = message.get("payload", {})
+        for part_index, part in enumerate(walk_mime_parts(msg_payload)):
             body_info = part.get("body", {})
             attachment_id = body_info.get("attachmentId")
             inline_data = body_info.get("data", "")
@@ -143,6 +162,17 @@ async def poll_gmail(
                 attachments_skipped += 1
                 continue
 
+            att_locator = f"gmail://message/{message_id}/attachment/{attachment_slug}"
+            att_fingerprint = _compute_fingerprint(att_bytes)
+
+            skip = await _check_skip(conn, "gmail_attachment", att_locator, att_fingerprint, force)
+            if skip == "processed":
+                already_processed += 1
+                continue
+            if skip == "pending":
+                already_queued += 1
+                continue
+
             source_alias = filename or f"attachment-{attachment_slug}{suffix}"
             staged_name = _staged_attachment_name(message_id, attachment_slug, suffix)
             att_staged = staging_dir / staged_name
@@ -152,9 +182,9 @@ async def poll_gmail(
                 conn,
                 staged_path=str(att_staged),
                 source_type="gmail_attachment",
-                source_locator=f"gmail://message/{message_id}/attachment/{attachment_slug}",
+                source_locator=att_locator,
                 source_alias=source_alias,
-                metadata={**base_metadata, "mime_type": mime_type},
+                metadata={**base_metadata, "mime_type": mime_type, "content_fingerprint": att_fingerprint},
             )
             attachment_jobs += 1
 
@@ -163,7 +193,30 @@ async def poll_gmail(
         body_jobs_enqueued=body_jobs,
         attachment_jobs_enqueued=attachment_jobs,
         attachments_skipped=attachments_skipped,
+        artifacts_already_processed=already_processed,
+        artifacts_already_queued=already_queued,
     )
+
+
+def _compute_fingerprint(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
+
+
+async def _check_skip(
+    conn: psycopg.AsyncConnection[Any],
+    source_type: str,
+    source_locator: str,
+    fingerprint: str,
+    force: bool,
+) -> str | None:
+    """Return 'processed', 'pending', or None (should enqueue)."""
+    if force:
+        return None
+    if await has_processed_artifact(conn, source_type, source_locator, fingerprint):
+        return "processed"
+    if await has_pending_job_for_locator(conn, source_locator, fingerprint):
+        return "pending"
+    return None
 
 
 def _format_body_md(

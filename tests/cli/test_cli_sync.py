@@ -1,4 +1,5 @@
 """Tests for `cos sync gmail` and `cos sync calendar` CLI commands."""
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from pydantic import SecretStr
@@ -131,6 +132,80 @@ def test_sync_gmail_reports_configuration_error() -> None:
     assert result.exit_code == 1
     assert "configuration error" in result.output.lower()
     assert "max_results must be <= 500" in result.output
+
+
+# ── skip counts in summary ────────────────────────────────────────────────────
+
+def test_sync_gmail_prints_skip_counts_in_summary() -> None:
+    poll_result = GmailPollResult(
+        messages_scanned=5,
+        body_jobs_enqueued=2,
+        attachment_jobs_enqueued=1,
+        attachments_skipped=0,
+        artifacts_already_processed=3,
+        artifacts_already_queued=1,
+    )
+    with (
+        patch("cos.cli.CosConfig.load", return_value=_config_with_gmail()),
+        patch("cos.cli._do_sync_gmail", new=AsyncMock(return_value=poll_result)),
+    ):
+        result = runner.invoke(app, ["sync", "gmail"])
+
+    assert result.exit_code == 0
+    assert "3 artifacts already processed (skipped)" in result.output
+    assert "1 artifacts already queued (skipped)" in result.output
+
+
+# ── --force flag ──────────────────────────────────────────────────────────────
+
+def test_sync_gmail_force_flag_passes_force_to_service() -> None:
+    poll_result = GmailPollResult(
+        messages_scanned=3,
+        body_jobs_enqueued=3,
+        attachment_jobs_enqueued=0,
+        attachments_skipped=0,
+        artifacts_already_processed=0,
+        artifacts_already_queued=0,
+    )
+
+    captured_kwargs: dict = {}
+
+    async def _fake_do_sync(config: Any, force: bool = False) -> GmailPollResult:
+        captured_kwargs["force"] = force
+        return poll_result
+
+    with (
+        patch("cos.cli.CosConfig.load", return_value=_config_with_gmail()),
+        patch("cos.cli._do_sync_gmail", new=_fake_do_sync),
+    ):
+        result = runner.invoke(app, ["sync", "gmail", "--force"])
+
+    assert result.exit_code == 0
+    assert captured_kwargs.get("force") is True
+
+
+def test_sync_gmail_default_does_not_pass_force() -> None:
+    poll_result = GmailPollResult(
+        messages_scanned=0,
+        body_jobs_enqueued=0,
+        attachment_jobs_enqueued=0,
+        attachments_skipped=0,
+    )
+
+    captured_kwargs: dict = {}
+
+    async def _fake_do_sync(config: Any, force: bool = False) -> GmailPollResult:
+        captured_kwargs["force"] = force
+        return poll_result
+
+    with (
+        patch("cos.cli.CosConfig.load", return_value=_config_with_gmail()),
+        patch("cos.cli._do_sync_gmail", new=_fake_do_sync),
+    ):
+        result = runner.invoke(app, ["sync", "gmail"])
+
+    assert result.exit_code == 0
+    assert captured_kwargs.get("force") is False
 
 
 # ─────────────────────────────────────────────────────────────────────────────

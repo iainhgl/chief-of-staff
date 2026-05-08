@@ -9,6 +9,8 @@ from conftest import TEST_DSN
 from cos.store.db import (
     claim_next_job,
     enqueue_job,
+    has_pending_job_for_locator,
+    has_processed_artifact,
     mark_job_retryable_failure,
     mark_job_succeeded,
     mark_job_terminal_failure,
@@ -307,3 +309,204 @@ async def test_retry_cycle_eventually_reaches_terminal_failure(
 
     assert row is not None
     assert row[0] == "failed"
+
+
+# ── has_processed_artifact ────────────────────────────────────────────────────
+
+async def test_has_processed_artifact_returns_false_when_nothing_ingested(
+    migrated_db: None,
+) -> None:
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        found = await has_processed_artifact(
+            conn, "gmail_message_body", "gmail://message/x/body", "abc123"
+        )
+    assert found is False
+
+
+async def test_has_processed_artifact_returns_true_after_ingestion(
+    migrated_db: None,
+) -> None:
+    import hashlib
+
+    content = b"some body content"
+    fingerprint = hashlib.sha256(content).hexdigest()
+
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        blob = await conn.execute(
+            "INSERT INTO content_blobs (sha256, byte_size) VALUES (%s, %s) RETURNING id::text",
+            (fingerprint, len(content)),
+        )
+        blob_row = await blob.fetchone()
+        assert blob_row is not None
+        blob_id = blob_row[0]
+
+        source = await conn.execute(
+            "INSERT INTO sources (source_type, source_locator, source_alias) "
+            "VALUES ('gmail_message_body', 'gmail://message/msg-1/body', 'msg-1.md') "
+            "RETURNING id::text",
+        )
+        source_row = await source.fetchone()
+        assert source_row is not None
+        source_id = source_row[0]
+
+        doc = await conn.execute(
+            "INSERT INTO documents (source_path, file_hash, current_version, status) "
+            "VALUES ('/tmp/staged.md', %s, 1, 'indexed') RETURNING id",
+            (fingerprint,),
+        )
+        doc_row = await doc.fetchone()
+        assert doc_row is not None
+        document_id = doc_row[0]
+
+        dv = await conn.execute(
+            "INSERT INTO document_versions (document_id, version, content_hash, content_blob_id) "
+            "VALUES (%s, 1, %s, %s::uuid) RETURNING id::text",
+            (document_id, fingerprint, blob_id),
+        )
+        dv_row = await dv.fetchone()
+        assert dv_row is not None
+        dv_id = dv_row[0]
+
+        await conn.execute(
+            "INSERT INTO source_versions (source_id, document_version_id, content_blob_id) "
+            "VALUES (%s::uuid, %s::uuid, %s::uuid)",
+            (source_id, dv_id, blob_id),
+        )
+
+        found = await has_processed_artifact(
+            conn, "gmail_message_body", "gmail://message/msg-1/body", fingerprint
+        )
+    assert found is True
+
+
+async def test_has_processed_artifact_returns_false_for_different_fingerprint(
+    migrated_db: None,
+) -> None:
+    """Different fingerprint (changed content) is not considered already processed."""
+    import hashlib
+
+    fingerprint_a = hashlib.sha256(b"version a").hexdigest()
+    fingerprint_b = hashlib.sha256(b"version b").hexdigest()
+
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        blob = await conn.execute(
+            "INSERT INTO content_blobs (sha256, byte_size) VALUES (%s, %s) RETURNING id::text",
+            (fingerprint_a, 9),
+        )
+        blob_row = await blob.fetchone()
+        assert blob_row is not None
+        blob_id = blob_row[0]
+
+        source = await conn.execute(
+            "INSERT INTO sources (source_type, source_locator, source_alias) "
+            "VALUES ('gmail_message_body', 'gmail://message/msg-x/body', 'msg-x.md') "
+            "RETURNING id::text",
+        )
+        source_row = await source.fetchone()
+        assert source_row is not None
+        source_id = source_row[0]
+
+        doc = await conn.execute(
+            "INSERT INTO documents (source_path, file_hash, current_version, status) "
+            "VALUES ('/tmp/staged-x.md', %s, 1, 'indexed') RETURNING id",
+            (fingerprint_a,),
+        )
+        doc_row = await doc.fetchone()
+        assert doc_row is not None
+        document_id = doc_row[0]
+
+        dv = await conn.execute(
+            "INSERT INTO document_versions (document_id, version, content_hash, content_blob_id) "
+            "VALUES (%s, 1, %s, %s::uuid) RETURNING id::text",
+            (document_id, fingerprint_a, blob_id),
+        )
+        dv_row = await dv.fetchone()
+        assert dv_row is not None
+        dv_id = dv_row[0]
+
+        await conn.execute(
+            "INSERT INTO source_versions (source_id, document_version_id, content_blob_id) "
+            "VALUES (%s::uuid, %s::uuid, %s::uuid)",
+            (source_id, dv_id, blob_id),
+        )
+
+        # Query with a DIFFERENT fingerprint → should return False
+        found = await has_processed_artifact(
+            conn, "gmail_message_body", "gmail://message/msg-x/body", fingerprint_b
+        )
+    assert found is False
+
+
+# ── has_pending_job_for_locator ───────────────────────────────────────────────
+
+async def test_has_pending_job_returns_false_when_no_jobs(
+    migrated_db: None,
+    db_conn: psycopg.AsyncConnection[Any],
+) -> None:
+    found = await has_pending_job_for_locator(
+        db_conn, "gmail://message/x/body", "fingerprintabc"
+    )
+    assert found is False
+
+
+async def test_has_pending_job_returns_true_for_queued_job(
+    migrated_db: None,
+    db_conn: psycopg.AsyncConnection[Any],
+) -> None:
+    locator = "gmail://message/msg-pend-1/body"
+    fingerprint = "fp-queued-001"
+    payload = {
+        "staged_path": "/tmp/msg.md",
+        "source_type": "gmail_message_body",
+        "source_locator": locator,
+        "source_alias": "msg.md",
+        "metadata": {"content_fingerprint": fingerprint},
+    }
+    await enqueue_job(db_conn, "ingest", payload)
+
+    found = await has_pending_job_for_locator(db_conn, locator, fingerprint)
+    assert found is True
+
+
+async def test_has_pending_job_returns_false_after_job_succeeds(
+    migrated_db: None,
+) -> None:
+    locator = "gmail://message/msg-done-1/body"
+    fingerprint = "fp-done-001"
+    payload = {
+        "staged_path": "/tmp/msg.md",
+        "source_type": "gmail_message_body",
+        "source_locator": locator,
+        "source_alias": "msg.md",
+        "metadata": {"content_fingerprint": fingerprint},
+    }
+
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        job = await enqueue_job(conn, "ingest", payload)
+
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        await claim_next_job(conn, "ingest")
+        await mark_job_succeeded(conn, job.id)
+
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        found = await has_pending_job_for_locator(conn, locator, fingerprint)
+    assert found is False
+
+
+async def test_has_pending_job_returns_false_for_different_fingerprint(
+    migrated_db: None,
+    db_conn: psycopg.AsyncConnection[Any],
+) -> None:
+    locator = "gmail://message/msg-fp-1/body"
+    payload = {
+        "staged_path": "/tmp/msg.md",
+        "source_type": "gmail_message_body",
+        "source_locator": locator,
+        "source_alias": "msg.md",
+        "metadata": {"content_fingerprint": "fingerprint-A"},
+    }
+    await enqueue_job(db_conn, "ingest", payload)
+
+    # Query with a different fingerprint → should return False
+    found = await has_pending_job_for_locator(db_conn, locator, "fingerprint-B")
+    assert found is False

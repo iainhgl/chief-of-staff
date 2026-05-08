@@ -203,15 +203,37 @@ After completing the OAuth steps above, run the relevant sync commands inside th
 docker compose exec cos uv run cos sync gmail
 ```
 
-Expected output:
+Expected output on a first run:
 
 ```text
 Gmail sync complete:
   14 messages scanned
   12 body jobs enqueued
   3 attachment jobs enqueued
+  0 artifacts already processed (skipped)
+  0 artifacts already queued (skipped)
   1 unsupported attachments skipped
 ```
+
+On repeated runs after the worker has processed the initial jobs, already-processed artifacts are skipped automatically:
+
+```text
+Gmail sync complete:
+  14 messages scanned
+  0 body jobs enqueued
+  0 attachment jobs enqueued
+  15 artifacts already processed (skipped)
+  0 artifacts already queued (skipped)
+  1 unsupported attachments skipped
+```
+
+To intentionally reprocess all matching Gmail content for the current run (for example after correcting an ingestion configuration), use the `--force` flag:
+
+```bash
+docker compose exec cos uv run cos sync gmail --force
+```
+
+`--force` applies only to that single invocation. It bypasses skip checks so that all matching artifacts are re-staged and re-enqueued, regardless of prior ingestion status. The canonical pipeline will still deduplicate unchanged content through the normal ingest outcomes.
 
 ### Sync Google Calendar
 
