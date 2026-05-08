@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -10,24 +11,76 @@ from cos.llm.adapter import LLMAdapter
 from cos.retrieval.citations import CitedResponse, narrow_to_lineage
 from cos.retrieval.search import hybrid_search
 
-_MULTI_SOURCE_SIGNALS = (
+_COMPARE_SIGNALS = (
     "compare ",
     "comparison between",
     "differences between",
     " vs ",
     " versus ",
-    "aggregate",
-    "across all",
+)
+
+_EXPLICIT_MULTI_SOURCE_SIGNALS = (
     "from all sources",
     "across sources",
     "multiple sources",
 )
 
+_SYNTHESIS_SIGNALS = (
+    "summarise",
+    "summarize",
+    "summary of",
+    "brief me on",
+    "brief on",
+    "synthesise",
+    "synthesize",
+    "synthesis of",
+    "combine",
+    "combined",
+    "using both",
+    "use both",
+)
+
+_AGGREGATION_SIGNALS = (
+    "aggregate",
+    "aggregated",
+)
+
+_SOURCE_TERM_PATTERN = (
+    r"(?:source|sources|document|documents|doc|docs|file|files|email|emails|"
+    r"message|messages|note|notes|record|records)"
+)
+
+_MULTI_SOURCE_REFERENCE_PATTERNS = (
+    re.compile(rf"\bboth\b.*\b{_SOURCE_TERM_PATTERN}\b"),
+    re.compile(rf"\b{_SOURCE_TERM_PATTERN}\b.*\band\b.*\b{_SOURCE_TERM_PATTERN}\b"),
+    re.compile(
+        rf"\b(?:between|across all)\b.*\b{_SOURCE_TERM_PATTERN}\b"
+    ),
+)
+
+
+def _contains_any(text: str, signals: tuple[str, ...]) -> bool:
+    return any(signal in text for signal in signals)
+
+
+def _mentions_multiple_sources(text: str) -> bool:
+    return any(pattern.search(text) for pattern in _MULTI_SOURCE_REFERENCE_PATTERNS)
+
 
 def _is_multi_source_query(text: str) -> bool:
     """Return True if the query explicitly requests multi-source synthesis."""
     t = text.lower()
-    return any(kw in t for kw in _MULTI_SOURCE_SIGNALS)
+    if _contains_any(t, _COMPARE_SIGNALS):
+        return True
+    if _contains_any(t, _EXPLICIT_MULTI_SOURCE_SIGNALS):
+        return True
+    if _mentions_multiple_sources(t):
+        return True
+    if _contains_any(t, _SYNTHESIS_SIGNALS) and _mentions_multiple_sources(t):
+        return True
+    if _contains_any(t, _AGGREGATION_SIGNALS) and _mentions_multiple_sources(t):
+        return True
+    return False
 
 
 _TASK_INSTRUCTIONS: dict[str, str] = {

@@ -1,5 +1,5 @@
 # generated: 2026-04-17
-# last_updated: 2026-05-08  # 6-14-single-source-factual-grounding-for-retrieve -> review
+# last_updated: 2026-05-08  # 6-14-single-source-factual-grounding-for-retrieve -> done
 # project: CoS
 # project_key: NOKEY
 # tracking_system: file-system
@@ -37,7 +37,7 @@
 # - Epics 1-5 represent the implemented baseline; Epic 6 onward reflects the change-course backlog
 
 generated: 2026-04-17
-last_updated: 2026-05-08  # 6-14-single-source-factual-grounding-for-retrieve -> review
+last_updated: 2026-05-08  # 6-14-single-source-factual-grounding-for-retrieve -> done
 project: CoS
 project_key: NOKEY
 tracking_system: file-system
@@ -129,7 +129,7 @@ development_status:
   6-11-operator-validation-connected-sources-live: done
   6-12-documentation-and-housekeeping: review
   6-13-retrieval-result-thresholding-and-citation-pruning: done
-  6-14-single-source-factual-grounding-for-retrieve: review
+  6-14-single-source-factual-grounding-for-retrieve: done
   6-15-gmail-processed-message-semantics-and-requeue-prevention: backlog
   epic-6-retrospective: optional
 

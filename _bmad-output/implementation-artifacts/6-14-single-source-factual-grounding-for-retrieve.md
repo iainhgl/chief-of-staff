@@ -1,6 +1,6 @@
 # Story 6.14: Single-Source Factual Grounding for `retrieve`
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -195,6 +195,11 @@ The safest pattern is a dedicated helper or a small extension that explicitly re
 - [Current retrieval service tests](/Users/iain.livingstone/Development/CoS/cos/tests/services/test_retrieval_service.py)
 - [Current MCP tool tests](/Users/iain.livingstone/Development/CoS/cos/tests/mcp_server/test_tools.py)
 
+### Review Findings
+
+- [x] [Review][Patch] Missing explicit synthesis opt-out in grounding heuristic [src/cos/services/retrieval.py:13]
+- [x] [Review][Patch] Generic `aggregate` signal makes multi-source opt-out too broad [src/cos/services/retrieval.py:19]
+
 ## Dev Agent Record
 
 ### Agent Model Used
@@ -206,10 +211,12 @@ claude-sonnet-4-6
 ### Completion Notes List
 
 - Added `_lineage_key()` and `narrow_to_lineage()` helpers to `citations.py`. `_lineage_key` prefers `document_version_id` and falls back to `source_locator` for legacy/backfilled records.
-- Added `_MULTI_SOURCE_SIGNALS` tuple and `_is_multi_source_query()` to `retrieval.py`. Kept as a separate dedicated helper rather than repurposing `_detect_query_type`, per the story's Query-Intent Guardrail note.
+- Added dedicated multi-source detection helpers in `retrieval.py`, centered on `_is_multi_source_query()`, rather than repurposing `_detect_query_type`, per the story's Query-Intent Guardrail note.
 - Wired grounding into `RetrievalService.query()`: after 6.13 thresholding/pruning, direct factual queries are narrowed to one lineage before context and citations are built. Multi-source path is preserved for explicit compare/aggregate queries.
 - Two existing 6.13 tests (`test_query_llm_receives_only_pruned_context`, `test_query_citations_match_pruned_evidence_set`) updated to use compare queries so they keep testing 6.13 pruning behavior without conflicting with 6.14 grounding.
 - 414 tests pass, 1 skipped; ruff clean.
+- Review fixes tightened the multi-source heuristic so explicit cross-source summaries stay multi-source while bare `aggregate` no longer disables grounding on single-source factual lookups.
+- Focused regression suite passed after review fixes: 66 passed.
 
 ### File List
 

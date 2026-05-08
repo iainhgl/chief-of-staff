@@ -415,6 +415,65 @@ async def test_compare_query_allows_multi_source_evidence(
 
 
 @pytest.mark.asyncio
+async def test_explicit_summary_query_across_two_sources_keeps_multi_source_evidence(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+) -> None:
+    gmail_chunk = _make_versioned_chunk(
+        "gmail://msg-001", "ver-aaa-001", 0.9, 0, "leave policy from email"
+    )
+    local_chunk = _make_versioned_chunk(
+        "/docs/leave-policy.md", "ver-bbb-001", 0.7, 0, "leave policy from file"
+    )
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with patch(
+        "cos.services.retrieval.hybrid_search",
+        new=AsyncMock(return_value=[gmail_chunk, local_chunk]),
+    ):
+        response = await service.query(
+            "summarise the email and the local file", role_pack=None
+        )
+
+    assert len(response.citations) == 2
+
+
+@pytest.mark.asyncio
+async def test_single_source_query_with_aggregate_word_still_grounds_to_one_lineage(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+) -> None:
+    primary_chunk = _make_versioned_chunk(
+        "gmail://msg-001", "ver-aaa-001", 0.9, 0, "aggregate retention rate is 12%"
+    )
+    sibling_chunk = _make_versioned_chunk(
+        "/docs/retention.md", "ver-bbb-001", 0.7, 0, "aggregate retention rate is 9%"
+    )
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with patch(
+        "cos.services.retrieval.hybrid_search",
+        new=AsyncMock(return_value=[primary_chunk, sibling_chunk]),
+    ):
+        response = await service.query(
+            "what is the aggregate retention rate?", role_pack=None
+        )
+
+    assert len(response.citations) == 1
+    assert response.citations[0].source_locator == "gmail://msg-001"
+
+
+@pytest.mark.asyncio
 async def test_grounding_no_usable_lineage_returns_no_content(
     tmp_path: Path,
     mock_pool: MagicMock,
