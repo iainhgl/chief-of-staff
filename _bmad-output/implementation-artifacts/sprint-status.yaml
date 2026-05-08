@@ -128,6 +128,9 @@ development_status:
   6-10-ingest-document-mcp-tool: done
   6-11-operator-validation-connected-sources-live: done
   6-12-documentation-and-housekeeping: review
+  6-13-retrieval-result-thresholding-and-citation-pruning: backlog
+  6-14-single-source-factual-grounding-for-retrieve: backlog
+  6-15-gmail-processed-message-semantics-and-requeue-prevention: backlog
   epic-6-retrospective: optional
 
   # ─────────────────────────────────────────────
