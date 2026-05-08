@@ -1532,6 +1532,82 @@ So that the backlog and docs stay consistent with the actual strategy.
 **When** the architecture and planning artifacts are reviewed together,
 **Then** the documented model, story ordering, and operator workflow are consistent across `architecture.md`, `epics.md`, and connector documentation.
 
+### Story 6.13: Retrieval Result Thresholding and Citation Pruning
+
+As a user,
+I want retrieval to filter low-signal results and cite only supporting evidence,
+So that grounded answers stay precise in a mixed-source corpus.
+
+**Acceptance Criteria:**
+
+**Given** a mixed-source retrieval query,
+**When** the search results are assembled,
+**Then** chunks below a configurable relevance threshold are excluded from synthesis input.
+
+**Given** an answer is synthesized,
+**When** citations are returned,
+**Then** the citation list includes only chunks or source records that materially support the answer rather than the full pre-filter retrieval set.
+
+**Given** no result clears the relevance threshold,
+**When** `retrieve` completes,
+**Then** it returns the normal no-relevant-content behavior rather than forcing a weakly grounded answer.
+
+**Given** the filtered retrieval path runs under normal conditions,
+**When** it is measured end to end,
+**Then** it remains within the existing retrieval latency target.
+
+---
+
+### Story 6.14: Single-Source Factual Grounding for `retrieve`
+
+As a user,
+I want direct factual questions to stay grounded in the source actually being asked about,
+So that the answer layer does not blend facts across similar but distinct records.
+
+**Acceptance Criteria:**
+
+**Given** a direct factual query about one apparent source item,
+**When** the retrieval service prepares synthesis context,
+**Then** it defaults to evidence from the best matching single source locator or document version rather than mixing multiple unrelated source items.
+
+**Given** a query explicitly asks for synthesis, comparison, or aggregation,
+**When** retrieval runs,
+**Then** multi-source evidence remains allowed.
+
+**Given** a single-source grounded answer is returned,
+**When** citations are inspected,
+**Then** they point to the same source lineage that supports the factual claim.
+
+**Given** a mixed-source corpus containing semantically similar Gmail, local-file, or MCP-note records,
+**When** a factual lookup is tested,
+**Then** the answer does not import unsupported facts from sibling records.
+
+---
+
+### Story 6.15: Gmail Processed-Message Semantics and Requeue Prevention
+
+As an operator,
+I want Gmail sync to skip already-processed matching messages by default,
+So that normal operation does not keep re-scanning and re-queueing work that has already completed successfully.
+
+**Acceptance Criteria:**
+
+**Given** a Gmail message body or attachment source has already been processed successfully,
+**When** the same message still matches the configured query on a later sync,
+**Then** the connector skips re-queueing it by default.
+
+**Given** a Gmail message changes in a way that should be treated as new ingestable content or a new source observation,
+**When** sync runs,
+**Then** the connector still submits the appropriate work safely.
+
+**Given** the connector resumes after restart,
+**When** it evaluates whether to queue matching Gmail content,
+**Then** processed-message bookkeeping survives restart and does not depend on in-memory state.
+
+**Given** the operator needs to intentionally reprocess Gmail content,
+**When** they follow the documented recovery path,
+**Then** a supported override exists without requiring manual database surgery.
+
 ## Epic 7: Ambient Messaging Intelligence
 
 Users interact with the platform through Telegram — asking questions, capturing notes, and receiving proactive morning briefs — without opening a dedicated interface. The platform comes to them, augmented by live web search when local knowledge is insufficient.

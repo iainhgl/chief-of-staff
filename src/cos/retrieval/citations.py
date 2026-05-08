@@ -33,3 +33,17 @@ def format_citations(results: CitedResults) -> str:
         f"(chunk {chunk.chunk_index}, score {chunk.score:.3f})"
         for index, chunk in enumerate(results, start=1)
     )
+
+
+def prune_citations(
+    results: CitedResults,
+    max_chunks_per_source: int,
+) -> CitedResults:
+    seen: dict[str, int] = {}
+    pruned: CitedResults = []
+    for chunk in results:
+        count = seen.get(chunk.source_locator, 0)
+        if count < max_chunks_per_source:
+            pruned.append(chunk)
+            seen[chunk.source_locator] = count + 1
+    return pruned

@@ -166,3 +166,86 @@ def test_coerce_priority_weight_list_str_first_match_wins() -> None:
     weight = _coerce_priority_weight(priorities, "/hr-frameworks-and-documents.md")
 
     assert weight == pytest.approx(2.0)
+
+
+# ── Threshold filtering tests (Story 6.13) ──────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_hybrid_search_high_min_score_filters_all_results(
+    migrated_db: None,
+    mock_embed: None,
+    tmp_path: Path,
+) -> None:
+    del migrated_db, mock_embed
+    config = make_test_config(tmp_path)
+    vector = [float(index) / 100 for index in range(1024)]
+
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        await _store_search_document(
+            conn,
+            source_path="/test/doc.md",
+            content="workforce segmentation framework",
+            vector=vector,
+        )
+        # max RRF score is ~0.033; setting min_score=1.0 filters everything
+        results = await hybrid_search("segmentation", conn, config, min_score=1.0)
+
+    assert results == []
+
+
+@pytest.mark.asyncio
+async def test_hybrid_search_zero_min_score_preserves_existing_behavior(
+    migrated_db: None,
+    mock_embed: None,
+    tmp_path: Path,
+) -> None:
+    del migrated_db, mock_embed
+    config = make_test_config(tmp_path)
+    vector = [float(index) / 100 for index in range(1024)]
+
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        await _store_search_document(
+            conn,
+            source_path="/test/hr-framework.md",
+            content="workforce segmentation framework",
+            vector=vector,
+        )
+        results = await hybrid_search("segmentation", conn, config, min_score=0.0)
+
+    assert len(results) == 1
+
+
+@pytest.mark.asyncio
+async def test_hybrid_search_role_priority_cannot_resurrect_filtered_chunk(
+    migrated_db: None,
+    mock_embed: None,
+    tmp_path: Path,
+) -> None:
+    del migrated_db, mock_embed
+    config = make_test_config(tmp_path)
+    vector = [float(index) / 100 for index in range(1024)]
+    role_pack = type(
+        "RolePack",
+        (),
+        {"retrieval_priorities": {"workforce": 9999.0}, "tone": ""},
+    )()
+
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        await _store_search_document(
+            conn,
+            source_path="workforce-planning.md",
+            content="workforce planning strategy",
+            vector=vector,
+        )
+        # min_score=1.0 means raw RRF (never exceeds ~0.033) is always below threshold;
+        # role priority weight of 9999x must not resurrect the filtered chunk
+        results = await hybrid_search(
+            "workforce planning",
+            conn,
+            config,
+            role_pack=role_pack,
+            min_score=1.0,
+        )
+
+    assert results == []

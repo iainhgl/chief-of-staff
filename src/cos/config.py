@@ -102,6 +102,11 @@ class McpNoteIngestConfig(BaseModel):
     near_duplicate_threshold: float = Field(default=0.95, ge=0.0, le=1.0)
 
 
+class RetrievalConfig(BaseModel):
+    min_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    max_chunks_per_source: int = Field(default=2, ge=1)
+
+
 class CosConfig(BaseModel):
     llm: LLMConfig
     embedding: EmbeddingConfig
@@ -116,6 +121,7 @@ class CosConfig(BaseModel):
     gmail: GmailConnectorConfig | None = None
     google_calendar: GoogleCalendarConnectorConfig | None = None
     mcp_note: McpNoteIngestConfig | None = None
+    retrieval: RetrievalConfig = RetrievalConfig()
 
     @classmethod
     def load(cls, path: str | Path = "config.yaml") -> "CosConfig":

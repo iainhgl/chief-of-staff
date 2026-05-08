@@ -55,6 +55,7 @@ async def hybrid_search(
     config: CosConfig,
     role_pack: RolePackConfig | None = None,
     top_k: int = 10,
+    min_score: float = 0.0,
 ) -> CitedResults:
     if not query.strip():
         return []
@@ -210,7 +211,11 @@ async def hybrid_search(
             source_alias = legacy_path
             source_locator = legacy_path
 
-        final_score = float(entry["score"])
+        raw_rrf_score = float(entry["score"])
+        if raw_rrf_score < min_score:
+            continue
+
+        final_score = raw_rrf_score
         if retrieval_priorities is not None:
             final_score *= _coerce_priority_weight(retrieval_priorities, source_alias)
 
