@@ -12,6 +12,10 @@ def test_migration_files_exist() -> None:
     assert (migrations_dir / "002_jobs.sql").exists()
     assert (migrations_dir / "003_search_indexes.sql").exists()
     assert (migrations_dir / "004_canonical_identity.sql").exists()
+    assert (migrations_dir / "005_gmail_pending_job_dedupe.sql").exists()
+    assert (
+        migrations_dir / "006_gmail_pending_job_dedupe_force_repair.sql"
+    ).exists()
 
 
 async def test_run_migrations_creates_all_tables(migrated_db, db_conn) -> None:
@@ -207,6 +211,18 @@ async def test_jobs_table_has_required_columns(migrated_db, db_conn) -> None:
         "created_at",
         "updated_at",
     }
+
+
+async def test_gmail_pending_job_dedupe_index_exists(
+    migrated_db,
+    db_conn,
+) -> None:
+    result = await db_conn.execute(
+        "SELECT indexname FROM pg_indexes "
+        "WHERE schemaname = 'public' AND tablename = 'jobs' "
+        "AND indexname = 'idx_jobs_ingest_gmail_pending_unique'"
+    )
+    assert await result.fetchone() is not None
 
 
 def test_search_indexes_migration_is_idempotent() -> None:

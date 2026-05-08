@@ -174,9 +174,9 @@ async def test_poll_gmail_body_file_staged_on_disk(
         async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
             await poll_gmail(config, conn)
 
-    staged = staging_dir / "msg-003_body.md"
-    assert staged.exists()
-    assert "Important content" in staged.read_text()
+    staged_files = list(staging_dir.glob("msg-003_body_*.md"))
+    assert len(staged_files) == 1
+    assert "Important content" in staged_files[0].read_text()
 
 
 # ── attachment job submission ─────────────────────────────────────────────────
@@ -678,6 +678,44 @@ async def test_second_sync_reenqueues_changed_body_content(
     assert result.artifacts_already_processed == 0
 
 
+async def test_reverting_to_previous_body_content_reenqueues_against_latest_version(
+    migrated_db: None,
+    tmp_path: Path,
+    mock_embed: None,
+) -> None:
+    """A -> B -> A should enqueue A again because B is the latest processed version."""
+    staging_dir = tmp_path / "staging"
+    config = make_test_config(tmp_path)
+    config = config.model_copy(
+        update={
+            "connectors": ["gmail"],
+            "gmail": GmailConnectorConfig(staging_dir=staging_dir),
+        }
+    )
+
+    msg_v1 = _plain_message("msg-revert-body-001", body="Body version A")
+    msg_v2 = _plain_message("msg-revert-body-001", body="Body version B")
+
+    from cos.services.jobs import process_next_ingest_job
+
+    with _patch_gmail(["msg-revert-body-001"], {"msg-revert-body-001": msg_v1}):
+        async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+            await poll_gmail(config, conn)
+    await process_next_ingest_job(TEST_DSN, config)
+
+    with _patch_gmail(["msg-revert-body-001"], {"msg-revert-body-001": msg_v2}):
+        async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+            await poll_gmail(config, conn)
+    await process_next_ingest_job(TEST_DSN, config)
+
+    with _patch_gmail(["msg-revert-body-001"], {"msg-revert-body-001": msg_v1}):
+        async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+            result = await poll_gmail(config, conn)
+
+    assert result.body_jobs_enqueued == 1
+    assert result.artifacts_already_processed == 0
+
+
 async def test_second_sync_with_pending_body_job_does_not_duplicate(
     migrated_db: None,
     tmp_path: Path,
@@ -1017,6 +1055,46 @@ async def test_force_flag_bypasses_pending_job_skip(
 
     assert result.body_jobs_enqueued == 1
     assert result.artifacts_already_queued == 0
+
+
+async def test_force_reenqueue_uses_distinct_staged_paths(
+    migrated_db: None,
+    tmp_path: Path,
+) -> None:
+    """Forced re-enqueues keep separate staged snapshots for each queued job."""
+    staging_dir = tmp_path / "staging"
+    config = make_test_config(tmp_path)
+    config = config.model_copy(
+        update={
+            "connectors": ["gmail"],
+            "gmail": GmailConnectorConfig(staging_dir=staging_dir),
+        }
+    )
+
+    msg = _plain_message("msg-force-stage-001", body="Body content")
+
+    with _patch_gmail(["msg-force-stage-001"], {"msg-force-stage-001": msg}):
+        async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+            await poll_gmail(config, conn)
+
+    with _patch_gmail(["msg-force-stage-001"], {"msg-force-stage-001": msg}):
+        async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+            result = await poll_gmail(config, conn, force=True)
+
+    assert result.body_jobs_enqueued == 1
+
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        rows = await (
+            await conn.execute(
+                "SELECT payload->>'staged_path' FROM jobs "
+                "WHERE payload->>'source_locator' = 'gmail://message/msg-force-stage-001/body' "
+                "ORDER BY created_at ASC"
+            )
+        ).fetchall()
+
+    staged_paths = [row[0] for row in rows]
+    assert len(staged_paths) == 2
+    assert staged_paths[0] != staged_paths[1]
 
 
 # ── helper: txt attachment message ───────────────────────────────────────────
