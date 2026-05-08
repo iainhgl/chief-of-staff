@@ -250,7 +250,8 @@ async def test_query_llm_receives_only_pruned_context(
         "cos.services.retrieval.hybrid_search",
         new=AsyncMock(return_value=pruned_results),
     ):
-        await service.query("HR planning", role_pack=None)
+        # compare query keeps multi-source evidence so both chunks reach the LLM
+        await service.query("compare HR planning across all sources", role_pack=None)
 
     call_kwargs = mock_llm_adapter.complete.call_args.kwargs
     context = call_kwargs["context"]
@@ -278,7 +279,8 @@ async def test_query_citations_match_pruned_evidence_set(
         "cos.services.retrieval.hybrid_search",
         new=AsyncMock(return_value=pruned_results),
     ):
-        response = await service.query("HR planning", role_pack=None)
+        # compare query keeps multi-source evidence so citations match the full set
+        response = await service.query("compare HR documents", role_pack=None)
 
     assert response.citations == pruned_results
 
@@ -326,3 +328,233 @@ async def test_query_adds_query_type_instruction_to_prompt(
 
     prompt = mock_llm_adapter.complete.call_args.kwargs["prompt"]
     assert expected_fragment in prompt
+
+
+# ── Grounding tests (Story 6.14) ──────────────────────────────────────────────
+
+
+def _make_versioned_chunk(
+    source_locator: str,
+    document_version_id: str,
+    score: float,
+    chunk_index: int = 0,
+    content: str = "",
+) -> CitedChunk:
+    return CitedChunk(
+        content=content or f"content from {source_locator}",
+        source_document_id="12345678-1234-1234-1234-123456789012",
+        source_alias=source_locator,
+        source_locator=source_locator,
+        document_version_id=document_version_id,
+        chunk_index=chunk_index,
+        score=score,
+    )
+
+
+@pytest.mark.asyncio
+async def test_direct_factual_query_narrows_to_single_lineage(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+) -> None:
+    # Mixed corpus: two distinct lineages — Gmail note and local file
+    gmail_chunk = _make_versioned_chunk(
+        "gmail://msg-001", "ver-aaa-001", 0.9, 0, "leave policy from email"
+    )
+    local_chunk = _make_versioned_chunk(
+        "/docs/leave-policy.md", "ver-bbb-001", 0.7, 0, "leave policy from file"
+    )
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with patch(
+        "cos.services.retrieval.hybrid_search",
+        new=AsyncMock(return_value=[gmail_chunk, local_chunk]),
+    ):
+        response = await service.query(
+            "what is the leave policy?", role_pack=None
+        )
+
+    # Only the highest-ranked lineage (gmail) should survive into citations
+    assert len(response.citations) == 1
+    assert response.citations[0].source_locator == "gmail://msg-001"
+    assert response.citations[0].document_version_id == "ver-aaa-001"
+
+
+@pytest.mark.asyncio
+async def test_compare_query_allows_multi_source_evidence(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+) -> None:
+    gmail_chunk = _make_versioned_chunk(
+        "gmail://msg-001", "ver-aaa-001", 0.9, 0, "leave policy from email"
+    )
+    local_chunk = _make_versioned_chunk(
+        "/docs/leave-policy.md", "ver-bbb-001", 0.7, 0, "leave policy from file"
+    )
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with patch(
+        "cos.services.retrieval.hybrid_search",
+        new=AsyncMock(return_value=[gmail_chunk, local_chunk]),
+    ):
+        response = await service.query(
+            "compare the leave policy email vs the local file", role_pack=None
+        )
+
+    # Both lineages survive when an explicit compare query is used
+    assert len(response.citations) == 2
+
+
+@pytest.mark.asyncio
+async def test_explicit_summary_query_across_two_sources_keeps_multi_source_evidence(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+) -> None:
+    gmail_chunk = _make_versioned_chunk(
+        "gmail://msg-001", "ver-aaa-001", 0.9, 0, "leave policy from email"
+    )
+    local_chunk = _make_versioned_chunk(
+        "/docs/leave-policy.md", "ver-bbb-001", 0.7, 0, "leave policy from file"
+    )
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with patch(
+        "cos.services.retrieval.hybrid_search",
+        new=AsyncMock(return_value=[gmail_chunk, local_chunk]),
+    ):
+        response = await service.query(
+            "summarise the email and the local file", role_pack=None
+        )
+
+    assert len(response.citations) == 2
+
+
+@pytest.mark.asyncio
+async def test_single_source_query_with_aggregate_word_still_grounds_to_one_lineage(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+) -> None:
+    primary_chunk = _make_versioned_chunk(
+        "gmail://msg-001", "ver-aaa-001", 0.9, 0, "aggregate retention rate is 12%"
+    )
+    sibling_chunk = _make_versioned_chunk(
+        "/docs/retention.md", "ver-bbb-001", 0.7, 0, "aggregate retention rate is 9%"
+    )
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with patch(
+        "cos.services.retrieval.hybrid_search",
+        new=AsyncMock(return_value=[primary_chunk, sibling_chunk]),
+    ):
+        response = await service.query(
+            "what is the aggregate retention rate?", role_pack=None
+        )
+
+    assert len(response.citations) == 1
+    assert response.citations[0].source_locator == "gmail://msg-001"
+
+
+@pytest.mark.asyncio
+async def test_grounding_no_usable_lineage_returns_no_content(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+) -> None:
+    # hybrid_search returns an empty list (already filtered to nothing)
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with patch(
+        "cos.services.retrieval.hybrid_search",
+        new=AsyncMock(return_value=[]),
+    ):
+        response = await service.query("what is the retention rate?", role_pack=None)
+
+    assert "no relevant content" in (response.answer or "").lower()
+    assert response.citations == []
+    mock_llm_adapter.complete.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_legacy_backfill_uses_source_locator_as_lineage_key(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+) -> None:
+    # Both chunks have empty document_version_id (legacy/backfilled records)
+    # Lineage key falls back to source_locator
+    primary_chunk = _make_chunk_from_source("/docs/primary.md", 0.9, 0, "primary")
+    sibling_chunk = _make_chunk_from_source("/docs/sibling.md", 0.7, 0, "sibling")
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with patch(
+        "cos.services.retrieval.hybrid_search",
+        new=AsyncMock(return_value=[primary_chunk, sibling_chunk]),
+    ):
+        response = await service.query(
+            "what does primary say?", role_pack=None
+        )
+
+    # Only primary.md chunks survive because source_locator is the lineage key
+    assert len(response.citations) == 1
+    assert response.citations[0].source_locator == "/docs/primary.md"
+
+
+@pytest.mark.asyncio
+async def test_direct_factual_query_multiple_chunks_same_lineage_all_survive(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+) -> None:
+    # Both chunks from the same document_version_id — both should survive grounding
+    chunk_a = _make_versioned_chunk(
+        "gmail://msg-001", "ver-aaa-001", 0.9, 0, "chunk A from email"
+    )
+    chunk_b = _make_versioned_chunk(
+        "gmail://msg-001", "ver-aaa-001", 0.8, 1, "chunk B from email"
+    )
+    sibling = _make_versioned_chunk(
+        "/docs/other.md", "ver-bbb-001", 0.6, 0, "unrelated file"
+    )
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with patch(
+        "cos.services.retrieval.hybrid_search",
+        new=AsyncMock(return_value=[chunk_a, chunk_b, sibling]),
+    ):
+        response = await service.query(
+            "what did the email say about leave?", role_pack=None
+        )
+
+    assert len(response.citations) == 2
+    assert all(c.document_version_id == "ver-aaa-001" for c in response.citations)

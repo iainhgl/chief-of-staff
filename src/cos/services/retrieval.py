@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -7,8 +8,80 @@ from psycopg_pool import AsyncConnectionPool
 
 from cos.config import CosConfig
 from cos.llm.adapter import LLMAdapter
-from cos.retrieval.citations import CitedResponse
+from cos.retrieval.citations import CitedResponse, narrow_to_lineage
 from cos.retrieval.search import hybrid_search
+
+_COMPARE_SIGNALS = (
+    "compare ",
+    "comparison between",
+    "differences between",
+    " vs ",
+    " versus ",
+)
+
+_EXPLICIT_MULTI_SOURCE_SIGNALS = (
+    "from all sources",
+    "across sources",
+    "multiple sources",
+)
+
+_SYNTHESIS_SIGNALS = (
+    "summarise",
+    "summarize",
+    "summary of",
+    "brief me on",
+    "brief on",
+    "synthesise",
+    "synthesize",
+    "synthesis of",
+    "combine",
+    "combined",
+    "using both",
+    "use both",
+)
+
+_AGGREGATION_SIGNALS = (
+    "aggregate",
+    "aggregated",
+)
+
+_SOURCE_TERM_PATTERN = (
+    r"(?:source|sources|document|documents|doc|docs|file|files|email|emails|"
+    r"message|messages|note|notes|record|records)"
+)
+
+_MULTI_SOURCE_REFERENCE_PATTERNS = (
+    re.compile(rf"\bboth\b.*\b{_SOURCE_TERM_PATTERN}\b"),
+    re.compile(rf"\b{_SOURCE_TERM_PATTERN}\b.*\band\b.*\b{_SOURCE_TERM_PATTERN}\b"),
+    re.compile(
+        rf"\b(?:between|across all)\b.*\b{_SOURCE_TERM_PATTERN}\b"
+    ),
+)
+
+
+def _contains_any(text: str, signals: tuple[str, ...]) -> bool:
+    return any(signal in text for signal in signals)
+
+
+def _mentions_multiple_sources(text: str) -> bool:
+    return any(pattern.search(text) for pattern in _MULTI_SOURCE_REFERENCE_PATTERNS)
+
+
+def _is_multi_source_query(text: str) -> bool:
+    """Return True if the query explicitly requests multi-source synthesis."""
+    t = text.lower()
+    if _contains_any(t, _COMPARE_SIGNALS):
+        return True
+    if _contains_any(t, _EXPLICIT_MULTI_SOURCE_SIGNALS):
+        return True
+    if _mentions_multiple_sources(t):
+        return True
+    if _contains_any(t, _SYNTHESIS_SIGNALS) and _mentions_multiple_sources(t):
+        return True
+    if _contains_any(t, _AGGREGATION_SIGNALS) and _mentions_multiple_sources(t):
+        return True
+    return False
+
 
 _TASK_INSTRUCTIONS: dict[str, str] = {
     "draft": (
@@ -105,6 +178,15 @@ class RetrievalService:
                 min_score=self._config.retrieval.min_score,
                 max_chunks_per_source=self._config.retrieval.max_chunks_per_source,
             )
+
+        if not cited_results:
+            return CitedResponse(
+                answer="No relevant content found in the knowledge base.",
+                citations=[],
+            )
+
+        if not _is_multi_source_query(text):
+            cited_results = narrow_to_lineage(cited_results)
 
         if not cited_results:
             return CitedResponse(
