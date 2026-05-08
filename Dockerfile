@@ -15,4 +15,4 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY src/ ./src/
 RUN uv sync --frozen --no-dev
 
-ENTRYPOINT ["uv", "run", "cos-mcp"]
+CMD ["uv", "run", "cos-mcp"]

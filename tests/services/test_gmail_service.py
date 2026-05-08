@@ -404,6 +404,64 @@ async def test_poll_gmail_inline_attachments_without_ids_get_unique_paths(
     }
 
 
+async def test_poll_gmail_long_attachment_id_uses_short_staged_filename(
+    migrated_db: None,
+    tmp_path: Path,
+) -> None:
+    staging_dir = tmp_path / "staging"
+    config = make_test_config(tmp_path)
+    config = config.model_copy(
+        update={
+            "connectors": ["gmail"],
+            "gmail": GmailConnectorConfig(staging_dir=staging_dir),
+        }
+    )
+
+    long_attachment_id = "att-" + ("x" * 400)
+    markdown_bytes = b"long attachment id content"
+    msg = {
+        "id": "msg-033",
+        "threadId": "thread-msg-033",
+        "internalDate": "1746518400000",
+        "payload": {
+            "mimeType": "multipart/mixed",
+            "headers": [{"name": "Subject", "value": "Long attachment id"}],
+            "parts": [
+                {"mimeType": "text/plain", "body": {"data": _b64url(b"body")}},
+                {
+                    "mimeType": "text/markdown",
+                    "filename": "shared-note.md",
+                    "body": {"attachmentId": long_attachment_id},
+                },
+            ],
+        },
+    }
+
+    with _patch_gmail(
+        ["msg-033"],
+        {"msg-033": msg},
+        {("msg-033", long_attachment_id): markdown_bytes},
+    ):
+        async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+            result = await poll_gmail(config, conn)
+
+    assert result.attachment_jobs_enqueued == 1
+
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        row = await (
+            await conn.execute(
+                "SELECT payload->>'staged_path', payload->>'source_locator' "
+                "FROM jobs WHERE payload->>'source_type' = 'gmail_attachment'"
+            )
+        ).fetchone()
+
+    assert row is not None
+    staged_path, source_locator = row
+    assert staged_path is not None
+    assert len(Path(staged_path).name) <= 240
+    assert source_locator == f"gmail://message/msg-033/attachment/{long_attachment_id}"
+
+
 # ── empty poll ────────────────────────────────────────────────────────────────
 
 async def test_poll_gmail_returns_zero_counts_for_empty_inbox(
