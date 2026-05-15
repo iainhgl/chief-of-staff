@@ -1,6 +1,6 @@
 # Story 6.15: Gmail Processed-Message Semantics and Requeue Prevention
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 

@@ -694,29 +694,36 @@ This pack validates grounded retrieval and citations across local, Gmail, Calend
 
 ### Pack-specific setup
 
-Seed one record for each source type used in retrieval.
+Seed one record for each source type used in retrieval, plus one deliberate
+“sibling record” pair for the single-source grounding checks.
 
 Create and ingest a local file:
 
 ```bash
 mkdir -p data/uat-docs/retrieval
 printf '%s' 'Epic 6 retrieval local note. Marker: epic-6-retrieval-local-a. Workforce segmentation framework lives here.' > data/uat-docs/retrieval/epic-6-retrieval-local.md
+printf '%s' 'Epic 6 retrieval local leave policy note. Marker: epic-6-retrieval-local-leave-a. Local file says the leave policy allows 20 days.' > data/uat-docs/retrieval/epic-6-retrieval-local-leave.md
 docker compose exec cos uv run cos ingest /data/uat-docs/retrieval/epic-6-retrieval-local.md
+docker compose exec cos uv run cos ingest /data/uat-docs/retrieval/epic-6-retrieval-local-leave.md
 ```
 
-Seed one Gmail message:
+Seed two Gmail messages:
 
 1. Send yourself an email with:
    - subject: `Epic 6 Retrieval Gmail`
    - body text: `epic-6-retrieval-gmail-a`
    - label: `cos-uat`
-2. Authenticate if needed:
+2. Send yourself a second email with:
+   - subject: `Epic 6 Retrieval Gmail Leave Policy`
+   - body text: `epic-6-retrieval-gmail-leave-a. Email says the leave policy allows 25 days.`
+   - label: `cos-uat`
+3. Authenticate if needed:
 
 ```bash
 uv run cos auth gmail
 ```
 
-3. Sync Gmail:
+4. Sync Gmail:
 
 ```bash
 docker compose exec cos uv run cos sync gmail
@@ -785,6 +792,64 @@ Expected:
 - answers are grounded rather than fabricated
 - citations include `source_alias` and `source_locator`
 - the cited aliases and locators correspond to the seeded Gmail, Calendar, MCP, or local records
+
+### Story 6.14 grounding spot checks
+
+In the same MCP client session, ask a direct factual question about the
+leave-policy email:
+
+```text
+Use retrieve to answer: what did the Epic 6 Retrieval Gmail Leave Policy message say about leave?
+```
+
+Then ask an explicit comparison query:
+
+```text
+Use retrieve to answer: compare the Epic 6 Retrieval Gmail Leave Policy message vs the Epic 6 retrieval local leave policy note.
+```
+
+Expected:
+
+- the direct factual query stays grounded to one source lineage
+- the direct factual query answer reflects the Gmail message's `25 days` statement
+- the direct factual query citations point only to the Gmail leave-policy record, not the local leave-policy file
+- the explicit compare query is allowed to use multi-source evidence
+- the compare query citations include both the Gmail leave-policy record and the local leave-policy file
+- the compare query does not pull in unrelated seeded records such as the Calendar event or the workforce-planning MCP note
+
+### Story 6.13 threshold fallback spot check
+
+Temporarily raise the retrieval threshold high enough that no result can
+survive filtering.
+
+Edit `config.yaml` and add or update:
+
+```yaml
+retrieval:
+  min_score: 1.0
+```
+
+Restart the platform:
+
+```bash
+docker compose restart cos
+docker compose ps
+```
+
+Then rerun one of the known-good retrieval questions, for example:
+
+```text
+Use retrieve to answer: what does the Epic 6 retrieval local note say about workforce segmentation?
+```
+
+Expected:
+
+- the response still comes back through the normal MCP envelope
+- the answer is exactly `No relevant content found in the knowledge base.`
+- both top-level `citations` and `data.citations` are empty
+
+After this check, restore your previous `retrieval.min_score` value and restart
+the `cos` container again before moving on to the restart pack.
 
 ---
 
@@ -926,11 +991,14 @@ Epic 6 UAT is a pass when all of the following are true:
 - post-restart Gmail and Calendar syncs complete without browser re-authorisation
 - post-restart jobs drain back to no long-lived backlog
 
-### 5. Retrieval remains grounded
+### 5. Retrieval hardening remains correct
 
 - retrieval responses remain grounded after connected-source ingestion
+- direct factual queries stay on a single source lineage when sibling records disagree
+- explicit compare/synthesis queries can still use multi-source evidence
 - citations include `source_alias` and `source_locator`
 - the cited sources correspond to the seeded local, Gmail, Calendar, or MCP records
+- when `retrieval.min_score` is temporarily raised high enough to filter everything out, `retrieve` returns `No relevant content found in the knowledge base.` with empty citations rather than a weakly grounded answer
 
 ---
 
