@@ -1,6 +1,6 @@
 # Story 6.6: OAuth Authentication Setup for Gmail and Calendar
 
-Status: review
+Status: done
 
 ## Story
 
