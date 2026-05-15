@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import psycopg
 
@@ -23,6 +24,7 @@ from cos.connectors.gmail import (
 )
 from cos.services.ingestion import SUPPORTED_SUFFIXES
 from cos.services.jobs import submit_ingest_job
+from cos.store.db import has_pending_job_for_locator, has_processed_artifact
 
 _CONNECTOR = "gmail"
 _BODY_MIME_TYPES = frozenset({"text/plain", "text/html"})
@@ -40,13 +42,21 @@ class GmailPollResult:
     body_jobs_enqueued: int
     attachment_jobs_enqueued: int
     attachments_skipped: int
+    artifacts_already_processed: int = 0
+    artifacts_already_queued: int = 0
 
 
 async def poll_gmail(
     config: CosConfig,
     conn: psycopg.AsyncConnection[Any],
+    force: bool = False,
 ) -> GmailPollResult:
-    """Poll Gmail for new messages, stage artifacts, and enqueue ingest jobs."""
+    """Poll Gmail for new messages, stage artifacts, and enqueue ingest jobs.
+
+    By default, artifacts that have already been successfully processed or that
+    already have a queued/running job with the same content are skipped.  Pass
+    ``force=True`` to bypass those checks for the current run only.
+    """
     gmail_config = config.gmail or GmailConnectorConfig()
     staging_dir = gmail_config.staging_dir
     staging_dir.mkdir(parents=True, exist_ok=True)
@@ -57,6 +67,8 @@ async def poll_gmail(
     body_jobs = 0
     attachment_jobs = 0
     attachments_skipped = 0
+    already_processed = 0
+    already_queued = 0
 
     for message_id in message_ids:
         try:
@@ -82,22 +94,39 @@ async def poll_gmail(
         # Stage message body
         body_text = extract_body_text(message)
         body_content = _format_body_md(from_addr, subject, internal_date, body_text)
-        body_staged = staging_dir / f"{message_id}_body.md"
-        body_staged.write_text(body_content, encoding="utf-8")
+        body_locator = f"gmail://message/{message_id}/body"
+        body_fingerprint = _compute_fingerprint(body_content.encode("utf-8"))
+        body_metadata = {**base_metadata, "content_fingerprint": body_fingerprint}
+        if force:
+            body_metadata["force_reenqueue"] = True
 
-        await submit_ingest_job(
-            conn,
-            staged_path=str(body_staged),
-            source_type="gmail_message_body",
-            source_locator=f"gmail://message/{message_id}/body",
-            source_alias=_body_alias(subject, message_id),
-            metadata={**base_metadata},
-        )
-        body_jobs += 1
+        skip = await _check_skip(conn, "gmail_message_body", body_locator, body_fingerprint, force)
+        if skip == "processed":
+            already_processed += 1
+        elif skip == "pending":
+            already_queued += 1
+        else:
+            body_staged = _build_staged_path(
+                staging_dir=staging_dir,
+                stem=f"{message_id}_body",
+                suffix=".md",
+            )
+            body_staged.write_text(body_content, encoding="utf-8")
+            if await _submit_gmail_job(
+                conn,
+                staged_path=body_staged,
+                source_type="gmail_message_body",
+                source_locator=body_locator,
+                source_alias=_body_alias(subject, message_id),
+                metadata=body_metadata,
+            ):
+                body_jobs += 1
+            else:
+                already_queued += 1
 
         # Stage supported attachments
-        payload = message.get("payload", {})
-        for part_index, part in enumerate(walk_mime_parts(payload)):
+        msg_payload = message.get("payload", {})
+        for part_index, part in enumerate(walk_mime_parts(msg_payload)):
             body_info = part.get("body", {})
             attachment_id = body_info.get("attachmentId")
             inline_data = body_info.get("data", "")
@@ -143,27 +172,98 @@ async def poll_gmail(
                 attachments_skipped += 1
                 continue
 
+            att_locator = f"gmail://message/{message_id}/attachment/{attachment_slug}"
+            att_fingerprint = _compute_fingerprint(att_bytes)
+            att_metadata = {
+                **base_metadata,
+                "mime_type": mime_type,
+                "content_fingerprint": att_fingerprint,
+            }
+            if force:
+                att_metadata["force_reenqueue"] = True
+
+            skip = await _check_skip(conn, "gmail_attachment", att_locator, att_fingerprint, force)
+            if skip == "processed":
+                already_processed += 1
+                continue
+            if skip == "pending":
+                already_queued += 1
+                continue
+
             source_alias = filename or f"attachment-{attachment_slug}{suffix}"
-            staged_name = _staged_attachment_name(message_id, attachment_slug, suffix)
-            att_staged = staging_dir / staged_name
+            att_staged = _build_staged_path(
+                staging_dir=staging_dir,
+                stem=f"{message_id}_{attachment_slug}",
+                suffix=suffix,
+            )
             att_staged.write_bytes(att_bytes)
 
-            await submit_ingest_job(
+            if await _submit_gmail_job(
                 conn,
-                staged_path=str(att_staged),
+                staged_path=att_staged,
                 source_type="gmail_attachment",
-                source_locator=f"gmail://message/{message_id}/attachment/{attachment_slug}",
+                source_locator=att_locator,
                 source_alias=source_alias,
-                metadata={**base_metadata, "mime_type": mime_type},
-            )
-            attachment_jobs += 1
+                metadata=att_metadata,
+            ):
+                attachment_jobs += 1
+            else:
+                already_queued += 1
 
     return GmailPollResult(
         messages_scanned=len(message_ids),
         body_jobs_enqueued=body_jobs,
         attachment_jobs_enqueued=attachment_jobs,
         attachments_skipped=attachments_skipped,
+        artifacts_already_processed=already_processed,
+        artifacts_already_queued=already_queued,
     )
+
+
+def _compute_fingerprint(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
+
+
+async def _submit_gmail_job(
+    conn: psycopg.AsyncConnection[Any],
+    staged_path: Path,
+    source_type: str,
+    source_locator: str,
+    source_alias: str,
+    metadata: dict[str, Any],
+) -> bool:
+    """Submit a Gmail ingest job, tolerating concurrent duplicate inserts."""
+    try:
+        async with conn.transaction():
+            await submit_ingest_job(
+                conn,
+                staged_path=str(staged_path),
+                source_type=source_type,
+                source_locator=source_locator,
+                source_alias=source_alias,
+                metadata=metadata,
+            )
+    except psycopg.errors.UniqueViolation:
+        staged_path.unlink(missing_ok=True)
+        return False
+    return True
+
+
+async def _check_skip(
+    conn: psycopg.AsyncConnection[Any],
+    source_type: str,
+    source_locator: str,
+    fingerprint: str,
+    force: bool,
+) -> str | None:
+    """Return 'processed', 'pending', or None (should enqueue)."""
+    if force:
+        return None
+    if await has_processed_artifact(conn, source_type, source_locator, fingerprint):
+        return "processed"
+    if await has_pending_job_for_locator(conn, source_locator, fingerprint):
+        return "pending"
+    return None
 
 
 def _format_body_md(
@@ -222,15 +322,23 @@ def _attachment_slug(part: dict[str, Any], attachment_id: Any, part_index: int) 
     return clean or f"part-{part_index}"
 
 
-def _staged_attachment_name(message_id: str, attachment_slug: str, suffix: str) -> str:
-    base = f"{message_id}_{attachment_slug}"
-    candidate = f"{base}{suffix}"
-    if len(candidate) <= 240:
-        return candidate
+def _build_staged_path(staging_dir: Path, stem: str, suffix: str) -> Path:
+    """Create a per-enqueue staged file path that preserves the queued snapshot."""
+    token = uuid4().hex[:8]
+    max_name_length = 240
+    max_stem_length = max_name_length - len(suffix) - len(token) - 1
+    safe_stem = _truncate_stem(stem, max_stem_length)
+    return staging_dir / f"{safe_stem}_{token}{suffix}"
 
-    digest = hashlib.sha256(base.encode("utf-8")).hexdigest()[:16]
-    truncated_slug = attachment_slug[:80].rstrip("._-") or "attachment"
-    return f"{message_id}_{truncated_slug}_{digest}{suffix}"
+
+def _truncate_stem(stem: str, max_length: int) -> str:
+    if len(stem) <= max_length:
+        return stem
+
+    digest = hashlib.sha256(stem.encode("utf-8")).hexdigest()[:16]
+    prefix_length = max(max_length - len(digest) - 1, 1)
+    truncated = stem[:prefix_length].rstrip("._-") or "artifact"
+    return f"{truncated}_{digest}"
 
 
 def _header_value(headers: Any, name: str) -> str:

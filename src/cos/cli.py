@@ -42,7 +42,13 @@ def auth_calendar() -> None:
 
 
 @sync_app.command("gmail")
-def sync_gmail() -> None:
+def sync_gmail(
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Re-enqueue all matching artifacts for this run, bypassing skip checks.",
+    ),
+) -> None:
     """Poll Gmail for new messages and enqueue background ingest jobs."""
     try:
         config = CosConfig.load()
@@ -53,7 +59,7 @@ def sync_gmail() -> None:
                 err=True,
             )
             raise typer.Exit(code=1)
-        result = asyncio.run(_do_sync_gmail(config))
+        result = asyncio.run(_do_sync_gmail(config, force=force))
     except SystemExit as exc:
         typer.echo(f"Gmail sync configuration error: {exc}", err=True)
         raise typer.Exit(code=1)
@@ -70,6 +76,8 @@ def sync_gmail() -> None:
     typer.echo(f"  {result.messages_scanned} messages scanned")
     typer.echo(f"  {result.body_jobs_enqueued} body jobs enqueued")
     typer.echo(f"  {result.attachment_jobs_enqueued} attachment jobs enqueued")
+    typer.echo(f"  {result.artifacts_already_processed} artifacts already processed (skipped)")
+    typer.echo(f"  {result.artifacts_already_queued} artifacts already queued (skipped)")
     typer.echo(f"  {result.attachments_skipped} unsupported attachments skipped")
 
 
@@ -113,13 +121,13 @@ def sync_calendar() -> None:
     typer.echo(f"  {result.jobs_enqueued} jobs enqueued")
 
 
-async def _do_sync_gmail(config: CosConfig) -> Any:
+async def _do_sync_gmail(config: CosConfig, force: bool = False) -> Any:
     from cos.services.gmail import poll_gmail
 
     async with await psycopg.AsyncConnection.connect(
         config.database.libpq_dsn
     ) as conn:
-        return await poll_gmail(config, conn)
+        return await poll_gmail(config, conn, force=force)
 
 
 async def _do_sync_calendar(config: CosConfig) -> Any:

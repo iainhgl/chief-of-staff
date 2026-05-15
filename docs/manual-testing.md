@@ -270,7 +270,7 @@ Expected:
 - `uv run cos auth gmail` completes successfully and creates `tokens/gmail.json`
 - the sync command prints a completion summary
 - at least one message is scanned
-- body jobs are enqueued
+- body jobs are enqueued on the first run
 - attachment jobs are enqueued if you seeded supported attachments
 - worker logs show queued ingest jobs being processed
 - there is no long-lived build-up of `queued` or `running` jobs after the worker catches up
@@ -280,6 +280,38 @@ Expected:
 - Gmail attachment aliases use the attachment filename
 - Gmail locators begin with `gmail://message/`
 - if you used the same attachment bytes in two emails, at least one query row shows `distinct_sources >= 2` and `distinct_documents = 1`
+
+#### Repeated sync (skip semantics)
+
+After the worker has drained the queue, run the sync again:
+
+```bash
+docker compose exec cos uv run cos sync gmail
+```
+
+Expected output on the second run:
+
+```text
+Gmail sync complete:
+  <N> messages scanned
+  0 body jobs enqueued
+  0 attachment jobs enqueued
+  <N> artifacts already processed (skipped)
+  0 artifacts already queued (skipped)
+  0 unsupported attachments skipped
+```
+
+All previously processed artifacts should be skipped. The `artifacts already processed` count should equal the number of body + attachment sources ingested on the first run. No new jobs should appear in the queue.
+
+#### Intentional reprocessing with --force
+
+To force all matching artifacts to be re-staged and re-enqueued for the current run (useful after changing ingestion configuration):
+
+```bash
+docker compose exec cos uv run cos sync gmail --force
+```
+
+Expected: the summary shows body and attachment jobs enqueued again, with `0 artifacts already processed (skipped)`. The `--force` flag applies to that invocation only and does not change any persistent configuration.
 
 ---
 
