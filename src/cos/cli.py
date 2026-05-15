@@ -361,6 +361,68 @@ def docs(
 
 
 @app.command()
+def benchmark(
+    corpus: str = typer.Option(
+        "tests/fixtures/retrieval_eval",
+        "--corpus",
+        help="Path to the retrieval evaluation corpus directory.",
+    ),
+    include_fuzz: bool = typer.Option(
+        False,
+        "--include-fuzz",
+        help="Include stress/fuzz layer queries in the run.",
+    ),
+    output: str | None = typer.Option(
+        None,
+        "--output",
+        help="Write JSON report to this file path (default: print to stdout).",
+    ),
+) -> None:
+    """Run the retrieval benchmark harness and emit a structured report."""
+    try:
+        result = asyncio.run(
+            _run_benchmark(Path(corpus), include_fuzz=include_fuzz)
+        )
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        typer.echo(f"Benchmark failed: {exc}", err=True)
+        raise typer.Exit(code=1)
+
+    from cos.services.retrieval_eval import format_human_summary, report_to_dict
+
+    report_dict = report_to_dict(result)
+    typer.echo(format_human_summary(result))
+
+    if output:
+        output_path = Path(output)
+        output_path.write_text(json.dumps(report_dict, indent=2))
+        typer.echo(f"\nJSON report written to {output}")
+    else:
+        typer.echo("\n" + json.dumps(report_dict, indent=2))
+
+    if result.overall_pass_rate < 1.0:
+        raise typer.Exit(code=1)
+
+
+async def _run_benchmark(corpus_path: Path, include_fuzz: bool) -> object:
+    from cos.services.retrieval_eval import RetrievalEvalService
+    from cos.store.db import create_pool
+
+    config = CosConfig.load()
+    if not corpus_path.is_dir():
+        typer.echo(f"Error: corpus path not found: {corpus_path}", err=True)
+        raise typer.Exit(code=1)
+
+    pool = await create_pool(config.database.libpq_dsn)
+    try:
+        service = RetrievalEvalService(config, pool)
+        return await service.run_benchmark(corpus_path, include_stress_fuzz=include_fuzz)
+    finally:
+        await pool.close()
+
+
+@app.command()
 def migrate() -> None:
     """Backfill legacy documents onto the canonical identity model."""
     try:

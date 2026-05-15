@@ -1,0 +1,342 @@
+"""Service-level tests for the retrieval evaluation service."""
+
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from conftest import make_test_config
+
+from cos.retrieval.benchmark import BenchmarkQuery, CorpusError
+from cos.retrieval.citations import CitedChunk
+from cos.services.retrieval_eval import (
+    RetrievalEvalService,
+    _build_report,
+    format_human_summary,
+    report_to_dict,
+)
+
+_CORPUS_PATH = Path(__file__).parents[1] / "fixtures" / "retrieval_eval"
+
+
+def _make_pool(cited_results_by_query: dict) -> MagicMock:
+    """Return a mock pool whose hybrid_search side effect uses a query counter."""
+    mock_conn = AsyncMock()
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=mock_conn)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    pool = MagicMock()
+    pool.connection.return_value = cm
+    return pool
+
+
+def _make_cited_chunk(source_locator: str, source_alias: str = "") -> CitedChunk:
+    return CitedChunk(
+        content="fixture content",
+        source_document_id="12345678-1234-1234-1234-123456789012",
+        source_alias=source_alias or source_locator,
+        source_locator=source_locator,
+        document_version_id="",
+        chunk_index=0,
+        score=0.9,
+    )
+
+
+def _make_pool_with_connection() -> MagicMock:
+    mock_conn = AsyncMock()
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=mock_conn)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    pool = MagicMock()
+    pool.connection.return_value = cm
+    return pool
+
+
+# ── run_benchmark integration (mocked hybrid_search + seeding) ──────────────
+
+
+@pytest.mark.asyncio
+async def test_run_benchmark_loads_and_runs_all_gold_queries(tmp_path: Path) -> None:
+    config = make_test_config(tmp_path)
+    pool = _make_pool_with_connection()
+
+    call_count = 0
+
+    async def _fake_search(*args, **kwargs):  # type: ignore[no-untyped-def]
+        nonlocal call_count
+        call_count += 1
+        return []
+
+    with (
+        patch("cos.services.retrieval_eval.embed", new=AsyncMock(
+            return_value=[MagicMock(vector=[0.1] * 1024)]
+        )),
+        patch("cos.services.retrieval_eval.store_document_canonical", new=AsyncMock()),
+        patch("cos.services.retrieval_eval.hybrid_search", new=_fake_search),
+    ):
+        service = RetrievalEvalService(config, pool)
+        report = await service.run_benchmark(_CORPUS_PATH)
+
+    # Gold corpus has 7 queries (core-queries.yaml)
+    assert report.total_queries == 7
+    assert call_count == 7
+
+
+@pytest.mark.asyncio
+async def test_run_benchmark_with_fuzz_includes_fuzz_queries(tmp_path: Path) -> None:
+    config = make_test_config(tmp_path)
+    pool = _make_pool_with_connection()
+
+    with (
+        patch("cos.services.retrieval_eval.embed", new=AsyncMock(
+            return_value=[MagicMock(vector=[0.1] * 1024)]
+        )),
+        patch("cos.services.retrieval_eval.store_document_canonical", new=AsyncMock()),
+        patch("cos.services.retrieval_eval.hybrid_search", new=AsyncMock(return_value=[])),
+    ):
+        service = RetrievalEvalService(config, pool)
+        report = await service.run_benchmark(_CORPUS_PATH, include_stress_fuzz=True)
+
+    # Gold (7) + stress_fuzz (5) = 12
+    assert report.total_queries == 12
+
+
+@pytest.mark.asyncio
+async def test_run_benchmark_correct_answer_counted_as_passed(tmp_path: Path) -> None:
+    config = make_test_config(tmp_path)
+    pool = _make_pool_with_connection()
+
+    leave_chunk = _make_cited_chunk("local://local-leave-policy")
+
+    async def _fake_search(query, conn, cfg, **kwargs):  # type: ignore[no-untyped-def]
+        if "annual leave" in query.lower() or "leave policy" in query.lower():
+            return [leave_chunk]
+        return []
+
+    with (
+        patch("cos.services.retrieval_eval.embed", new=AsyncMock(
+            return_value=[MagicMock(vector=[0.1] * 1024)]
+        )),
+        patch("cos.services.retrieval_eval.store_document_canonical", new=AsyncMock()),
+        patch("cos.services.retrieval_eval.hybrid_search", new=_fake_search),
+    ):
+        service = RetrievalEvalService(config, pool)
+        report = await service.run_benchmark(_CORPUS_PATH)
+
+    per_query_by_id = {r.query_id: r for r in report.per_query}
+    df_result = per_query_by_id["gold-df-001"]
+    assert df_result.passed
+    assert df_result.answerability_verdict == "correct_answer"
+
+
+@pytest.mark.asyncio
+async def test_run_benchmark_no_answer_case_correct_when_empty(tmp_path: Path) -> None:
+    config = make_test_config(tmp_path)
+    pool = _make_pool_with_connection()
+
+    with (
+        patch("cos.services.retrieval_eval.embed", new=AsyncMock(
+            return_value=[MagicMock(vector=[0.1] * 1024)]
+        )),
+        patch("cos.services.retrieval_eval.store_document_canonical", new=AsyncMock()),
+        patch("cos.services.retrieval_eval.hybrid_search", new=AsyncMock(return_value=[])),
+    ):
+        service = RetrievalEvalService(config, pool)
+        report = await service.run_benchmark(_CORPUS_PATH)
+
+    per_query_by_id = {r.query_id: r for r in report.per_query}
+    na_result = per_query_by_id["gold-na-001"]
+    assert na_result.passed
+    assert na_result.answerability_verdict == "correct_no_answer"
+
+
+@pytest.mark.asyncio
+async def test_run_benchmark_single_lineage_class_applies_narrowing(tmp_path: Path) -> None:
+    config = make_test_config(tmp_path)
+    pool = _make_pool_with_connection()
+
+    chunk_a = _make_cited_chunk("local://local-leave-policy")
+    chunk_b = _make_cited_chunk("gmail://msg-leave-policy-001")
+    chunk_a.score = 0.9
+
+    returned_chunks = [chunk_a, chunk_b]
+
+    async def _fake_search(*args, **kwargs):  # type: ignore[no-untyped-def]
+        return list(returned_chunks)
+
+    with (
+        patch("cos.services.retrieval_eval.embed", new=AsyncMock(
+            return_value=[MagicMock(vector=[0.1] * 1024)]
+        )),
+        patch("cos.services.retrieval_eval.store_document_canonical", new=AsyncMock()),
+        patch("cos.services.retrieval_eval.hybrid_search", new=_fake_search),
+    ):
+        service = RetrievalEvalService(config, pool)
+        report = await service.run_benchmark(_CORPUS_PATH)
+
+    per_query_by_id = {r.query_id: r for r in report.per_query}
+    df_result = per_query_by_id["gold-df-001"]
+    # direct_fact → narrow_to_lineage → only highest-ranked lineage survives
+    assert len(df_result.actual_lineage) == 1
+    assert df_result.actual_lineage[0] == "local://local-leave-policy"
+
+
+@pytest.mark.asyncio
+async def test_run_benchmark_cross_doc_class_not_narrowed(tmp_path: Path) -> None:
+    config = make_test_config(tmp_path)
+    pool = _make_pool_with_connection()
+
+    chunk_a = _make_cited_chunk("local://local-leave-policy")
+    chunk_b = _make_cited_chunk("gmail://msg-leave-policy-001")
+
+    async def _fake_search(query, conn, cfg, **kwargs):  # type: ignore[no-untyped-def]
+        if "compare" in query.lower():
+            return [chunk_a, chunk_b]
+        return []
+
+    with (
+        patch("cos.services.retrieval_eval.embed", new=AsyncMock(
+            return_value=[MagicMock(vector=[0.1] * 1024)]
+        )),
+        patch("cos.services.retrieval_eval.store_document_canonical", new=AsyncMock()),
+        patch("cos.services.retrieval_eval.hybrid_search", new=_fake_search),
+    ):
+        service = RetrievalEvalService(config, pool)
+        report = await service.run_benchmark(_CORPUS_PATH)
+
+    per_query_by_id = {r.query_id: r for r in report.per_query}
+    cds_result = per_query_by_id["gold-cds-001"]
+    # cross_doc_synthesis is NOT narrowed → both lineages must survive
+    assert len(cds_result.actual_lineage) == 2
+
+
+# ── Report building and serialisation ────────────────────────────────────────
+
+
+def test_report_to_dict_contains_required_top_level_keys(tmp_path: Path) -> None:
+    from cos.retrieval.benchmark import QueryResult
+    results = [
+        QueryResult("q1", "direct_fact", True, 50.0, ["loc://a"], ["loc://a"], "correct_answer")
+    ]
+    per_class = aggregate_by_class_simple(results)
+    report = _build_report("2026-01-01T00:00:00+00:00", "abc123def456", results, per_class)
+    d = report_to_dict(report)
+
+    assert "run_timestamp" in d
+    assert "corpus_version" in d
+    assert "summary" in d
+    assert "per_class" in d
+    assert "per_query" in d
+
+
+def test_report_summary_fields_present(tmp_path: Path) -> None:
+    from cos.retrieval.benchmark import QueryResult
+    results = [
+        QueryResult("q1", "direct_fact", True, 50.0, ["loc://a"], ["loc://a"], "correct_answer")
+    ]
+    per_class = aggregate_by_class_simple(results)
+    report = _build_report("2026-01-01T00:00:00+00:00", "abc123def456", results, per_class)
+    d = report_to_dict(report)
+    summary = d["summary"]
+
+    assert "total_queries" in summary
+    assert "passed_queries" in summary
+    assert "overall_pass_rate" in summary
+    assert "overall_recall" in summary
+    assert "overall_citation_precision" in summary
+    assert "avg_latency_ms" in summary
+
+
+def test_report_per_query_has_required_fields() -> None:
+    from cos.retrieval.benchmark import QueryResult
+    results = [
+        QueryResult("q1", "direct_fact", True, 42.0, ["loc://a"], ["loc://a"], "correct_answer")
+    ]
+    per_class = aggregate_by_class_simple(results)
+    report = _build_report("2026-01-01T00:00:00+00:00", "ver", results, per_class)
+    d = report_to_dict(report)
+
+    pq = d["per_query"][0]
+    assert pq["query_id"] == "q1"
+    assert "query_class" in pq
+    assert "pass" in pq
+    assert "latency_ms" in pq
+    assert "expected_lineage" in pq
+    assert "actual_lineage" in pq
+    assert "answerability_verdict" in pq
+
+
+def test_report_per_class_has_required_fields() -> None:
+    from cos.retrieval.benchmark import QueryResult
+    results = [
+        QueryResult("q1", "direct_fact", True, 42.0, ["loc://a"], ["loc://a"], "correct_answer")
+    ]
+    per_class = aggregate_by_class_simple(results)
+    report = _build_report("2026-01-01T00:00:00+00:00", "ver", results, per_class)
+    d = report_to_dict(report)
+
+    pc = d["per_class"][0]
+    assert "query_class" in pc
+    assert "total" in pc
+    assert "passed" in pc
+    assert "recall" in pc
+    assert "citation_precision" in pc
+    assert "avg_latency_ms" in pc
+
+
+def test_format_human_summary_contains_pass_rate() -> None:
+    from cos.retrieval.benchmark import QueryResult
+    results = [
+        QueryResult("q1", "direct_fact", True, 50.0, ["loc://a"], ["loc://a"], "correct_answer")
+    ]
+    per_class = aggregate_by_class_simple(results)
+    report = _build_report("2026-01-01T00:00:00+00:00", "abc123def456", results, per_class)
+    summary = format_human_summary(report)
+
+    assert "1/1" in summary
+    assert "direct_fact" in summary
+
+
+def test_build_report_overall_recall_correct() -> None:
+    from cos.retrieval.benchmark import QueryResult
+    results = [
+        QueryResult("q1", "direct_fact", True, 10.0, ["loc://a"], ["loc://a"], "correct_answer"),
+        QueryResult("q2", "direct_fact", False, 10.0, ["loc://b"], ["loc://c"], "missed_answer"),
+    ]
+    per_class = aggregate_by_class_simple(results)
+    report = _build_report("ts", "ver", results, per_class)
+    assert report.overall_recall == pytest.approx(0.5)
+
+
+def test_build_report_no_answer_excluded_from_recall() -> None:
+    from cos.retrieval.benchmark import QueryResult
+    results = [
+        QueryResult("q1", "direct_fact", True, 10.0, ["loc://a"], ["loc://a"], "correct_answer"),
+        QueryResult("q2", "no_answer", True, 5.0, [], [], "correct_no_answer"),
+    ]
+    per_class = aggregate_by_class_simple(results)
+    report = _build_report("ts", "ver", results, per_class)
+    # Recall is computed over answerable queries only
+    assert report.overall_recall == pytest.approx(1.0)
+
+
+def test_build_report_overall_citation_precision() -> None:
+    from cos.retrieval.benchmark import QueryResult
+    results = [
+        QueryResult(
+            "q1", "direct_fact", True, 10.0,
+            ["loc://a"],
+            ["loc://a", "loc://b"],  # one in expected, one not → precision 0.5
+            "correct_answer",
+        ),
+    ]
+    per_class = aggregate_by_class_simple(results)
+    report = _build_report("ts", "ver", results, per_class)
+    assert report.overall_citation_precision == pytest.approx(0.5)
+
+
+# ── Helper ───────────────────────────────────────────────────────────────────
+
+
+def aggregate_by_class_simple(results):  # type: ignore[no-untyped-def]
+    from cos.retrieval.benchmark import aggregate_by_class
+    return aggregate_by_class(results)

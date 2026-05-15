@@ -1,0 +1,25 @@
+documents:
+  - filename: local-leave-policy.md
+    source_locator: local://local-leave-policy
+    source_alias: local://local-leave-policy
+    source_type: local
+
+  - filename: gmail-leave-policy-note.md
+    source_locator: gmail://msg-leave-policy-001
+    source_alias: gmail://msg-leave-policy-001
+    source_type: gmail
+
+  - filename: calendar-q1-review-event.md
+    source_locator: calendar://event-q1-review-001
+    source_alias: calendar://event-q1-review-001
+    source_type: google_calendar
+
+  - filename: mcp-note-retention-data.md
+    source_locator: mcp://note-retention-q4-2024
+    source_alias: mcp://note-retention-q4-2024
+    source_type: mcp_note
+
+  - filename: local-succession-plan.md
+    source_locator: local://local-succession-plan
+    source_alias: local://local-succession-plan
+    source_type: local
