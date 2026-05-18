@@ -288,7 +288,10 @@ class RetrievalService:
             cited_results = narrow_to_lineage(cited_results)
             post_lineage_count = len(cited_results)
 
-        evidence = select_synthesis_evidence(cited_results)
+        evidence = select_synthesis_evidence(
+            cited_results,
+            require_multi_source=_is_multi_source_query(text),
+        )
         post_evidence_selection_count = len(evidence)
 
         if not evidence:

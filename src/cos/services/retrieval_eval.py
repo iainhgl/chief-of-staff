@@ -35,6 +35,7 @@ from cos.retrieval.benchmark import (
 )
 from cos.retrieval.citations import narrow_to_lineage, select_synthesis_evidence
 from cos.retrieval.search import hybrid_search_with_trace
+from cos.services.retrieval import _is_multi_source_query
 from cos.store.db import store_document_canonical
 from cos.store.models import ChunkRecord, EmbeddingRecord
 
@@ -187,7 +188,10 @@ class RetrievalEvalService:
             cited = narrow_to_lineage(cited)
             post_lineage_count = len(cited)
 
-        evidence = select_synthesis_evidence(cited)
+        evidence = select_synthesis_evidence(
+            cited,
+            require_multi_source=_is_multi_source_query(query.query),
+        )
         post_evidence_selection_count = len(evidence)
 
         candidate_counts: dict[str, Any] = {
@@ -212,17 +216,21 @@ class RetrievalEvalService:
             synthesis_mode="not_run",
         )
 
-        pre_lineage_support = (
-            recall_satisfied(
-                score_query(
-                    query,
-                    pre_lineage_cited,
-                    latency_ms,
-                    expected_citations=expected_citations,
-                )
+        pre_lineage_result = (
+            score_query(
+                query,
+                pre_lineage_cited,
+                latency_ms,
+                expected_citations=expected_citations,
             )
             if post_lineage_count is not None
-            else False
+            else None
+        )
+        post_lineage_result = score_query(
+            query,
+            cited,
+            latency_ms,
+            expected_citations=expected_citations,
         )
 
         # Attribute failure to the earliest pipeline stage that lost evidence
@@ -231,8 +239,12 @@ class RetrievalEvalService:
                 result.answerability_verdict,
                 candidate_counts,
                 lineage_narrowing_lost_support=(
-                    post_lineage_count is not None
-                    and pre_lineage_support
+                    pre_lineage_result is not None
+                    and recall_satisfied(pre_lineage_result)
+                    and not recall_satisfied(post_lineage_result)
+                ),
+                evidence_selection_lost_support=(
+                    recall_satisfied(post_lineage_result)
                     and not recall_satisfied(result)
                 ),
             )

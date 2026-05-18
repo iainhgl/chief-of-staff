@@ -786,8 +786,28 @@ def test_attribute_failure_evidence_selection_checked_after_lineage_narrowing() 
         "post_evidence_selection": 0,
     }
     assert (
-        attribute_failure("missed_answer", counts, lineage_narrowing_lost_support=True)
+        attribute_failure(
+            "missed_answer",
+            counts,
+            lineage_narrowing_lost_support=True,
+            evidence_selection_lost_support=True,
+        )
         == "lineage_narrowing"
+    )
+
+
+def test_attribute_failure_nonempty_evidence_selection_loss_returns_evidence_selection() -> None:
+    counts = {
+        "merged": 5, "post_threshold": 3, "post_pruning": 2, "final": 1,
+        "post_evidence_selection": 1,
+    }
+    assert (
+        attribute_failure(
+            "missed_answer",
+            counts,
+            evidence_selection_lost_support=True,
+        )
+        == "evidence_selection"
     )
 
 

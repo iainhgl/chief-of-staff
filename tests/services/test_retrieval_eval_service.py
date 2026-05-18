@@ -944,6 +944,96 @@ async def test_benchmark_candidate_counts_includes_post_evidence_selection(
 
 
 @pytest.mark.asyncio
+async def test_benchmark_real_selector_rejects_compare_query_without_two_surviving_lineages(
+    tmp_path: Path,
+) -> None:
+    config = make_test_config(tmp_path)
+    pool = _make_pool_with_connection()
+    strong = _make_benchmark_chunk("local://local-leave-policy", "seeded-version-1")
+    weak = _make_benchmark_chunk("local://local-leave-policy", "seeded-version-1")
+    strong.score = 0.9
+    weak.score = 0.5
+
+    async def _fake_search(query, conn, cfg, **kwargs):  # type: ignore[no-untyped-def]
+        if "compare the leave policy" in query.lower():
+            return [strong, weak], SearchStats(
+                merged_candidate_count=2,
+                post_threshold_count=2,
+                post_pruning_count=2,
+                final_candidate_count=2,
+            )
+        return [], SearchStats()
+
+    with (
+        patch("cos.services.retrieval_eval.embed", new=AsyncMock(
+            return_value=[MagicMock(vector=[0.1] * 1024)]
+        )),
+        patch("cos.services.retrieval_eval.store_document_canonical", new=AsyncMock()),
+        patch(
+            "cos.services.retrieval_eval._resolve_seeded_citation",
+            new=AsyncMock(return_value=_SEEDED_CITATION),
+        ),
+        patch(_SEARCH_PATCH, new=_fake_search),
+    ):
+        service = RetrievalEvalService(config, pool)
+        report = await service.run_benchmark(_CORPUS_PATH)
+
+    result = {r.query_id: r for r in report.per_query}["gold-cds-001"]
+    assert not result.passed
+    assert result.failure_stage == "evidence_selection"
+    assert result.candidate_counts["post_evidence_selection"] == 0
+
+
+@pytest.mark.asyncio
+async def test_benchmark_real_selector_allows_single_lineage_briefing_when_query_is_not_explicitly_multi_source(
+    tmp_path: Path,
+) -> None:
+    config = make_test_config(tmp_path)
+    pool = _make_pool_with_connection()
+    succession = _make_benchmark_chunk(
+        "local://local-succession-plan",
+        "seeded-version-1",
+    )
+
+    async def _fake_search(query, conn, cfg, **kwargs):  # type: ignore[no-untyped-def]
+        if "succession planning status and timeline" in query.lower():
+            return [succession], SearchStats(
+                merged_candidate_count=1,
+                post_threshold_count=1,
+                post_pruning_count=1,
+                final_candidate_count=1,
+            )
+        return [], SearchStats()
+
+    async def _fake_resolve_seeded_citation(conn, source_path, doc):  # type: ignore[no-untyped-def]
+        return BenchmarkCitation(
+            source_alias=doc.source_locator,
+            source_locator=doc.source_locator,
+            document_version_id="seeded-version-1",
+            chunk_index=0,
+        )
+
+    with (
+        patch("cos.services.retrieval_eval.embed", new=AsyncMock(
+            return_value=[MagicMock(vector=[0.1] * 1024)]
+        )),
+        patch("cos.services.retrieval_eval.store_document_canonical", new=AsyncMock()),
+        patch(
+            "cos.services.retrieval_eval._resolve_seeded_citation",
+            new=_fake_resolve_seeded_citation,
+        ),
+        patch(_SEARCH_PATCH, new=_fake_search),
+    ):
+        service = RetrievalEvalService(config, pool)
+        report = await service.run_benchmark(_CORPUS_PATH, include_stress_fuzz=True)
+
+    result = {r.query_id: r for r in report.per_query}["fuzz-br-001"]
+    assert result.passed
+    assert result.failure_stage is None
+    assert result.actual_lineage == ["local://local-succession-plan"]
+
+
+@pytest.mark.asyncio
 async def test_benchmark_scores_based_on_evidence_eligible_set(
     tmp_path: Path,
 ) -> None:
@@ -1011,3 +1101,43 @@ async def test_benchmark_attribute_failure_evidence_selection_stage(
         assert pq["failure_stage"] == "evidence_selection", (
             f"Expected evidence_selection for {pq['query_id']}, got {pq['failure_stage']}"
         )
+
+
+@pytest.mark.asyncio
+async def test_benchmark_attribute_failure_nonempty_wrong_evidence_is_evidence_selection(
+    tmp_path: Path,
+) -> None:
+    config = make_test_config(tmp_path)
+    pool = _make_pool_with_connection()
+    expected = _make_benchmark_chunk("local://local-leave-policy", "seeded-version-1")
+    distractor = _make_benchmark_chunk("local://unexpected", "seeded-version-2")
+
+    async def _fake_search(query, conn, cfg, **kwargs):  # type: ignore[no-untyped-def]
+        if "annual leave" in query.lower():
+            return [expected], SearchStats(
+                merged_candidate_count=1,
+                post_threshold_count=1,
+                post_pruning_count=1,
+                final_candidate_count=1,
+            )
+        return [], SearchStats()
+
+    with (
+        patch("cos.services.retrieval_eval.embed", new=AsyncMock(
+            return_value=[MagicMock(vector=[0.1] * 1024)]
+        )),
+        patch("cos.services.retrieval_eval.store_document_canonical", new=AsyncMock()),
+        patch(
+            "cos.services.retrieval_eval._resolve_seeded_citation",
+            new=AsyncMock(return_value=_SEEDED_CITATION),
+        ),
+        patch(_SEARCH_PATCH, new=_fake_search),
+        patch(_EVIDENCE_SELECT_PATCH, return_value=[distractor]),
+    ):
+        service = RetrievalEvalService(config, pool)
+        report = await service.run_benchmark(_CORPUS_PATH)
+
+    result = {r.query_id: r for r in report.per_query}["gold-df-001"]
+    assert not result.passed
+    assert result.failure_stage == "evidence_selection"
+    assert result.candidate_counts["post_evidence_selection"] == 1

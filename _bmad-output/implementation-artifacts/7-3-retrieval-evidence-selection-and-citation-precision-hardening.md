@@ -1,6 +1,6 @@
 # Story 7.3: Retrieval Evidence Selection & Citation Precision Hardening
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -50,6 +50,11 @@ So that grounded Q&A remains trustworthy as the corpus becomes more mixed and co
   - [x] Add focused service/search/eval tests covering citation leakage, over-inclusive evidence, and insufficient-evidence fallback after selection.
   - [x] Update the retrieval benchmark expectations where needed so precision failures caused by evidence-selection mistakes are visible and attributable.
   - [x] Keep all new coverage deterministic and local: no live provider calls, no browser auth, no network-dependent reranking service, and no extra ambient dependencies.
+
+### Review Findings
+
+- [x] [Review][Patch] Define the concrete evidence-selection policy for Story 7.3 before marking it complete [src/cos/retrieval/citations.py:76]
+- [x] [Review][Patch] Benchmark failure attribution does not reliably surface evidence-selection regressions [src/cos/retrieval/benchmark.py:317]
 
 ## Dev Notes
 

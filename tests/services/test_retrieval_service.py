@@ -313,7 +313,14 @@ async def test_query_adds_query_type_instruction_to_prompt(
         llm_adapter=mock_llm_adapter,
     )
 
-    with patch(_PATCH, new=AsyncMock(return_value=_search_result([_make_chunk()]))):
+    chunks = [_make_chunk()]
+    if query.startswith("compare "):
+        chunks = [
+            _make_chunk_from_source("/docs/a.md", 0.9, 0, "compare-a"),
+            _make_chunk_from_source("/docs/b.md", 0.8, 0, "compare-b"),
+        ]
+
+    with patch(_PATCH, new=AsyncMock(return_value=_search_result(chunks))):
         await service.query(query, role_pack=None)
 
     prompt = mock_llm_adapter.complete.call_args.kwargs["prompt"]
@@ -842,6 +849,28 @@ async def test_llm_receives_only_synthesis_eligible_evidence(
 
 
 @pytest.mark.asyncio
+async def test_selector_preserves_bounded_evidence_in_single_source_path(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+) -> None:
+    chunk_a = _make_chunk_from_source("/docs/a.md", 0.9, 0, "evidence-a content")
+    chunk_b = _make_chunk_from_source("/docs/a.md", 0.5, 1, "evidence-b content")
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with patch(_PATCH, new=AsyncMock(return_value=_search_result([chunk_a, chunk_b]))):
+        response = await service.query("what is X?", role_pack=None)
+
+    context = mock_llm_adapter.complete.call_args.kwargs["context"]
+    assert context == ["evidence-a content", "evidence-b content"]
+    assert response.citations == [chunk_a, chunk_b]
+
+
+@pytest.mark.asyncio
 async def test_citations_are_identical_to_synthesis_evidence(
     tmp_path: Path,
     mock_pool: MagicMock,
@@ -866,6 +895,31 @@ async def test_citations_are_identical_to_synthesis_evidence(
 
     assert response.citations == [chunk_b]
     assert chunk_a not in response.citations
+
+
+@pytest.mark.asyncio
+async def test_selector_rejects_multi_source_query_without_two_surviving_lineages(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+) -> None:
+    chunk_a = _make_chunk_from_source("/docs/a.md", 0.9, 0, "content-a")
+    chunk_b = _make_chunk_from_source("/docs/a.md", 0.5, 1, "content-b")
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with patch(_PATCH, new=AsyncMock(return_value=_search_result([chunk_a, chunk_b]))):
+        response = await service.query(
+            "compare docs across all sources",
+            role_pack=None,
+        )
+
+    assert "no relevant content" in (response.answer or "").lower()
+    assert response.citations == []
+    mock_llm_adapter.complete.assert_not_called()
 
 
 @pytest.mark.asyncio
