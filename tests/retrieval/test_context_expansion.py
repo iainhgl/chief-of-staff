@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from cos.retrieval.citations import CitedChunk
-from cos.retrieval.context_expansion import ExpandedContext, expand_bounded_context
+from cos.retrieval.context_expansion import expand_bounded_context
 
 _DOC_ID = "12345678-1234-1234-1234-123456789012"
 _DOC_VERSION_ID = "aaaabbbb-cccc-dddd-eeee-ffffffffffff"
@@ -51,7 +51,7 @@ async def test_empty_anchors_returns_empty_expanded_context() -> None:
 
 
 @pytest.mark.asyncio
-async def test_legacy_anchor_without_version_id_skips_expansion() -> None:
+async def test_legacy_anchor_without_version_id_falls_back_to_document_id() -> None:
     anchor = CitedChunk(
         content="content",
         source_document_id=_DOC_ID,
@@ -61,11 +61,14 @@ async def test_legacy_anchor_without_version_id_skips_expansion() -> None:
         chunk_index=2,
         score=0.9,
     )
-    conn = _make_conn([])
+    conn = _make_conn([(1, "content 1"), (2, "content 2"), (3, "content 3")])
     result = await expand_bounded_context(conn, [anchor])
-    assert result.synthesis_chunks == [anchor]
+
+    assert [chunk.chunk_index for chunk in result.synthesis_chunks] == [1, 2, 3]
     assert result.evidence_chunks == [anchor]
-    conn.execute.assert_not_called()
+    sql, params = conn.execute.await_args.args
+    assert "WHERE document_id = %s::uuid" in sql
+    assert params[0] == _DOC_ID
 
 
 # ── Basic expansion ───────────────────────────────────────────────────────────
@@ -106,7 +109,7 @@ async def test_anchor_at_chunk_0_does_not_request_negative_indices() -> None:
     anchor = _chunk(0)
     db_rows = [(0, "content 0"), (1, "content 1")]
     conn = _make_conn(db_rows)
-    result = await expand_bounded_context(conn, [anchor], window=1)
+    await expand_bounded_context(conn, [anchor], window=1)
 
     # Verify query was called with min_idx=0 (not negative)
     call_args = conn.execute.await_args
@@ -160,6 +163,54 @@ async def test_multiple_anchors_from_same_lineage_merged_correctly() -> None:
     # evidence = only the two anchors
     evidence_indices = {c.chunk_index for c in result.evidence_chunks}
     assert evidence_indices == {1, 3}
+
+
+@pytest.mark.asyncio
+async def test_distant_anchors_query_only_local_windows() -> None:
+    anchor_a = _chunk(1)
+    anchor_b = _chunk(10)
+    conn = _make_conn(
+        [
+            (0, "content 0"),
+            (1, "content 1"),
+            (2, "content 2"),
+            (9, "content 9"),
+            (10, "content 10"),
+            (11, "content 11"),
+        ]
+    )
+
+    await expand_bounded_context(conn, [anchor_a, anchor_b], window=1)
+
+    _, params = conn.execute.await_args.args
+    assert params == (_DOC_VERSION_ID, 0, 2, 9, 11)
+
+
+@pytest.mark.asyncio
+async def test_max_expanded_preserves_all_selected_anchors() -> None:
+    anchor_a = _chunk(1, score=0.9)
+    anchor_b = _chunk(5, score=0.8)
+    db_rows = [
+        (0, "content 0"),
+        (1, "content 1"),
+        (2, "content 2"),
+        (4, "content 4"),
+        (5, "content 5"),
+        (6, "content 6"),
+    ]
+    conn = _make_conn(db_rows)
+
+    result = await expand_bounded_context(
+        conn,
+        [anchor_a, anchor_b],
+        window=1,
+        max_expanded=4,
+    )
+
+    synthesis_indices = [chunk.chunk_index for chunk in result.synthesis_chunks]
+    assert 1 in synthesis_indices
+    assert 5 in synthesis_indices
+    assert len(synthesis_indices) == 4
 
 
 # ── Neighbour chunk metadata ──────────────────────────────────────────────────

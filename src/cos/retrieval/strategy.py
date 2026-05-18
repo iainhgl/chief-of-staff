@@ -78,37 +78,54 @@ _SOURCE_TERM_PATTERN = (
     r"message|messages|note|notes|record|records)"
 )
 
+_BOUNDED_DOCUMENT_TERM_PATTERN = (
+    r"(?:document|documents|doc|docs|email|emails|message|messages|note|notes|"
+    r"record|records|review|reviews|meeting|meetings|policy|policies|report|"
+    r"reports|plan|plans)"
+)
+
 _MULTI_SOURCE_REFERENCE_PATTERNS = (
     re.compile(rf"\bboth\b.*\b{_SOURCE_TERM_PATTERN}\b"),
     re.compile(rf"\b{_SOURCE_TERM_PATTERN}\b.*\band\b.*\b{_SOURCE_TERM_PATTERN}\b"),
     re.compile(rf"\b(?:between|across all)\b.*\b{_SOURCE_TERM_PATTERN}\b"),
 )
 
-# Signals that suggest a bounded, document-centric interpretation query.
-# These phrases typically ask for context or meaning from a specific artefact
-# rather than a direct factual lookup.
-_BOUNDED_SIGNALS = (
-    "what did ",
-    "what does the ",
-    "what was the conclusion",
-    "what was concluded",
-    "what was decided",
-    "what was recommended",
-    "what was found",
-    "what are the findings",
-    "according to the ",
-    "based on the document",
-    "from the document",
-    "tell me about the ",
-    "describe the ",
-    "explain the ",
-    "walk me through ",
+_BOUNDED_CONTEXT_SIGNALS = (
     "full context",
     "in detail",
     "full details",
-    "what happened in ",
-    "what was discussed in ",
-    "what was covered in ",
+    "walk me through",
+)
+
+_BOUNDED_TOPIC_TERMS = (
+    "protocol",
+    "programme",
+    "program",
+    "procedure",
+    "process",
+    "conversation",
+    "discussion",
+    "findings",
+    "context",
+    "timeline",
+)
+
+_BOUNDED_INTERPRETATION_PATTERNS = (
+    re.compile(
+        r"\bwhat did (?:the|this)\b.*\b"
+        rf"{_BOUNDED_DOCUMENT_TERM_PATTERN}\b.*\b"
+        r"(?:conclude|concluded|decide|decided|recommend|recommended|find|found)\b"
+    ),
+    re.compile(r"\bwhat was the conclusion\b"),
+    re.compile(r"\bwhat was concluded\b"),
+    re.compile(r"\bwhat was decided\b"),
+    re.compile(r"\bwhat was recommended\b"),
+    re.compile(r"\bwhat was found\b"),
+    re.compile(r"\bwhat are the findings\b"),
+    re.compile(rf"\baccording to the {_BOUNDED_DOCUMENT_TERM_PATTERN}\b"),
+    re.compile(r"\bwhat happened in\b"),
+    re.compile(r"\bwhat was discussed in\b"),
+    re.compile(r"\bwhat was covered in\b"),
 )
 
 
@@ -139,7 +156,19 @@ def _is_multi_source(text: str) -> bool:
 def _is_bounded_interpretation(text: str) -> bool:
     """Return True if the query asks for document-centric interpretation."""
     t = text.lower()
-    return _contains_any(t, _BOUNDED_SIGNALS)
+    if any(pattern.search(t) for pattern in _BOUNDED_INTERPRETATION_PATTERNS):
+        return True
+    if (
+        "say about" in t
+        and _contains_any(t, _BOUNDED_TOPIC_TERMS)
+        and re.search(_BOUNDED_DOCUMENT_TERM_PATTERN, t)
+    ):
+        return True
+    if _contains_any(t, _BOUNDED_CONTEXT_SIGNALS) and re.search(
+        _BOUNDED_DOCUMENT_TERM_PATTERN, t
+    ):
+        return True
+    return False
 
 
 def select_query_strategy_from_text(text: str) -> QueryStrategy:

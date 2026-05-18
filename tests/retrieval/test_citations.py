@@ -3,6 +3,7 @@ from cos.retrieval.citations import (
     format_citations,
     narrow_to_lineage,
     prune_citations,
+    select_document_first_anchors,
     select_synthesis_evidence,
 )
 
@@ -248,3 +249,27 @@ def test_narrow_to_lineage_legacy_multiple_chunks_same_locator_all_survive() -> 
     result = narrow_to_lineage([chunk_a, chunk_b, sibling])
     assert len(result) == 2
     assert all(c.source_locator == "/docs/report.md" for c in result)
+
+
+# ── Document-first anchor selection tests (Story 7.4 review fixes) ──────────
+
+
+def test_select_document_first_anchors_prefers_highest_aggregate_lineage() -> None:
+    top_chunk = _make_versioned_chunk("loc://a", "ver-a", 0.95, 0)
+    supported_a = _make_versioned_chunk("loc://b", "ver-b", 0.81, 0)
+    supported_b = _make_versioned_chunk("loc://b", "ver-b", 0.80, 1)
+
+    result = select_document_first_anchors([top_chunk, supported_a, supported_b])
+
+    assert [chunk.document_version_id for chunk in result] == ["ver-b", "ver-b"]
+    assert [chunk.chunk_index for chunk in result] == [0, 1]
+
+
+def test_select_document_first_anchors_falls_back_to_source_locator_for_legacy_chunks() -> None:
+    legacy_a = _make_versioned_chunk("loc://legacy-a", "", 0.91, 0)
+    legacy_b0 = _make_versioned_chunk("loc://legacy-b", "", 0.60, 0)
+    legacy_b1 = _make_versioned_chunk("loc://legacy-b", "", 0.59, 1)
+
+    result = select_document_first_anchors([legacy_a, legacy_b0, legacy_b1])
+
+    assert [chunk.source_locator for chunk in result] == ["loc://legacy-b", "loc://legacy-b"]

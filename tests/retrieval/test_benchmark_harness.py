@@ -906,6 +906,28 @@ def test_query_strategy_from_text_document_interpretation_is_bounded() -> None:
     )
 
 
+def test_query_strategy_from_text_policy_protocol_is_bounded() -> None:
+    from cos.retrieval.strategy import QueryStrategy, select_query_strategy_from_text
+
+    assert (
+        select_query_strategy_from_text(
+            "What does the performance policy say about the Below Expectations protocol?"
+        )
+        == QueryStrategy.BOUNDED
+    )
+
+
+def test_query_strategy_from_text_policy_fact_stays_default() -> None:
+    from cos.retrieval.strategy import QueryStrategy, select_query_strategy_from_text
+
+    assert (
+        select_query_strategy_from_text(
+            "What does the leave policy say about annual leave days?"
+        )
+        == QueryStrategy.DEFAULT
+    )
+
+
 def test_query_strategy_multi_source_takes_precedence_over_bounded() -> None:
     from cos.retrieval.strategy import QueryStrategy, select_query_strategy_from_text
 
@@ -929,6 +951,7 @@ def test_load_fixture_docs_performance_policy_has_chunk_count_3() -> None:
     docs = load_fixture_docs(_CORPUS_PATH)
     policy = next(d for d in docs if d.source_locator == "local://local-performance-policy")
     assert policy.chunk_count == 3
+    assert policy.citation_chunk_index == 1
 
 
 def test_load_fixture_docs_single_chunk_docs_have_chunk_count_1() -> None:
@@ -952,6 +975,26 @@ def test_load_fixture_docs_chunk_count_invalid_raises_corpus_error(tmp_path: Pat
         "    chunk_count: 0\n"
     )
     with pytest.raises(CorpusError, match="chunk_count"):
+        load_fixture_docs(tmp_path)
+
+
+def test_load_fixture_docs_citation_chunk_index_out_of_range_raises_corpus_error(
+    tmp_path: Path,
+) -> None:
+    from cos.retrieval.benchmark import CorpusError, load_fixture_docs
+
+    gen_dir = tmp_path / "generated"
+    gen_dir.mkdir()
+    (gen_dir / "manifest.yaml").write_text(
+        "documents:\n"
+        "  - filename: foo.md\n"
+        "    source_locator: loc://foo\n"
+        "    source_alias: loc://foo\n"
+        "    source_type: local\n"
+        "    chunk_count: 2\n"
+        "    citation_chunk_index: 2\n"
+    )
+    with pytest.raises(CorpusError, match="citation_chunk_index"):
         load_fixture_docs(tmp_path)
 
 

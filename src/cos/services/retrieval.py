@@ -9,12 +9,16 @@ from psycopg_pool import AsyncConnectionPool
 
 from cos.config import CosConfig
 from cos.llm.adapter import LLMAdapter
-from cos.retrieval.citations import CitedResponse, narrow_to_lineage, select_synthesis_evidence
+from cos.retrieval.citations import (
+    CitedResponse,
+    narrow_to_lineage,
+    select_document_first_anchors,
+    select_synthesis_evidence,
+)
 from cos.retrieval.context_expansion import expand_bounded_context
 from cos.retrieval.search import hybrid_search_with_trace
 from cos.retrieval.strategy import QueryStrategy, select_query_strategy_from_text
 from cos.retrieval.telemetry import SearchStats
-
 
 _TASK_INSTRUCTIONS: dict[str, str] = {
     "draft": (
@@ -212,11 +216,11 @@ class RetrievalService:
 
                 # Route by strategy ──────────────────────────────────────────
                 if strategy == QueryStrategy.BOUNDED:
-                    anchors = narrow_to_lineage(cited_results)
+                    anchors = select_document_first_anchors(cited_results)
                     post_lineage_count = len(anchors)
                     expanded = await expand_bounded_context(conn, anchors)
                     synthesis_chunks = expanded.synthesis_chunks
-                    evidence = expanded.evidence_chunks
+                    evidence = select_synthesis_evidence(expanded.evidence_chunks)
                     post_evidence_selection_count = len(evidence)
                     expansion_mode = "bounded"
                     expanded_context_count = len(synthesis_chunks)

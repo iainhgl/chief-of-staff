@@ -1,6 +1,6 @@
 # Story 7.4: Document-First Retrieval & Context Expansion
 
-Status: ready-for-dev
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -332,6 +332,14 @@ Prefer doing both for the highest-signal bounded-context cases. [Source: [src/co
 - [Current LLM adapter contract](/Users/iain.livingstone/Development/CoS/cos/src/cos/llm/adapter.py), [Anthropic adapter](/Users/iain.livingstone/Development/CoS/cos/src/cos/llm/anthropic.py)
 - [Benchmark fixture README](/Users/iain.livingstone/Development/CoS/cos/tests/fixtures/retrieval_eval/README.md)
 
+### Review Findings
+
+- [x] [Review][Patch] Bounded retrieval still narrows by top chunk lineage instead of ranking document candidates first [src/cos/services/retrieval.py:214]
+- [x] [Review][Patch] Bounded mode bypasses the shared Story 7.3 evidence-selection boundary [src/cos/services/retrieval.py:217]
+- [x] [Review][Patch] Context expansion is not safe for legacy records or widely separated anchors [src/cos/retrieval/context_expansion.py:64]
+- [x] [Review][Patch] The benchmark still cannot prove chunk-level bounded-context recovery or citation precision [src/cos/services/retrieval_eval.py:123]
+- [x] [Review][Patch] Runtime bounded-query heuristics are broad enough to reroute direct-fact lookups [src/cos/retrieval/strategy.py:90]
+
 ## Dev Agent Record
 
 ### Agent Model Used
@@ -344,6 +352,7 @@ GPT-5 Codex
 
 - Story context created on 2026-05-18.
 - Sprint status advanced from `backlog` to `ready-for-dev` on 2026-05-18.
+- Review findings resolved on 2026-05-18; targeted retrieval tests and production retrieval lint passed.
 - No repo `project-context.md` file was found; the story was grounded in the planning artifacts, current Epic 7 story chain, and the live retrieval codebase.
 - Primary implementation risk called out explicitly: the benchmark harness currently seeds one chunk per fixture document, which would otherwise hide adjacent-context regressions.
 

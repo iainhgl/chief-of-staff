@@ -32,7 +32,11 @@ from cos.retrieval.benchmark import (
     resolve_corpus_version,
     score_query,
 )
-from cos.retrieval.citations import narrow_to_lineage, select_synthesis_evidence
+from cos.retrieval.citations import (
+    narrow_to_lineage,
+    select_document_first_anchors,
+    select_synthesis_evidence,
+)
 from cos.retrieval.context_expansion import expand_bounded_context
 from cos.retrieval.search import hybrid_search_with_trace
 from cos.retrieval.strategy import QueryStrategy, select_query_strategy_for_class
@@ -124,7 +128,7 @@ class RetrievalEvalService:
                 chunks, embeddings = await _make_multi_chunks(
                     content, doc.chunk_count, benchmark_config
                 )
-                citation_chunk_index = -1  # any chunk from this lineage is acceptable
+                citation_chunk_index = doc.citation_chunk_index
             else:
                 chunks = [
                     ChunkRecord(
@@ -203,10 +207,10 @@ class RetrievalEvalService:
         expanded_context_count: int | None = None
 
         if strategy == QueryStrategy.BOUNDED:
-            anchors = narrow_to_lineage(cited)
+            anchors = select_document_first_anchors(cited)
             post_lineage_count = len(anchors)
             expanded = await expand_bounded_context(conn, anchors)
-            evidence = expanded.evidence_chunks
+            evidence = select_synthesis_evidence(expanded.evidence_chunks)
             post_evidence_selection_count = len(evidence)
             expansion_mode = "bounded"
             expanded_context_count = len(expanded.synthesis_chunks)
@@ -270,7 +274,11 @@ class RetrievalEvalService:
                 recall_satisfied(
                     score_query(
                         query,
-                        narrow_to_lineage(pre_lineage_cited) if pre_lineage_cited else [],
+                        (
+                            select_document_first_anchors(pre_lineage_cited)
+                            if pre_lineage_cited
+                            else []
+                        ),
                         latency_ms,
                         expected_citations=expected_citations,
                     )
@@ -539,6 +547,11 @@ async def _make_multi_chunks(
                 model=benchmark_config.embedding.model,
                 provider=benchmark_config.embedding.provider,
             )
+        )
+
+    if len(chunks) != chunk_count:
+        raise CorpusError(
+            f"Seeded {len(chunks)} chunks, expected {chunk_count} for benchmark fixture"
         )
     return chunks, embeddings
 

@@ -38,6 +38,111 @@ class ExpandedContext:
     evidence_chunks: CitedResults
 
 
+def _dedupe_anchors_by_index(anchors: CitedResults) -> CitedResults:
+    deduped: CitedResults = []
+    seen_indices: set[int] = set()
+    for anchor in anchors:
+        if anchor.chunk_index in seen_indices:
+            continue
+        seen_indices.add(anchor.chunk_index)
+        deduped.append(anchor)
+    return deduped
+
+
+def _select_anchor_subset(
+    anchors: CitedResults,
+    max_expanded: int,
+) -> CitedResults:
+    selected = _dedupe_anchors_by_index(anchors)
+    if len(selected) <= max_expanded:
+        return selected
+    return selected[:max_expanded]
+
+
+def _merge_windows(windows: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    if not windows:
+        return []
+
+    merged: list[tuple[int, int]] = []
+    for start, end in sorted(windows):
+        if not merged:
+            merged.append((start, end))
+            continue
+
+        prev_start, prev_end = merged[-1]
+        if start <= prev_end + 1:
+            merged[-1] = (prev_start, max(prev_end, end))
+            continue
+
+        merged.append((start, end))
+    return merged
+
+
+def _window_clauses(windows: list[tuple[int, int]]) -> tuple[str, list[int]]:
+    clauses = []
+    params: list[int] = []
+    for start, end in windows:
+        clauses.append("(chunk_index BETWEEN %s AND %s)")
+        params.extend((start, end))
+    return " OR ".join(clauses), params
+
+
+async def _fetch_window_rows(
+    conn: psycopg.AsyncConnection[Any],
+    *,
+    identifier_column: str,
+    identifier: str,
+    windows: list[tuple[int, int]],
+) -> list[tuple[int, str]]:
+    clauses, params = _window_clauses(windows)
+    query = f"""
+        SELECT chunk_index, content
+        FROM chunks
+        WHERE {identifier_column} = %s::uuid
+          AND ({clauses})
+        ORDER BY chunk_index
+        """
+    result = await conn.execute(query, (identifier, *params))
+    rows = await result.fetchall()
+    return [(int(row[0]), str(row[1])) for row in rows]
+
+
+def _distance_to_nearest_anchor(index: int, anchor_indices: set[int]) -> int:
+    return min(abs(index - anchor_index) for anchor_index in anchor_indices)
+
+
+def _trim_synthesis_chunks(
+    synthesis_chunks: CitedResults,
+    anchor_indices: set[int],
+    max_expanded: int,
+) -> CitedResults:
+    if len(synthesis_chunks) <= max_expanded:
+        return synthesis_chunks
+
+    kept_indices = set(anchor_indices)
+    remaining_slots = max_expanded - len(kept_indices)
+    if remaining_slots <= 0:
+        return [
+            chunk
+            for chunk in synthesis_chunks
+            if chunk.chunk_index in kept_indices
+        ]
+
+    neighbours = [
+        chunk for chunk in synthesis_chunks if chunk.chunk_index not in anchor_indices
+    ]
+    neighbours.sort(
+        key=lambda chunk: (
+            _distance_to_nearest_anchor(chunk.chunk_index, anchor_indices),
+            chunk.chunk_index,
+        )
+    )
+    for neighbour in neighbours[:remaining_slots]:
+        kept_indices.add(neighbour.chunk_index)
+
+    return [chunk for chunk in synthesis_chunks if chunk.chunk_index in kept_indices]
+
+
 async def expand_bounded_context(
     conn: psycopg.AsyncConnection[Any],
     anchors: CitedResults,
@@ -52,42 +157,44 @@ async def expand_bounded_context(
     chunks remain in evidence_chunks; neighbour chunks fill out the synthesis
     context but are not returned as citations.
 
-    If document_version_id is absent (legacy records), expansion is skipped
-    and synthesis_chunks equals evidence_chunks.
+    If document_version_id is absent (legacy records), expansion falls back to
+    document_id so older chunks can still recover bounded neighbours.
     """
     if not anchors:
         return ExpandedContext(synthesis_chunks=[], evidence_chunks=[])
 
-    representative = anchors[0]
+    selected_anchors = _select_anchor_subset(anchors, max_expanded=max_expanded)
+    representative = selected_anchors[0]
     doc_version_id = representative.document_version_id
 
-    if not doc_version_id:
-        return ExpandedContext(
-            synthesis_chunks=list(anchors),
-            evidence_chunks=list(anchors),
+    anchor_indices = {c.chunk_index for c in selected_anchors}
+    windows = _merge_windows(
+        [
+            (max(0, anchor_index - window), anchor_index + window)
+            for anchor_index in sorted(anchor_indices)
+        ]
+    )
+
+    if doc_version_id:
+        rows = await _fetch_window_rows(
+            conn,
+            identifier_column="document_version_id",
+            identifier=doc_version_id,
+            windows=windows,
+        )
+    else:
+        rows = await _fetch_window_rows(
+            conn,
+            identifier_column="document_id",
+            identifier=representative.source_document_id,
+            windows=windows,
         )
 
-    anchor_indices = {c.chunk_index for c in anchors}
-    min_idx = max(0, min(anchor_indices) - window)
-    max_idx = max(anchor_indices) + window
-
-    result = await conn.execute(
-        """
-        SELECT chunk_index, content
-        FROM chunks
-        WHERE document_version_id = %s::uuid
-          AND chunk_index BETWEEN %s AND %s
-        ORDER BY chunk_index
-        """,
-        (doc_version_id, min_idx, max_idx),
-    )
-    rows = await result.fetchall()
-
-    anchor_map: dict[int, CitedChunk] = {c.chunk_index: c for c in anchors}
+    anchor_map: dict[int, CitedChunk] = {
+        chunk.chunk_index: chunk for chunk in selected_anchors
+    }
     synthesis_chunks: CitedResults = []
-    for row in rows:
-        idx: int = row[0]
-        content: str = row[1]
+    for idx, content in rows:
         if idx in anchor_map:
             synthesis_chunks.append(anchor_map[idx])
         else:
@@ -103,10 +210,13 @@ async def expand_bounded_context(
                 )
             )
 
-    if len(synthesis_chunks) > max_expanded:
-        synthesis_chunks = synthesis_chunks[:max_expanded]
+    synthesis_chunks = _trim_synthesis_chunks(
+        synthesis_chunks,
+        anchor_indices=anchor_indices,
+        max_expanded=max_expanded,
+    )
 
     return ExpandedContext(
         synthesis_chunks=synthesis_chunks,
-        evidence_chunks=list(anchors),
+        evidence_chunks=list(selected_anchors),
     )

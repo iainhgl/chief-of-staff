@@ -53,6 +53,7 @@ class FixtureDoc:
     source_alias: str
     source_type: str
     chunk_count: int = 1  # >1 triggers multi-chunk seeding for bounded-context fixtures
+    citation_chunk_index: int = 0
 
 
 @dataclass
@@ -163,6 +164,16 @@ def load_fixture_docs(corpus_path: Path) -> list[FixtureDoc]:
             raise CorpusError(
                 f"Document entry 'chunk_count' must be a positive int: {item!r}"
             )
+        citation_chunk_index = item.get("citation_chunk_index", 0)
+        if (
+            not isinstance(citation_chunk_index, int)
+            or citation_chunk_index < 0
+            or citation_chunk_index >= chunk_count
+        ):
+            raise CorpusError(
+                "Document entry 'citation_chunk_index' must be an int within the "
+                f"chunk_count range: {item!r}"
+            )
         docs.append(
             FixtureDoc(
                 filename=item["filename"],
@@ -170,6 +181,7 @@ def load_fixture_docs(corpus_path: Path) -> list[FixtureDoc]:
                 source_alias=item["source_alias"],
                 source_type=item["source_type"],
                 chunk_count=chunk_count,
+                citation_chunk_index=citation_chunk_index,
             )
         )
     return docs

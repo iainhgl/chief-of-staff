@@ -1038,6 +1038,50 @@ def _make_expanded_context(
 
 
 @pytest.mark.asyncio
+async def test_bounded_strategy_selects_document_first_anchors_before_expansion(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+) -> None:
+    from cos.retrieval.strategy import QueryStrategy
+
+    doc_a = _make_chunk_from_source("/docs/a.md", 0.95, 0, "doc a")
+    doc_b0 = _make_chunk_from_source("/docs/b.md", 0.81, 0, "doc b 0")
+    doc_b1 = _make_chunk_from_source("/docs/b.md", 0.80, 1, "doc b 1")
+    seen_anchor_locators: list[str] = []
+
+    async def _record_expansion(conn, anchors, **kwargs):  # type: ignore[no-untyped-def]
+        seen_anchor_locators.extend(chunk.source_locator for chunk in anchors)
+        from cos.retrieval.context_expansion import ExpandedContext
+
+        return ExpandedContext(
+            synthesis_chunks=list(anchors),
+            evidence_chunks=list(anchors),
+        )
+
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with (
+        patch(
+            _PATCH,
+            new=AsyncMock(return_value=_search_result([doc_a, doc_b0, doc_b1])),
+        ),
+        patch(_STRATEGY_PATCH, return_value=QueryStrategy.BOUNDED),
+        patch(_EXPANSION_PATCH, new=_record_expansion),
+    ):
+        await service.query(
+            "What did the review conclude about attrition?",
+            role_pack=None,
+        )
+
+    assert seen_anchor_locators == ["/docs/b.md", "/docs/b.md"]
+
+
+@pytest.mark.asyncio
 async def test_bounded_strategy_llm_receives_synthesis_chunks_not_evidence_only(
     tmp_path: Path,
     mock_pool: MagicMock,
@@ -1065,7 +1109,7 @@ async def test_bounded_strategy_llm_receives_synthesis_chunks_not_evidence_only(
             new=AsyncMock(return_value=_make_expanded_context(synthesis, evidence)),
         ),
     ):
-        response = await service.query("what did the review say?", role_pack=None)
+        await service.query("what did the review say?", role_pack=None)
 
     context = mock_llm_adapter.complete.call_args.kwargs["context"]
     assert "anchor content" in context

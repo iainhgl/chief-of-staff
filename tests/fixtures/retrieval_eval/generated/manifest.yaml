@@ -29,3 +29,4 @@ documents:
     source_alias: local://local-performance-policy
     source_type: local
     chunk_count: 3
+    citation_chunk_index: 1

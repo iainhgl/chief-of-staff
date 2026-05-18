@@ -1231,6 +1231,67 @@ async def test_benchmark_bounded_class_calls_expand_bounded_context(
 
 
 @pytest.mark.asyncio
+async def test_benchmark_bounded_selects_document_first_anchors_before_expansion(
+    tmp_path: Path,
+) -> None:
+    config = make_test_config(tmp_path)
+    pool = _make_pool_with_connection()
+
+    doc_a = _make_cited_chunk(
+        "local://local-leave-policy",
+        document_version_id="seeded-version-a",
+    )
+    doc_a.score = 0.95
+    doc_b0 = _make_cited_chunk(
+        "local://local-performance-policy",
+        document_version_id="seeded-version-b",
+    )
+    doc_b0.score = 0.81
+    doc_b1 = _make_cited_chunk(
+        "local://local-performance-policy",
+        document_version_id="seeded-version-b",
+    )
+    doc_b1.chunk_index = 1
+    doc_b1.score = 0.80
+
+    async def _fake_search(query, conn, cfg, **kwargs):  # type: ignore[no-untyped-def]
+        if "Below Expectations protocol" in query:
+            return [doc_a, doc_b0, doc_b1], SearchStats(final_candidate_count=3)
+        return [], SearchStats()
+
+    seen_anchor_locators: list[str] = []
+
+    async def _record_expansion(conn, anchors, **kwargs):  # type: ignore[no-untyped-def]
+        seen_anchor_locators.extend(chunk.source_locator for chunk in anchors)
+        from cos.retrieval.context_expansion import ExpandedContext
+
+        return ExpandedContext(
+            synthesis_chunks=list(anchors),
+            evidence_chunks=list(anchors),
+        )
+
+    with (
+        patch("cos.services.retrieval_eval.embed", new=AsyncMock(
+            return_value=[MagicMock(vector=[0.1] * 1024)]
+        )),
+        patch("cos.services.retrieval_eval.store_document_canonical", new=AsyncMock()),
+        patch(
+            "cos.services.retrieval_eval._resolve_seeded_citation",
+            new=AsyncMock(return_value=_SEEDED_CITATION),
+        ),
+        patch(_SEARCH_PATCH, new=_fake_search),
+        patch(_EXPANSION_PATCH, new=_record_expansion),
+    ):
+        service = RetrievalEvalService(config, pool)
+        await service.run_benchmark(_CORPUS_PATH)
+
+    assert seen_anchor_locators == [
+        "local://local-performance-policy",
+        "local://local-performance-policy",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_benchmark_bounded_citation_is_evidence_not_synthesis(
     tmp_path: Path,
 ) -> None:
@@ -1285,6 +1346,55 @@ async def test_benchmark_bounded_citation_is_evidence_not_synthesis(
     # Evidence = sdi_chunk only; score should reflect anchor citation not neighbour
     assert all(c.chunk_index == 0 for c in sdi_result.actual_citations)
     assert not any(c.chunk_index == 1 for c in sdi_result.actual_citations)
+
+
+@pytest.mark.asyncio
+async def test_benchmark_multi_chunk_query_requires_expected_chunk_index(
+    tmp_path: Path,
+) -> None:
+    config = make_test_config(tmp_path)
+    pool = _make_pool_with_connection()
+
+    wrong_chunk = _make_cited_chunk(
+        "local://local-performance-policy",
+        document_version_id="seeded-performance-version",
+    )
+    wrong_chunk.chunk_index = 0
+
+    async def _fake_resolve_seeded_citation(conn, source_path, doc, **kwargs):  # type: ignore[no-untyped-def]
+        document_version_id = "seeded-performance-version"
+        if doc.source_locator != "local://local-performance-policy":
+            document_version_id = f"seeded-{doc.source_locator}"
+        return BenchmarkCitation(
+            source_alias=doc.source_alias,
+            source_locator=doc.source_locator,
+            document_version_id=document_version_id,
+            chunk_index=kwargs.get("chunk_index", 0),
+        )
+
+    async def _fake_search(query, conn, cfg, **kwargs):  # type: ignore[no-untyped-def]
+        if "Below Expectations protocol" in query:
+            return [wrong_chunk], SearchStats(final_candidate_count=1)
+        return [], SearchStats()
+
+    with (
+        patch("cos.services.retrieval_eval.embed", new=AsyncMock(
+            return_value=[MagicMock(vector=[0.1] * 1024)]
+        )),
+        patch("cos.services.retrieval_eval.store_document_canonical", new=AsyncMock()),
+        patch(
+            "cos.services.retrieval_eval._resolve_seeded_citation",
+            new=_fake_resolve_seeded_citation,
+        ),
+        patch(_SEARCH_PATCH, new=_fake_search),
+    ):
+        service = RetrievalEvalService(config, pool)
+        report = await service.run_benchmark(_CORPUS_PATH)
+
+    result = {r.query_id: r for r in report.per_query}["gold-sdi-002"]
+    assert not result.passed
+    assert result.actual_citations[0].chunk_index == 0
+    assert result.expected_citations[0].chunk_index == 1
 
 
 @pytest.mark.asyncio
