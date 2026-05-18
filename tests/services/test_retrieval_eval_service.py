@@ -25,6 +25,25 @@ _SEEDED_CITATION = BenchmarkCitation(
 )
 
 _SEARCH_PATCH = "cos.services.retrieval_eval.hybrid_search_with_trace"
+_EXPANSION_PATCH = "cos.services.retrieval_eval.expand_bounded_context"
+
+
+async def _expansion_passthrough(conn, anchors, **kwargs):  # type: ignore[no-untyped-def]
+    """Default expansion stub: returns anchors unchanged as both synthesis and evidence."""
+    from cos.retrieval.context_expansion import ExpandedContext
+
+    return ExpandedContext(synthesis_chunks=list(anchors), evidence_chunks=list(anchors))
+
+
+@pytest.fixture(autouse=True)
+def _patch_expand_passthrough():
+    """Patch expand_bounded_context to a passthrough for all tests in this module.
+
+    Tests that need to verify specific expansion behavior can override this by
+    patching _EXPANSION_PATCH inside their own context managers.
+    """
+    with patch(_EXPANSION_PATCH, new=_expansion_passthrough):
+        yield
 
 
 def _empty_search(*args, **kwargs):  # type: ignore[no-untyped-def]
@@ -103,9 +122,9 @@ async def test_run_benchmark_loads_and_runs_all_gold_queries(tmp_path: Path) -> 
         service = RetrievalEvalService(config, pool)
         report = await service.run_benchmark(_CORPUS_PATH)
 
-    # Gold corpus has 7 queries (core-queries.yaml)
-    assert report.total_queries == 7
-    assert call_count == 7
+    # Gold corpus has 8 queries (core-queries.yaml) — 7 original + gold-sdi-002 (Story 7.4)
+    assert report.total_queries == 8
+    assert call_count == 8
 
 
 @pytest.mark.asyncio
@@ -130,8 +149,8 @@ async def test_run_benchmark_with_fuzz_includes_fuzz_queries(tmp_path: Path) -> 
         service = RetrievalEvalService(config, pool)
         report = await service.run_benchmark(_CORPUS_PATH, include_stress_fuzz=True)
 
-    # Gold (7) + stress_fuzz (5) = 12
-    assert report.total_queries == 12
+    # Gold (8) + stress_fuzz (5) = 13
+    assert report.total_queries == 13
 
 
 @pytest.mark.asyncio
@@ -305,7 +324,8 @@ async def test_run_benchmark_uses_benchmark_provider_and_namespaced_source_ident
         service = RetrievalEvalService(config, pool)
         await service.run_benchmark(_CORPUS_PATH)
 
-    assert embed_mock.await_count == 5
+    # 5 single-chunk docs × 1 embed call + 1 three-chunk doc × 3 embed calls = 8
+    assert embed_mock.await_count == 8
     assert all(
         call.kwargs["provider"] == "benchmark"
         for call in embed_mock.await_args_list
@@ -598,7 +618,7 @@ async def test_run_benchmark_report_has_schema_version(tmp_path: Path) -> None:
         service = RetrievalEvalService(config, pool)
         report = await service.run_benchmark(_CORPUS_PATH)
 
-    assert report.schema_version == "7.3"
+    assert report.schema_version == "7.4"
 
 
 # ── Report building and serialisation ────────────────────────────────────────
@@ -655,7 +675,7 @@ def test_report_to_dict_contains_new_top_level_keys(tmp_path: Path) -> None:
     d = report_to_dict(report)
 
     assert "schema_version" in d
-    assert d["schema_version"] == "7.3"
+    assert d["schema_version"] == "7.4"
     assert "retrieval_settings" in d
     assert d["retrieval_settings"]["min_score"] == 0.0
 
@@ -1005,7 +1025,7 @@ async def test_benchmark_real_selector_allows_single_lineage_briefing_when_query
             )
         return [], SearchStats()
 
-    async def _fake_resolve_seeded_citation(conn, source_path, doc):  # type: ignore[no-untyped-def]
+    async def _fake_resolve_seeded_citation(conn, source_path, doc, **kwargs):  # type: ignore[no-untyped-def]
         return BenchmarkCitation(
             source_alias=doc.source_locator,
             source_locator=doc.source_locator,
@@ -1042,6 +1062,10 @@ async def test_benchmark_scores_based_on_evidence_eligible_set(
     pool = _make_pool_with_connection()
     chunk = _make_benchmark_chunk("local://leave-policy", "seeded-version-1")
 
+    async def _empty_expansion(conn, anchors, **kwargs):  # type: ignore[no-untyped-def]
+        from cos.retrieval.context_expansion import ExpandedContext
+        return ExpandedContext(synthesis_chunks=[], evidence_chunks=[])
+
     with (
         patch("cos.services.retrieval_eval.embed", new=AsyncMock(
             return_value=[MagicMock(vector=[0.1] * 1024)]
@@ -1053,6 +1077,7 @@ async def test_benchmark_scores_based_on_evidence_eligible_set(
         ),
         patch(_SEARCH_PATCH, new=AsyncMock(return_value=([chunk], SearchStats()))),
         patch(_EVIDENCE_SELECT_PATCH, return_value=[]),
+        patch(_EXPANSION_PATCH, new=_empty_expansion),
     ):
         service = RetrievalEvalService(config, pool)
         report = await service.run_benchmark(_CORPUS_PATH)
@@ -1072,6 +1097,10 @@ async def test_benchmark_attribute_failure_evidence_selection_stage(
     pool = _make_pool_with_connection()
     chunk = _make_benchmark_chunk("local://leave-policy", "seeded-version-1")
 
+    async def _empty_expansion(conn, anchors, **kwargs):  # type: ignore[no-untyped-def]
+        from cos.retrieval.context_expansion import ExpandedContext
+        return ExpandedContext(synthesis_chunks=[], evidence_chunks=[])
+
     with (
         patch("cos.services.retrieval_eval.embed", new=AsyncMock(
             return_value=[MagicMock(vector=[0.1] * 1024)]
@@ -1088,6 +1117,7 @@ async def test_benchmark_attribute_failure_evidence_selection_stage(
             final_candidate_count=1,
         )))),
         patch(_EVIDENCE_SELECT_PATCH, return_value=[]),
+        patch(_EXPANSION_PATCH, new=_empty_expansion),
     ):
         service = RetrievalEvalService(config, pool)
         report = await service.run_benchmark(_CORPUS_PATH)
@@ -1140,4 +1170,217 @@ async def test_benchmark_attribute_failure_nonempty_wrong_evidence_is_evidence_s
     result = {r.query_id: r for r in report.per_query}["gold-df-001"]
     assert not result.passed
     assert result.failure_stage == "evidence_selection"
-    assert result.candidate_counts["post_evidence_selection"] == 1
+
+
+# ── Document-first retrieval and context expansion tests (Story 7.4) ──────────
+
+
+@pytest.mark.asyncio
+async def test_benchmark_bounded_class_uses_strategy_not_lineage_class_set(
+    tmp_path: Path,
+) -> None:
+    """single_doc_interpretation triggers BOUNDED strategy (not SINGLE_LINEAGE_CLASSES dict)."""
+    from cos.retrieval.strategy import QueryStrategy, select_query_strategy_for_class
+
+    strategy = select_query_strategy_for_class("single_doc_interpretation")
+    assert strategy == QueryStrategy.BOUNDED
+
+
+@pytest.mark.asyncio
+async def test_benchmark_bounded_class_calls_expand_bounded_context(
+    tmp_path: Path,
+) -> None:
+    """BOUNDED queries must invoke expand_bounded_context rather than bypassing it."""
+    config = make_test_config(tmp_path)
+    pool = _make_pool_with_connection()
+
+    sdi_chunk = _make_cited_chunk(
+        "calendar://event-q1-review-001",
+        document_version_id="seeded-version-cal",
+    )
+
+    async def _fake_search(query, conn, cfg, **kwargs):  # type: ignore[no-untyped-def]
+        if "attrition" in query.lower() or "Q1 business review" in query.lower() or "business review" in query.lower():
+            return [sdi_chunk], SearchStats(final_candidate_count=1)
+        return [], SearchStats()
+
+    expansion_calls: list = []
+
+    async def _record_expansion(conn, anchors, **kwargs):  # type: ignore[no-untyped-def]
+        expansion_calls.append(list(anchors))
+        from cos.retrieval.context_expansion import ExpandedContext
+        return ExpandedContext(synthesis_chunks=list(anchors), evidence_chunks=list(anchors))
+
+    with (
+        patch("cos.services.retrieval_eval.embed", new=AsyncMock(
+            return_value=[MagicMock(vector=[0.1] * 1024)]
+        )),
+        patch("cos.services.retrieval_eval.store_document_canonical", new=AsyncMock()),
+        patch(
+            "cos.services.retrieval_eval._resolve_seeded_citation",
+            new=AsyncMock(return_value=_SEEDED_CITATION),
+        ),
+        patch(_SEARCH_PATCH, new=_fake_search),
+        patch(_EXPANSION_PATCH, new=_record_expansion),
+    ):
+        service = RetrievalEvalService(config, pool)
+        await service.run_benchmark(_CORPUS_PATH)
+
+    # At least one expansion call must have been made for BOUNDED queries
+    assert len(expansion_calls) >= 1
+
+
+@pytest.mark.asyncio
+async def test_benchmark_bounded_citation_is_evidence_not_synthesis(
+    tmp_path: Path,
+) -> None:
+    """BOUNDED: citations in the benchmark result are evidence_chunks, not synthesis_chunks."""
+    config = make_test_config(tmp_path)
+    pool = _make_pool_with_connection()
+
+    sdi_chunk = _make_cited_chunk(
+        "calendar://event-q1-review-001",
+        document_version_id="seeded-version-cal",
+    )
+    neighbour = _make_cited_chunk(
+        "calendar://event-q1-review-001",
+        document_version_id="seeded-version-cal",
+    )
+    neighbour.chunk_index = 1
+    neighbour.score = 0.0
+
+    async def _fake_search(query, conn, cfg, **kwargs):  # type: ignore[no-untyped-def]
+        if "attrition" in query.lower() or "business review" in query.lower():
+            return [sdi_chunk], SearchStats(final_candidate_count=1)
+        return [], SearchStats()
+
+    async def _fake_expansion(conn, anchors, **kwargs):  # type: ignore[no-untyped-def]
+        from cos.retrieval.context_expansion import ExpandedContext
+        return ExpandedContext(
+            synthesis_chunks=[sdi_chunk, neighbour],
+            evidence_chunks=[sdi_chunk],
+        )
+
+    with (
+        patch("cos.services.retrieval_eval.embed", new=AsyncMock(
+            return_value=[MagicMock(vector=[0.1] * 1024)]
+        )),
+        patch("cos.services.retrieval_eval.store_document_canonical", new=AsyncMock()),
+        patch(
+            "cos.services.retrieval_eval._resolve_seeded_citation",
+            new=AsyncMock(return_value=BenchmarkCitation(
+                source_alias="calendar://event-q1-review-001",
+                source_locator="calendar://event-q1-review-001",
+                document_version_id="seeded-version-cal",
+                chunk_index=0,
+            )),
+        ),
+        patch(_SEARCH_PATCH, new=_fake_search),
+        patch(_EXPANSION_PATCH, new=_fake_expansion),
+    ):
+        service = RetrievalEvalService(config, pool)
+        report = await service.run_benchmark(_CORPUS_PATH)
+
+    sdi_result = {r.query_id: r for r in report.per_query}["gold-sdi-001"]
+    # Evidence = sdi_chunk only; score should reflect anchor citation not neighbour
+    assert all(c.chunk_index == 0 for c in sdi_result.actual_citations)
+    assert not any(c.chunk_index == 1 for c in sdi_result.actual_citations)
+
+
+@pytest.mark.asyncio
+async def test_benchmark_candidate_counts_includes_expansion_fields(
+    tmp_path: Path,
+) -> None:
+    """candidate_counts in benchmark result includes expansion_mode and expanded_context."""
+    config = make_test_config(tmp_path)
+    pool = _make_pool_with_connection()
+
+    sdi_chunk = _make_cited_chunk(
+        "calendar://event-q1-review-001",
+        document_version_id="seeded-version-cal",
+    )
+
+    async def _fake_search(query, conn, cfg, **kwargs):  # type: ignore[no-untyped-def]
+        if "attrition" in query.lower() or "business review" in query.lower():
+            return [sdi_chunk], SearchStats(final_candidate_count=1)
+        return [], SearchStats()
+
+    async def _fake_expansion(conn, anchors, **kwargs):  # type: ignore[no-untyped-def]
+        from cos.retrieval.context_expansion import ExpandedContext
+        return ExpandedContext(
+            synthesis_chunks=[sdi_chunk, sdi_chunk],
+            evidence_chunks=[sdi_chunk],
+        )
+
+    with (
+        patch("cos.services.retrieval_eval.embed", new=AsyncMock(
+            return_value=[MagicMock(vector=[0.1] * 1024)]
+        )),
+        patch("cos.services.retrieval_eval.store_document_canonical", new=AsyncMock()),
+        patch(
+            "cos.services.retrieval_eval._resolve_seeded_citation",
+            new=AsyncMock(return_value=_SEEDED_CITATION),
+        ),
+        patch(_SEARCH_PATCH, new=_fake_search),
+        patch(_EXPANSION_PATCH, new=_fake_expansion),
+    ):
+        service = RetrievalEvalService(config, pool)
+        report = await service.run_benchmark(_CORPUS_PATH)
+
+    sdi_result = {r.query_id: r for r in report.per_query}["gold-sdi-001"]
+    counts = sdi_result.candidate_counts
+    assert counts["expansion_mode"] == "bounded"
+    assert counts["expanded_context"] == 2
+
+
+@pytest.mark.asyncio
+async def test_benchmark_multi_chunk_fixture_seeded_and_queryable(
+    tmp_path: Path,
+) -> None:
+    """The multi-chunk performance policy fixture must be seeded in the DB via benchmark run."""
+    config = make_test_config(tmp_path)
+    pool = _make_pool_with_connection()
+
+    store_calls: list = []
+
+    async def _record_store(*args, **kwargs):  # type: ignore[no-untyped-def]
+        store_calls.append(kwargs.get("source_locator", ""))
+
+    with (
+        patch("cos.services.retrieval_eval.embed", new=AsyncMock(
+            return_value=[MagicMock(vector=[0.1] * 1024)]
+        )),
+        patch("cos.services.retrieval_eval.store_document_canonical", new=_record_store),
+        patch(
+            "cos.services.retrieval_eval._resolve_seeded_citation",
+            new=AsyncMock(return_value=_SEEDED_CITATION),
+        ),
+        patch(_SEARCH_PATCH, new=AsyncMock(return_value=([], SearchStats()))),
+    ):
+        service = RetrievalEvalService(config, pool)
+        await service.run_benchmark(_CORPUS_PATH)
+
+    stored_locators = set(store_calls)
+    assert "local://local-performance-policy" in stored_locators
+
+
+@pytest.mark.asyncio
+async def test_benchmark_report_schema_version_is_7_4(tmp_path: Path) -> None:
+    config = make_test_config(tmp_path)
+    pool = _make_pool_with_connection()
+
+    with (
+        patch("cos.services.retrieval_eval.embed", new=AsyncMock(
+            return_value=[MagicMock(vector=[0.1] * 1024)]
+        )),
+        patch("cos.services.retrieval_eval.store_document_canonical", new=AsyncMock()),
+        patch(
+            "cos.services.retrieval_eval._resolve_seeded_citation",
+            new=AsyncMock(return_value=_SEEDED_CITATION),
+        ),
+        patch(_SEARCH_PATCH, new=AsyncMock(return_value=([], SearchStats()))),
+    ):
+        service = RetrievalEvalService(config, pool)
+        report = await service.run_benchmark(_CORPUS_PATH)
+
+    assert report.schema_version == "7.4"

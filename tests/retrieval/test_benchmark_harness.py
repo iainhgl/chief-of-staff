@@ -104,9 +104,9 @@ def test_load_queries_no_answer_cases_have_empty_lineage() -> None:
             )
 
 
-def test_load_fixture_docs_returns_five_docs() -> None:
+def test_load_fixture_docs_returns_six_docs() -> None:
     docs = load_fixture_docs(_CORPUS_PATH)
-    assert len(docs) == 5
+    assert len(docs) == 6
     locators = {d.source_locator for d in docs}
     assert "local://local-leave-policy" in locators
     assert "gmail://msg-leave-policy-001" in locators
@@ -817,3 +817,153 @@ def test_attribute_failure_positive_evidence_selection_falls_through_to_citation
         "post_evidence_selection": 1,
     }
     assert attribute_failure("missed_answer", counts) == "citation_precision"
+
+
+# ── attribute_failure tests (Story 7.4) ──────────────────────────────────────
+
+
+def test_attribute_failure_context_expansion_lost_support_returns_context_expansion() -> None:
+    counts = {
+        "merged": 5, "post_threshold": 3, "post_pruning": 2, "final": 1,
+        "post_evidence_selection": 1,
+    }
+    assert (
+        attribute_failure(
+            "missed_answer",
+            counts,
+            context_expansion_lost_support=True,
+        )
+        == "context_expansion"
+    )
+
+
+def test_attribute_failure_context_expansion_not_checked_before_evidence_selection() -> None:
+    """context_expansion is only reached when evidence_selection_lost_support is False."""
+    counts = {
+        "merged": 5, "post_threshold": 3, "post_pruning": 2, "final": 1,
+        "post_evidence_selection": 1,
+    }
+    assert (
+        attribute_failure(
+            "missed_answer",
+            counts,
+            evidence_selection_lost_support=True,
+            context_expansion_lost_support=True,
+        )
+        == "evidence_selection"
+    )
+
+
+def test_attribute_failure_context_expansion_not_triggered_without_flag() -> None:
+    """If context_expansion_lost_support is False, falls through to citation_precision."""
+    counts = {
+        "merged": 5, "post_threshold": 3, "post_pruning": 2, "final": 1,
+        "post_evidence_selection": 1,
+    }
+    assert attribute_failure("missed_answer", counts) == "citation_precision"
+
+
+# ── Query strategy classification tests (Story 7.4) ─────────────────────────
+
+
+def test_query_strategy_for_class_single_doc_is_bounded() -> None:
+    from cos.retrieval.strategy import QueryStrategy, select_query_strategy_for_class
+
+    assert select_query_strategy_for_class("single_doc_interpretation") == QueryStrategy.BOUNDED
+
+
+def test_query_strategy_for_class_cross_doc_is_multi_source() -> None:
+    from cos.retrieval.strategy import QueryStrategy, select_query_strategy_for_class
+
+    assert select_query_strategy_for_class("cross_doc_synthesis") == QueryStrategy.MULTI_SOURCE
+
+
+def test_query_strategy_for_class_direct_fact_is_default() -> None:
+    from cos.retrieval.strategy import QueryStrategy, select_query_strategy_for_class
+
+    for cls in ("direct_fact", "exact_phrase", "date_timeline", "no_answer", "briefing"):
+        assert select_query_strategy_for_class(cls) == QueryStrategy.DEFAULT, cls
+
+
+def test_query_strategy_from_text_compare_is_multi_source() -> None:
+    from cos.retrieval.strategy import QueryStrategy, select_query_strategy_from_text
+
+    assert select_query_strategy_from_text("compare the leave policy vs the email") == QueryStrategy.MULTI_SOURCE
+
+
+def test_query_strategy_from_text_factual_is_default() -> None:
+    from cos.retrieval.strategy import QueryStrategy, select_query_strategy_from_text
+
+    assert select_query_strategy_from_text("How many days of annual leave?") == QueryStrategy.DEFAULT
+
+
+def test_query_strategy_from_text_document_interpretation_is_bounded() -> None:
+    from cos.retrieval.strategy import QueryStrategy, select_query_strategy_from_text
+
+    assert (
+        select_query_strategy_from_text("What did the Q1 business review conclude about attrition?")
+        == QueryStrategy.BOUNDED
+    )
+
+
+def test_query_strategy_multi_source_takes_precedence_over_bounded() -> None:
+    from cos.retrieval.strategy import QueryStrategy, select_query_strategy_from_text
+
+    # A query that has both multi-source and bounded signals → MULTI_SOURCE wins
+    result = select_query_strategy_from_text(
+        "Compare what both documents say about the policy"
+    )
+    assert result == QueryStrategy.MULTI_SOURCE
+
+
+# ── Fixture loading tests for multi-chunk documents (Story 7.4) ──────────────
+
+
+def test_load_fixture_docs_includes_performance_policy() -> None:
+    docs = load_fixture_docs(_CORPUS_PATH)
+    locators = {d.source_locator for d in docs}
+    assert "local://local-performance-policy" in locators
+
+
+def test_load_fixture_docs_performance_policy_has_chunk_count_3() -> None:
+    docs = load_fixture_docs(_CORPUS_PATH)
+    policy = next(d for d in docs if d.source_locator == "local://local-performance-policy")
+    assert policy.chunk_count == 3
+
+
+def test_load_fixture_docs_single_chunk_docs_have_chunk_count_1() -> None:
+    docs = load_fixture_docs(_CORPUS_PATH)
+    for doc in docs:
+        if doc.source_locator != "local://local-performance-policy":
+            assert doc.chunk_count == 1, f"{doc.source_locator} has unexpected chunk_count"
+
+
+def test_load_fixture_docs_chunk_count_invalid_raises_corpus_error(tmp_path: Path) -> None:
+    from cos.retrieval.benchmark import CorpusError, load_fixture_docs
+
+    gen_dir = tmp_path / "generated"
+    gen_dir.mkdir()
+    (gen_dir / "manifest.yaml").write_text(
+        "documents:\n"
+        "  - filename: foo.md\n"
+        "    source_locator: loc://foo\n"
+        "    source_alias: loc://foo\n"
+        "    source_type: local\n"
+        "    chunk_count: 0\n"
+    )
+    with pytest.raises(CorpusError, match="chunk_count"):
+        load_fixture_docs(tmp_path)
+
+
+def test_gold_sdi_002_query_present_in_corpus() -> None:
+    queries = load_queries(_CORPUS_PATH)
+    ids = {q.id for q in queries}
+    assert "gold-sdi-002" in ids
+
+
+def test_gold_sdi_002_is_single_doc_interpretation() -> None:
+    queries = load_queries(_CORPUS_PATH)
+    q = next(q for q in queries if q.id == "gold-sdi-002")
+    assert q.query_class == "single_doc_interpretation"
+    assert q.answerable
+    assert "local://local-performance-policy" in q.expected_lineage

@@ -16,7 +16,6 @@ from cos.config import CosConfig
 from cos.ingestion.embedder import embed
 from cos.retrieval.benchmark import (
     BENCHMARK_SCHEMA_VERSION,
-    SINGLE_LINEAGE_CLASSES,
     BenchmarkCitation,
     BenchmarkQuery,
     BenchmarkReport,
@@ -34,8 +33,9 @@ from cos.retrieval.benchmark import (
     score_query,
 )
 from cos.retrieval.citations import narrow_to_lineage, select_synthesis_evidence
+from cos.retrieval.context_expansion import expand_bounded_context
 from cos.retrieval.search import hybrid_search_with_trace
-from cos.services.retrieval import _is_multi_source_query
+from cos.retrieval.strategy import QueryStrategy, select_query_strategy_for_class
 from cos.store.db import store_document_canonical
 from cos.store.models import ChunkRecord, EmbeddingRecord
 
@@ -120,27 +120,34 @@ class RetrievalEvalService:
             source_path = _benchmark_source_path(doc)
             source_type = _benchmark_source_type(doc.source_type)
 
-            chunks = [
-                ChunkRecord(
-                    content=content,
-                    chunk_index=0,
-                    token_count=len(content.split()),
+            if doc.chunk_count > 1:
+                chunks, embeddings = await _make_multi_chunks(
+                    content, doc.chunk_count, benchmark_config
                 )
-            ]
-            embeddings = [
-                EmbeddingRecord(
-                    vector=(
-                        await embed(
-                            [content],
-                            provider=benchmark_config.embedding.provider,
-                            model=benchmark_config.embedding.model,
-                            api_key="",
-                        )
-                    )[0].vector,
-                    model=benchmark_config.embedding.model,
-                    provider=benchmark_config.embedding.provider,
-                )
-            ]
+                citation_chunk_index = -1  # any chunk from this lineage is acceptable
+            else:
+                chunks = [
+                    ChunkRecord(
+                        content=content,
+                        chunk_index=0,
+                        token_count=len(content.split()),
+                    )
+                ]
+                embeddings = [
+                    EmbeddingRecord(
+                        vector=(
+                            await embed(
+                                [content],
+                                provider=benchmark_config.embedding.provider,
+                                model=benchmark_config.embedding.model,
+                                api_key="",
+                            )
+                        )[0].vector,
+                        model=benchmark_config.embedding.model,
+                        provider=benchmark_config.embedding.provider,
+                    )
+                ]
+                citation_chunk_index = 0
 
             await store_document_canonical(
                 conn,
@@ -159,7 +166,9 @@ class RetrievalEvalService:
                     source_type=source_type,
                     source_locator=doc.source_locator,
                     source_alias=doc.source_alias,
-                    citation=await _resolve_seeded_citation(conn, source_path, doc),
+                    citation=await _resolve_seeded_citation(
+                        conn, source_path, doc, chunk_index=citation_chunk_index
+                    ),
                 )
             )
         return seeded
@@ -182,17 +191,36 @@ class RetrievalEvalService:
         )
         latency_ms = (time.monotonic() - t0) * 1000.0
 
+        document_candidate_count = len(
+            {c.document_version_id or c.source_locator for c in cited}
+        )
+
+        strategy = select_query_strategy_for_class(query.query_class)
+
         pre_lineage_cited = list(cited)
         post_lineage_count: int | None = None
-        if cited and query.query_class in SINGLE_LINEAGE_CLASSES:
+        expansion_mode = "none"
+        expanded_context_count: int | None = None
+
+        if strategy == QueryStrategy.BOUNDED:
+            anchors = narrow_to_lineage(cited)
+            post_lineage_count = len(anchors)
+            expanded = await expand_bounded_context(conn, anchors)
+            evidence = expanded.evidence_chunks
+            post_evidence_selection_count = len(evidence)
+            expansion_mode = "bounded"
+            expanded_context_count = len(expanded.synthesis_chunks)
+        elif strategy == QueryStrategy.MULTI_SOURCE:
+            evidence = select_synthesis_evidence(
+                cited,
+                require_multi_source=True,
+            )
+            post_evidence_selection_count = len(evidence)
+        else:  # DEFAULT
             cited = narrow_to_lineage(cited)
             post_lineage_count = len(cited)
-
-        evidence = select_synthesis_evidence(
-            cited,
-            require_multi_source=_is_multi_source_query(query.query),
-        )
-        post_evidence_selection_count = len(evidence)
+            evidence = select_synthesis_evidence(cited)
+            post_evidence_selection_count = len(evidence)
 
         candidate_counts: dict[str, Any] = {
             "keyword": stats.keyword_candidate_count,
@@ -201,8 +229,11 @@ class RetrievalEvalService:
             "post_threshold": stats.post_threshold_count,
             "post_pruning": stats.post_pruning_count,
             "final": stats.final_candidate_count,
+            "document_candidates": document_candidate_count,
             "post_lineage": post_lineage_count,
             "post_evidence_selection": post_evidence_selection_count,
+            "expansion_mode": expansion_mode,
+            "expanded_context": expanded_context_count,
         }
 
         result = score_query(
@@ -216,6 +247,12 @@ class RetrievalEvalService:
             synthesis_mode="not_run",
         )
 
+        post_lineage_result = score_query(
+            query,
+            cited if strategy == QueryStrategy.DEFAULT else pre_lineage_cited,
+            latency_ms,
+            expected_citations=expected_citations,
+        )
         pre_lineage_result = (
             score_query(
                 query,
@@ -223,18 +260,24 @@ class RetrievalEvalService:
                 latency_ms,
                 expected_citations=expected_citations,
             )
-            if post_lineage_count is not None
+            if post_lineage_count is not None and strategy == QueryStrategy.DEFAULT
             else None
         )
-        post_lineage_result = score_query(
-            query,
-            cited,
-            latency_ms,
-            expected_citations=expected_citations,
-        )
 
-        # Attribute failure to the earliest pipeline stage that lost evidence
         if not result.passed:
+            # For BOUNDED: anchor recall vs expansion result (context_expansion stage)
+            anchors_passed = (
+                recall_satisfied(
+                    score_query(
+                        query,
+                        narrow_to_lineage(pre_lineage_cited) if pre_lineage_cited else [],
+                        latency_ms,
+                        expected_citations=expected_citations,
+                    )
+                )
+                if strategy == QueryStrategy.BOUNDED and pre_lineage_cited
+                else False
+            )
             result.failure_stage = attribute_failure(
                 result.answerability_verdict,
                 candidate_counts,
@@ -245,6 +288,12 @@ class RetrievalEvalService:
                 ),
                 evidence_selection_lost_support=(
                     recall_satisfied(post_lineage_result)
+                    and not recall_satisfied(result)
+                    and strategy != QueryStrategy.BOUNDED
+                ),
+                context_expansion_lost_support=(
+                    strategy == QueryStrategy.BOUNDED
+                    and anchors_passed
                     and not recall_satisfied(result)
                 ),
             )
@@ -453,10 +502,53 @@ def _content_sha256(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
+async def _make_multi_chunks(
+    content: str,
+    chunk_count: int,
+    benchmark_config: CosConfig,
+) -> tuple[list[ChunkRecord], list[EmbeddingRecord]]:
+    """Split content into chunk_count roughly equal chunks and embed each."""
+    lines = content.splitlines(keepends=True)
+    total_lines = len(lines)
+    chunk_size = max(1, total_lines // chunk_count)
+
+    chunks: list[ChunkRecord] = []
+    embeddings: list[EmbeddingRecord] = []
+    for i in range(chunk_count):
+        start = i * chunk_size
+        end = start + chunk_size if i < chunk_count - 1 else total_lines
+        chunk_content = "".join(lines[start:end]).strip()
+        if not chunk_content:
+            continue
+        chunks.append(
+            ChunkRecord(
+                content=chunk_content,
+                chunk_index=i,
+                token_count=len(chunk_content.split()),
+            )
+        )
+        result = await embed(
+            [chunk_content],
+            provider=benchmark_config.embedding.provider,
+            model=benchmark_config.embedding.model,
+            api_key="",
+        )
+        embeddings.append(
+            EmbeddingRecord(
+                vector=result[0].vector,
+                model=benchmark_config.embedding.model,
+                provider=benchmark_config.embedding.provider,
+            )
+        )
+    return chunks, embeddings
+
+
 async def _resolve_seeded_citation(
     conn: psycopg.AsyncConnection,  # type: ignore[type-arg]
     source_path: str,
     doc: FixtureDoc,
+    *,
+    chunk_index: int = 0,
 ) -> BenchmarkCitation:
     result = await conn.execute(
         """
@@ -478,7 +570,7 @@ async def _resolve_seeded_citation(
         source_alias=doc.source_alias,
         source_locator=doc.source_locator,
         document_version_id=row[0],
-        chunk_index=0,
+        chunk_index=chunk_index,
     )
 
 
