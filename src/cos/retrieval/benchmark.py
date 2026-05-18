@@ -11,7 +11,7 @@ import yaml
 
 from cos.retrieval.citations import CitedResults
 
-BENCHMARK_SCHEMA_VERSION = "7.2"
+BENCHMARK_SCHEMA_VERSION = "7.3"
 
 VALID_QUERY_CLASSES = frozenset(
     {
@@ -316,6 +316,9 @@ def attribute_failure(
         return "top_k_truncation"
     if lineage_narrowing_lost_support:
         return "lineage_narrowing"
+    post_evidence = _count_value(candidate_counts, "post_evidence_selection")
+    if post_evidence is not None and post_evidence == 0:
+        return "evidence_selection"
     if verdict == "false_answer":
         return "citation_precision"
     return "citation_precision"

@@ -33,7 +33,7 @@ from cos.retrieval.benchmark import (
     resolve_corpus_version,
     score_query,
 )
-from cos.retrieval.citations import narrow_to_lineage
+from cos.retrieval.citations import narrow_to_lineage, select_synthesis_evidence
 from cos.retrieval.search import hybrid_search_with_trace
 from cos.store.db import store_document_canonical
 from cos.store.models import ChunkRecord, EmbeddingRecord
@@ -187,6 +187,9 @@ class RetrievalEvalService:
             cited = narrow_to_lineage(cited)
             post_lineage_count = len(cited)
 
+        evidence = select_synthesis_evidence(cited)
+        post_evidence_selection_count = len(evidence)
+
         candidate_counts: dict[str, Any] = {
             "keyword": stats.keyword_candidate_count,
             "semantic": stats.semantic_candidate_count,
@@ -195,11 +198,12 @@ class RetrievalEvalService:
             "post_pruning": stats.post_pruning_count,
             "final": stats.final_candidate_count,
             "post_lineage": post_lineage_count,
+            "post_evidence_selection": post_evidence_selection_count,
         }
 
         result = score_query(
             query,
-            cited,
+            evidence,
             latency_ms,
             expected_citations=expected_citations,
             trace_id=str(uuid.uuid4()),

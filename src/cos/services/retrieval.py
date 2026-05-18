@@ -10,7 +10,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from cos.config import CosConfig
 from cos.llm.adapter import LLMAdapter
-from cos.retrieval.citations import CitedResponse, narrow_to_lineage
+from cos.retrieval.citations import CitedResponse, narrow_to_lineage, select_synthesis_evidence
 from cos.retrieval.search import hybrid_search_with_trace
 from cos.retrieval.telemetry import SearchStats
 
@@ -166,6 +166,7 @@ def _emit_retrieval_log(
     query_mode: str,
     stats: SearchStats,
     post_lineage_count: int | None,
+    post_evidence_selection_count: int | None,
     retrieval_latency_ms: float,
     synthesis_latency_ms: float | None,
     total_latency_ms: float,
@@ -194,6 +195,7 @@ def _emit_retrieval_log(
             "post_pruning": stats.post_pruning_count,
             "final": stats.final_candidate_count,
             "post_lineage": post_lineage_count,
+            "post_evidence_selection": post_evidence_selection_count,
         },
         "latency_ms": {
             "retrieval": round(retrieval_latency_ms, 2),
@@ -249,6 +251,7 @@ class RetrievalService:
                 query_mode=query_mode,
                 stats=search_stats,
                 post_lineage_count=None,
+                post_evidence_selection_count=None,
                 retrieval_latency_ms=retrieval_latency_ms,
                 synthesis_latency_ms=None,
                 total_latency_ms=(time.monotonic() - t_start) * 1000.0,
@@ -266,6 +269,7 @@ class RetrievalService:
                 query_mode=query_mode,
                 stats=search_stats,
                 post_lineage_count=None,
+                post_evidence_selection_count=None,
                 retrieval_latency_ms=retrieval_latency_ms,
                 synthesis_latency_ms=None,
                 total_latency_ms=(time.monotonic() - t_start) * 1000.0,
@@ -284,8 +288,31 @@ class RetrievalService:
             cited_results = narrow_to_lineage(cited_results)
             post_lineage_count = len(cited_results)
 
+        evidence = select_synthesis_evidence(cited_results)
+        post_evidence_selection_count = len(evidence)
+
+        if not evidence:
+            _emit_retrieval_log(
+                trace_id=trace_id,
+                query_mode=query_mode,
+                stats=search_stats,
+                post_lineage_count=post_lineage_count,
+                post_evidence_selection_count=post_evidence_selection_count,
+                retrieval_latency_ms=retrieval_latency_ms,
+                synthesis_latency_ms=None,
+                total_latency_ms=(time.monotonic() - t_start) * 1000.0,
+                provider=self._config.llm.provider,
+                model=self._config.llm.model,
+                outcome="no_content",
+                failure_stage="evidence_selection",
+            )
+            return CitedResponse(
+                answer="No relevant content found in the knowledge base.",
+                citations=[],
+            )
+
         prompt = _build_synthesis_prompt(text, role_pack)
-        context = [chunk.content for chunk in cited_results]
+        context = [chunk.content for chunk in evidence]
 
         t_synthesis = time.monotonic()
         try:
@@ -296,6 +323,7 @@ class RetrievalService:
                 query_mode=query_mode,
                 stats=search_stats,
                 post_lineage_count=post_lineage_count,
+                post_evidence_selection_count=post_evidence_selection_count,
                 retrieval_latency_ms=retrieval_latency_ms,
                 synthesis_latency_ms=synthesis_latency_ms,
                 total_latency_ms=(time.monotonic() - t_start) * 1000.0,
@@ -311,6 +339,7 @@ class RetrievalService:
                 query_mode=query_mode,
                 stats=search_stats,
                 post_lineage_count=post_lineage_count,
+                post_evidence_selection_count=post_evidence_selection_count,
                 retrieval_latency_ms=retrieval_latency_ms,
                 synthesis_latency_ms=synthesis_latency_ms,
                 total_latency_ms=(time.monotonic() - t_start) * 1000.0,
@@ -319,6 +348,6 @@ class RetrievalService:
                 outcome="synthesis_degraded",
                 failure_stage="synthesis",
             )
-            return CitedResponse(answer=None, citations=cited_results)
+            return CitedResponse(answer=None, citations=evidence)
 
-        return CitedResponse(answer=answer, citations=cited_results)
+        return CitedResponse(answer=answer, citations=evidence)

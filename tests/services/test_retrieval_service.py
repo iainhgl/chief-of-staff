@@ -804,3 +804,163 @@ async def test_query_telemetry_query_mode_is_not_raw_text(
         f"query_mode {data['query_mode']!r} is not a safe mode token"
     )
     assert data["query_mode"] != raw_query
+
+
+# ── Evidence-selection tests (Story 7.3) ─────────────────────────────────────
+
+_EVIDENCE_SELECT_PATCH = "cos.services.retrieval.select_synthesis_evidence"
+
+
+@pytest.mark.asyncio
+async def test_llm_receives_only_synthesis_eligible_evidence(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+) -> None:
+    """LLM context must contain exactly the evidence-eligible subset, no more."""
+    chunk_a = _make_chunk_from_source("/docs/a.md", 0.9, 0, "evidence-a content")
+    chunk_b = _make_chunk_from_source("/docs/b.md", 0.8, 0, "evidence-b content")
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with (
+        patch(_PATCH, new=AsyncMock(return_value=_search_result([chunk_a, chunk_b]))),
+        patch(_EVIDENCE_SELECT_PATCH, return_value=[chunk_a]),
+    ):
+        response = await service.query(
+            "compare docs across all sources", role_pack=None
+        )
+
+    context = mock_llm_adapter.complete.call_args.kwargs["context"]
+    assert "evidence-a content" in context
+    assert "evidence-b content" not in context
+    assert len(response.citations) == 1
+    assert response.citations[0].source_locator == "/docs/a.md"
+
+
+@pytest.mark.asyncio
+async def test_citations_are_identical_to_synthesis_evidence(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+) -> None:
+    """Returned citations must equal the evidence passed to synthesis — no leakage."""
+    chunk_a = _make_chunk_from_source("/docs/a.md", 0.9, 0, "content-a")
+    chunk_b = _make_chunk_from_source("/docs/b.md", 0.8, 0, "content-b")
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with (
+        patch(_PATCH, new=AsyncMock(return_value=_search_result([chunk_a, chunk_b]))),
+        patch(_EVIDENCE_SELECT_PATCH, return_value=[chunk_b]),
+    ):
+        response = await service.query(
+            "compare docs across all sources", role_pack=None
+        )
+
+    assert response.citations == [chunk_b]
+    assert chunk_a not in response.citations
+
+
+@pytest.mark.asyncio
+async def test_empty_evidence_after_selection_returns_no_content_without_llm(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+) -> None:
+    """If evidence selection yields nothing, return no-content without calling LLM."""
+    chunk = _make_chunk()
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with (
+        patch(_PATCH, new=AsyncMock(return_value=_search_result([chunk]))),
+        patch(_EVIDENCE_SELECT_PATCH, return_value=[]),
+    ):
+        response = await service.query("what is X?", role_pack=None)
+
+    assert "no relevant content" in (response.answer or "").lower()
+    assert response.citations == []
+    mock_llm_adapter.complete.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_synthesis_failure_after_sufficient_evidence_returns_degraded_path(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+) -> None:
+    """Synthesis failure with non-empty evidence must return the degraded path, not no-content."""
+    chunk = _make_chunk()
+    failing_adapter = AsyncMock(spec=LLMAdapter)
+    failing_adapter.complete = AsyncMock(side_effect=Exception("API down"))
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=failing_adapter,
+    )
+
+    with patch(_PATCH, new=AsyncMock(return_value=_search_result([chunk]))):
+        response = await service.query("what is X?", role_pack=None)
+
+    assert response.answer is None
+    assert len(response.citations) == 1
+
+
+@pytest.mark.asyncio
+async def test_telemetry_includes_post_evidence_selection_count(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    chunk = _make_chunk()
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with caplog.at_level(logging.INFO):
+        with patch(_PATCH, new=AsyncMock(return_value=_search_result([chunk]))):
+            await service.query("what is X?", role_pack=None)
+
+    data = _parse_telemetry_log(caplog)
+    assert "post_evidence_selection" in data["candidate_counts"]
+    assert data["candidate_counts"]["post_evidence_selection"] == 1
+
+
+@pytest.mark.asyncio
+async def test_telemetry_emits_evidence_selection_failure_stage_when_empty(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """When evidence selection empties the candidate set, failure_stage must be evidence_selection."""
+    chunk = _make_chunk()
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with caplog.at_level(logging.INFO):
+        with (
+            patch(_PATCH, new=AsyncMock(return_value=_search_result([chunk]))),
+            patch(_EVIDENCE_SELECT_PATCH, return_value=[]),
+        ):
+            await service.query("what is X?", role_pack=None)
+
+    data = _parse_telemetry_log(caplog)
+    assert data["outcome"] == "no_content"
+    assert data["failure_stage"] == "evidence_selection"
+    assert data["candidate_counts"]["post_evidence_selection"] == 0

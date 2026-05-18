@@ -769,3 +769,31 @@ def test_attribute_failure_missed_answer_lineage_loss_returns_lineage_narrowing(
 def test_attribute_failure_missed_answer_with_candidates_returns_citation_precision() -> None:
     counts = {"merged": 5, "post_threshold": 3, "post_pruning": 2, "final": 1}
     assert attribute_failure("missed_answer", counts) == "citation_precision"
+
+
+def test_attribute_failure_missed_answer_zero_evidence_selection_returns_evidence_selection() -> None:
+    counts = {
+        "merged": 5, "post_threshold": 3, "post_pruning": 2, "final": 1,
+        "post_evidence_selection": 0,
+    }
+    assert attribute_failure("missed_answer", counts) == "evidence_selection"
+
+
+def test_attribute_failure_evidence_selection_checked_after_lineage_narrowing() -> None:
+    """evidence_selection stage is only reached when lineage_narrowing_lost_support is False."""
+    counts = {
+        "merged": 5, "post_threshold": 3, "post_pruning": 2, "final": 1,
+        "post_evidence_selection": 0,
+    }
+    assert (
+        attribute_failure("missed_answer", counts, lineage_narrowing_lost_support=True)
+        == "lineage_narrowing"
+    )
+
+
+def test_attribute_failure_positive_evidence_selection_falls_through_to_citation_precision() -> None:
+    counts = {
+        "merged": 5, "post_threshold": 3, "post_pruning": 2, "final": 1,
+        "post_evidence_selection": 1,
+    }
+    assert attribute_failure("missed_answer", counts) == "citation_precision"

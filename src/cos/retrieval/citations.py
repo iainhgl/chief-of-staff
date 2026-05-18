@@ -71,3 +71,18 @@ def narrow_to_lineage(results: CitedResults) -> CitedResults:
         return []
     key = _lineage_key(results[0])
     return [chunk for chunk in results if _lineage_key(chunk) == key]
+
+
+def select_synthesis_evidence(candidates: CitedResults) -> CitedResults:
+    """Return the subset of candidates eligible to be passed to synthesis.
+
+    This is the explicit evidence-selection boundary: every chunk that enters
+    here becomes both the LLM context and the returned citations.  Chunks that
+    do not survive must never reappear in either place.
+
+    Currently delegates to the thresholding and pruning already applied by
+    hybrid_search_with_trace, so all candidates are eligible.  Future
+    per-candidate quality checks belong here rather than scattered across
+    callers.
+    """
+    return list(candidates)
