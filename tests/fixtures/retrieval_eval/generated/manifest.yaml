@@ -23,3 +23,10 @@ documents:
     source_locator: local://local-succession-plan
     source_alias: local://local-succession-plan
     source_type: local
+
+  - filename: local-performance-policy.md
+    source_locator: local://local-performance-policy
+    source_alias: local://local-performance-policy
+    source_type: local
+    chunk_count: 3
+    citation_chunk_index: 1

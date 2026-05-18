@@ -74,6 +74,35 @@ def narrow_to_lineage(results: CitedResults) -> CitedResults:
     return [chunk for chunk in results if _lineage_key(chunk) == key]
 
 
+def select_document_first_anchors(results: CitedResults) -> CitedResults:
+    """Rank lineages first, then return all retrieved chunks from the winner.
+
+    For bounded, document-centric questions we want the winning document to be
+    chosen based on the full set of retrieved support, not just whichever
+    individual chunk happened to rank first.
+    """
+    if not results:
+        return []
+
+    grouped: dict[str, list[tuple[int, CitedChunk]]] = {}
+    for rank, chunk in enumerate(results):
+        grouped.setdefault(_lineage_key(chunk), []).append((rank, chunk))
+
+    def _document_rank_key(item: tuple[str, list[tuple[int, CitedChunk]]]) -> tuple:
+        lineage_key, ranked_chunks = item
+        chunks = [chunk for _, chunk in ranked_chunks]
+        best_score = max(chunk.score for chunk in chunks)
+        total_score = sum(chunk.score for chunk in chunks)
+        first_rank = min(rank for rank, _ in ranked_chunks)
+        return (-total_score, -best_score, first_rank, lineage_key)
+
+    _, winning_ranked_chunks = min(grouped.items(), key=_document_rank_key)
+    return [
+        chunk
+        for _, chunk in sorted(winning_ranked_chunks, key=lambda ranked: ranked[0])
+    ]
+
+
 def select_synthesis_evidence(
     candidates: CitedResults,
     *,

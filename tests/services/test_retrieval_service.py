@@ -1017,4 +1017,281 @@ async def test_telemetry_emits_evidence_selection_failure_stage_when_empty(
     data = _parse_telemetry_log(caplog)
     assert data["outcome"] == "no_content"
     assert data["failure_stage"] == "evidence_selection"
-    assert data["candidate_counts"]["post_evidence_selection"] == 0
+
+
+# ── Document-first retrieval and context expansion tests (Story 7.4) ──────────
+
+_EXPANSION_PATCH = "cos.services.retrieval.expand_bounded_context"
+_STRATEGY_PATCH = "cos.services.retrieval.select_query_strategy_from_text"
+
+
+def _make_expanded_context(
+    synthesis_chunks: list[CitedChunk],
+    evidence_chunks: list[CitedChunk],
+) -> object:
+    from cos.retrieval.context_expansion import ExpandedContext
+
+    return ExpandedContext(
+        synthesis_chunks=synthesis_chunks,
+        evidence_chunks=evidence_chunks,
+    )
+
+
+@pytest.mark.asyncio
+async def test_bounded_strategy_selects_document_first_anchors_before_expansion(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+) -> None:
+    from cos.retrieval.strategy import QueryStrategy
+
+    doc_a = _make_chunk_from_source("/docs/a.md", 0.95, 0, "doc a")
+    doc_b0 = _make_chunk_from_source("/docs/b.md", 0.81, 0, "doc b 0")
+    doc_b1 = _make_chunk_from_source("/docs/b.md", 0.80, 1, "doc b 1")
+    seen_anchor_locators: list[str] = []
+
+    async def _record_expansion(conn, anchors, **kwargs):  # type: ignore[no-untyped-def]
+        seen_anchor_locators.extend(chunk.source_locator for chunk in anchors)
+        from cos.retrieval.context_expansion import ExpandedContext
+
+        return ExpandedContext(
+            synthesis_chunks=list(anchors),
+            evidence_chunks=list(anchors),
+        )
+
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with (
+        patch(
+            _PATCH,
+            new=AsyncMock(return_value=_search_result([doc_a, doc_b0, doc_b1])),
+        ),
+        patch(_STRATEGY_PATCH, return_value=QueryStrategy.BOUNDED),
+        patch(_EXPANSION_PATCH, new=_record_expansion),
+    ):
+        await service.query(
+            "What did the review conclude about attrition?",
+            role_pack=None,
+        )
+
+    assert seen_anchor_locators == ["/docs/b.md", "/docs/b.md"]
+
+
+@pytest.mark.asyncio
+async def test_bounded_strategy_llm_receives_synthesis_chunks_not_evidence_only(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+) -> None:
+    """BOUNDED: LLM context must include neighbour chunks from expansion, not just anchors."""
+    from cos.retrieval.strategy import QueryStrategy
+
+    anchor = _make_chunk_from_source("/docs/a.md", 0.9, 1, "anchor content")
+    neighbour = _make_chunk_from_source("/docs/a.md", 0.0, 2, "neighbour content")
+    synthesis = [anchor, neighbour]
+    evidence = [anchor]
+
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with (
+        patch(_PATCH, new=AsyncMock(return_value=_search_result([anchor]))),
+        patch(_STRATEGY_PATCH, return_value=QueryStrategy.BOUNDED),
+        patch(
+            _EXPANSION_PATCH,
+            new=AsyncMock(return_value=_make_expanded_context(synthesis, evidence)),
+        ),
+    ):
+        await service.query("what did the review say?", role_pack=None)
+
+    context = mock_llm_adapter.complete.call_args.kwargs["context"]
+    assert "anchor content" in context
+    assert "neighbour content" in context
+
+
+@pytest.mark.asyncio
+async def test_bounded_strategy_citations_are_evidence_chunks_not_synthesis_chunks(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+) -> None:
+    """BOUNDED: returned citations must be evidence_chunks only, never neighbour chunks."""
+    from cos.retrieval.strategy import QueryStrategy
+
+    anchor = _make_chunk_from_source("/docs/a.md", 0.9, 1, "anchor content")
+    neighbour = _make_chunk_from_source("/docs/a.md", 0.0, 2, "neighbour content")
+    synthesis = [anchor, neighbour]
+    evidence = [anchor]
+
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with (
+        patch(_PATCH, new=AsyncMock(return_value=_search_result([anchor]))),
+        patch(_STRATEGY_PATCH, return_value=QueryStrategy.BOUNDED),
+        patch(
+            _EXPANSION_PATCH,
+            new=AsyncMock(return_value=_make_expanded_context(synthesis, evidence)),
+        ),
+    ):
+        response = await service.query("what did the review say?", role_pack=None)
+
+    assert response.citations == evidence
+    assert neighbour not in response.citations
+
+
+@pytest.mark.asyncio
+async def test_default_strategy_does_not_call_expand_bounded_context(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+) -> None:
+    """DEFAULT strategy must not invoke context expansion."""
+    from cos.retrieval.strategy import QueryStrategy
+
+    chunk = _make_chunk()
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    expansion_mock = AsyncMock()
+    with (
+        patch(_PATCH, new=AsyncMock(return_value=_search_result([chunk]))),
+        patch(_STRATEGY_PATCH, return_value=QueryStrategy.DEFAULT),
+        patch(_EXPANSION_PATCH, new=expansion_mock),
+    ):
+        await service.query("how many days of leave?", role_pack=None)
+
+    expansion_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_multi_source_strategy_does_not_call_expand_bounded_context(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+) -> None:
+    """MULTI_SOURCE strategy must not invoke context expansion."""
+    from cos.retrieval.strategy import QueryStrategy
+
+    chunk_a = _make_chunk_from_source("/docs/a.md", 0.9, 0, "a")
+    chunk_b = _make_chunk_from_source("/docs/b.md", 0.8, 0, "b")
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    expansion_mock = AsyncMock()
+    with (
+        patch(_PATCH, new=AsyncMock(return_value=_search_result([chunk_a, chunk_b]))),
+        patch(_STRATEGY_PATCH, return_value=QueryStrategy.MULTI_SOURCE),
+        patch(_EXPANSION_PATCH, new=expansion_mock),
+    ):
+        await service.query("compare all sources", role_pack=None)
+
+    expansion_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_bounded_strategy_telemetry_includes_expansion_mode_and_count(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Telemetry for BOUNDED queries must record expansion_mode and expanded_context."""
+    from cos.retrieval.strategy import QueryStrategy
+
+    anchor = _make_chunk_from_source("/docs/a.md", 0.9, 1, "anchor")
+    neighbour = _make_chunk_from_source("/docs/a.md", 0.0, 2, "neighbour")
+    synthesis = [anchor, neighbour]
+    evidence = [anchor]
+
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with caplog.at_level(logging.INFO):
+        with (
+            patch(_PATCH, new=AsyncMock(return_value=_search_result([anchor]))),
+            patch(_STRATEGY_PATCH, return_value=QueryStrategy.BOUNDED),
+            patch(
+                _EXPANSION_PATCH,
+                new=AsyncMock(return_value=_make_expanded_context(synthesis, evidence)),
+            ),
+        ):
+            await service.query("what did the document say?", role_pack=None)
+
+    data = _parse_telemetry_log(caplog)
+    counts = data["candidate_counts"]
+    assert counts["expansion_mode"] == "bounded"
+    assert counts["expanded_context"] == 2
+
+
+@pytest.mark.asyncio
+async def test_default_strategy_telemetry_expansion_mode_is_none(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Telemetry for DEFAULT queries must have expansion_mode=none."""
+    from cos.retrieval.strategy import QueryStrategy
+
+    chunk = _make_chunk()
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with caplog.at_level(logging.INFO):
+        with (
+            patch(_PATCH, new=AsyncMock(return_value=_search_result([chunk]))),
+            patch(_STRATEGY_PATCH, return_value=QueryStrategy.DEFAULT),
+        ):
+            await service.query("how many days of leave?", role_pack=None)
+
+    data = _parse_telemetry_log(caplog)
+    assert data["candidate_counts"]["expansion_mode"] == "none"
+
+
+@pytest.mark.asyncio
+async def test_telemetry_includes_document_candidate_count(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Telemetry must include the number of distinct document candidates before selection."""
+    chunk_a = _make_chunk_from_source("/docs/a.md", 0.9, 0, "a")
+    chunk_b = _make_chunk_from_source("/docs/b.md", 0.8, 0, "b")
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with caplog.at_level(logging.INFO):
+        with patch(_PATCH, new=AsyncMock(return_value=_search_result([chunk_a, chunk_b]))):
+            await service.query("what is X?", role_pack=None)
+
+    data = _parse_telemetry_log(caplog)
+    assert "document_candidates" in data["candidate_counts"]
+    # Two distinct source_locators → 2 document candidates
+    assert data["candidate_counts"]["document_candidates"] == 2

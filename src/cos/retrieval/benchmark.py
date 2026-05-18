@@ -11,7 +11,7 @@ import yaml
 
 from cos.retrieval.citations import CitedResults
 
-BENCHMARK_SCHEMA_VERSION = "7.3"
+BENCHMARK_SCHEMA_VERSION = "7.4"
 
 VALID_QUERY_CLASSES = frozenset(
     {
@@ -52,6 +52,8 @@ class FixtureDoc:
     source_locator: str
     source_alias: str
     source_type: str
+    chunk_count: int = 1  # >1 triggers multi-chunk seeding for bounded-context fixtures
+    citation_chunk_index: int = 0
 
 
 @dataclass
@@ -157,12 +159,29 @@ def load_fixture_docs(corpus_path: Path) -> list[FixtureDoc]:
         for key in ("filename", "source_locator", "source_alias", "source_type"):
             if key not in item:
                 raise CorpusError(f"Document entry missing '{key}': {item!r}")
+        chunk_count = item.get("chunk_count", 1)
+        if not isinstance(chunk_count, int) or chunk_count < 1:
+            raise CorpusError(
+                f"Document entry 'chunk_count' must be a positive int: {item!r}"
+            )
+        citation_chunk_index = item.get("citation_chunk_index", 0)
+        if (
+            not isinstance(citation_chunk_index, int)
+            or citation_chunk_index < 0
+            or citation_chunk_index >= chunk_count
+        ):
+            raise CorpusError(
+                "Document entry 'citation_chunk_index' must be an int within the "
+                f"chunk_count range: {item!r}"
+            )
         docs.append(
             FixtureDoc(
                 filename=item["filename"],
                 source_locator=item["source_locator"],
                 source_alias=item["source_alias"],
                 source_type=item["source_type"],
+                chunk_count=chunk_count,
+                citation_chunk_index=citation_chunk_index,
             )
         )
     return docs
@@ -292,12 +311,18 @@ def attribute_failure(
     *,
     lineage_narrowing_lost_support: bool = False,
     evidence_selection_lost_support: bool = False,
+    context_expansion_lost_support: bool = False,
 ) -> str | None:
     """Return the retrieval stage most likely responsible for a failed query.
 
     Returns None when the verdict indicates a pass.  For failures, walks the
     candidate-count chain from the earliest stage inward to identify where
     evidence was lost.
+
+    Stage order:
+      candidate_selection → threshold_filtering → pruning → top_k_truncation
+      → lineage_narrowing → evidence_selection → context_expansion
+      → citation_precision
     """
     if verdict in ("correct_answer", "correct_no_answer"):
         return None
@@ -322,6 +347,8 @@ def attribute_failure(
         return "evidence_selection"
     if post_evidence is not None and post_evidence == 0:
         return "evidence_selection"
+    if context_expansion_lost_support:
+        return "context_expansion"
     if verdict == "false_answer":
         return "citation_precision"
     return "citation_precision"

@@ -35,6 +35,15 @@ queries:
       - calendar://event-q1-review-001
     notes: Attrition conclusions are in the calendar event document
 
+  # single_doc_interpretation — multi-chunk bounded context recovery (Story 7.4)
+  - id: gold-sdi-002
+    query: What does the performance policy say about the Below Expectations protocol?
+    query_class: single_doc_interpretation
+    answerable: true
+    expected_lineage:
+      - local://local-performance-policy
+    notes: Answer is in the second chunk of a 3-chunk document; tests bounded context recovery
+
   # cross_doc_synthesis — explicit multi-source comparison
   - id: gold-cds-001
     query: Compare the leave policy described in the email with the policy document
