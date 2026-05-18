@@ -55,13 +55,17 @@ queries:
 ### Expected Lineage
 
 For `direct_fact`, `exact_phrase`, `date_timeline`, and `single_doc_interpretation`
-queries, list exactly one acceptable locator. The harness treats any citation outside
-this set as a precision error.
+queries, list exactly one acceptable locator. The harness resolves that locator to the
+full citation contract at run time: `source_alias`, `source_locator`,
+`document_version_id`, and `chunk_index`. Any returned citation outside that resolved
+set is treated as a precision error.
 
 For `cross_doc_synthesis` and `briefing` queries, list every acceptable locator.
-The harness allows the returned evidence set to be a subset of the acceptable lineage.
+The harness allows the returned evidence set to be a subset of the acceptable set, but
+every returned citation still must resolve to one of those approved sources.
 
 ## Versioning
 
-The corpus version is derived from the git SHA of this directory at run time. Reports
-include the resolved version so results from different runs are comparable.
+The corpus version is derived from the corpus file paths and file contents at run time.
+Reports include the resolved version so results from different runs are comparable even
+outside a git checkout.

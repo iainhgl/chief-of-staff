@@ -2,15 +2,13 @@
 
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
-import pytest
 from typer.testing import CliRunner
 
 from cos.cli import app
 from cos.retrieval.benchmark import (
     BenchmarkReport,
-    ClassSummary,
     QueryResult,
 )
 
@@ -34,9 +32,16 @@ def _make_report(pass_rate: float = 1.0) -> BenchmarkReport:
         for i in range(7)
     ]
     from cos.retrieval.benchmark import aggregate_by_class
+
     per_class = aggregate_by_class(results)
     from cos.services.retrieval_eval import _build_report
-    return _build_report("2026-01-01T00:00:00+00:00", "abc123def456", results, per_class)
+
+    return _build_report(
+        "2026-01-01T00:00:00+00:00",
+        "abc123def456",
+        results,
+        per_class,
+    )
 
 
 # ── Success path ─────────────────────────────────────────────────────────────
@@ -45,9 +50,7 @@ def _make_report(pass_rate: float = 1.0) -> BenchmarkReport:
 def test_benchmark_command_exits_zero_when_all_pass() -> None:
     report = _make_report(pass_rate=1.0)
 
-    with (
-        patch("cos.cli.asyncio.run", return_value=report),
-    ):
+    with patch("cos.cli._run_benchmark", new=AsyncMock(return_value=report)):
         result = runner.invoke(app, ["benchmark", "--corpus", _CORPUS_PATH])
 
     assert result.exit_code == 0, result.output
@@ -56,7 +59,7 @@ def test_benchmark_command_exits_zero_when_all_pass() -> None:
 def test_benchmark_command_outputs_human_summary() -> None:
     report = _make_report(pass_rate=1.0)
 
-    with patch("cos.cli.asyncio.run", return_value=report):
+    with patch("cos.cli._run_benchmark", new=AsyncMock(return_value=report)):
         result = runner.invoke(app, ["benchmark", "--corpus", _CORPUS_PATH])
 
     assert "Retrieval Benchmark Summary" in result.output
@@ -66,7 +69,7 @@ def test_benchmark_command_outputs_human_summary() -> None:
 def test_benchmark_command_outputs_json_report_to_stdout() -> None:
     report = _make_report(pass_rate=1.0)
 
-    with patch("cos.cli.asyncio.run", return_value=report):
+    with patch("cos.cli._run_benchmark", new=AsyncMock(return_value=report)):
         result = runner.invoke(app, ["benchmark", "--corpus", _CORPUS_PATH])
 
     output = result.output
@@ -85,7 +88,7 @@ def test_benchmark_command_writes_json_to_file_when_output_option_given(
     report = _make_report(pass_rate=1.0)
     output_file = tmp_path / "report.json"
 
-    with patch("cos.cli.asyncio.run", return_value=report):
+    with patch("cos.cli._run_benchmark", new=AsyncMock(return_value=report)):
         result = runner.invoke(
             app,
             ["benchmark", "--corpus", _CORPUS_PATH, "--output", str(output_file)],
@@ -100,7 +103,7 @@ def test_benchmark_command_writes_json_to_file_when_output_option_given(
 def test_benchmark_command_exits_one_when_not_all_pass() -> None:
     report = _make_report(pass_rate=0.5)
 
-    with patch("cos.cli.asyncio.run", return_value=report):
+    with patch("cos.cli._run_benchmark", new=AsyncMock(return_value=report)):
         result = runner.invoke(app, ["benchmark", "--corpus", _CORPUS_PATH])
 
     assert result.exit_code == 1
@@ -110,14 +113,17 @@ def test_benchmark_command_exits_one_when_not_all_pass() -> None:
 
 
 def test_benchmark_command_exits_one_on_invalid_corpus_path() -> None:
-    with patch("cos.cli.asyncio.run", side_effect=SystemExit(1)):
+    with patch("cos.cli._run_benchmark", new=AsyncMock(side_effect=SystemExit(1))):
         result = runner.invoke(app, ["benchmark", "--corpus", "/nonexistent/path"])
 
     assert result.exit_code == 1
 
 
 def test_benchmark_command_exits_one_on_unexpected_exception() -> None:
-    with patch("cos.cli.asyncio.run", side_effect=RuntimeError("db down")):
+    with patch(
+        "cos.cli._run_benchmark",
+        new=AsyncMock(side_effect=RuntimeError("db down")),
+    ):
         result = runner.invoke(app, ["benchmark", "--corpus", _CORPUS_PATH])
 
     assert result.exit_code == 1

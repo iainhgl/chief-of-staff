@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
@@ -61,6 +61,8 @@ class QueryResult:
     actual_lineage: list[str]
     # "correct_answer" | "missed_answer" | "correct_no_answer" | "false_answer"
     answerability_verdict: str
+    expected_citations: list["BenchmarkCitation"] = field(default_factory=list)
+    actual_citations: list["BenchmarkCitation"] = field(default_factory=list)
 
 
 @dataclass
@@ -91,11 +93,19 @@ class CorpusError(ValueError):
     pass
 
 
+@dataclass(frozen=True)
+class BenchmarkCitation:
+    source_alias: str
+    source_locator: str
+    document_version_id: str
+    chunk_index: int
+
+
 def load_queries(
     corpus_path: Path,
     include_stress_fuzz: bool = False,
 ) -> list[BenchmarkQuery]:
-    """Load and validate benchmark queries from gold (and optionally stress_fuzz) manifests."""
+    """Load gold queries and optional stress/fuzz queries from corpus manifests."""
     gold_dir = corpus_path / "gold"
     if not gold_dir.is_dir():
         raise CorpusError(f"Gold benchmark directory not found: {gold_dir}")
@@ -209,13 +219,32 @@ def score_query(
     query: BenchmarkQuery,
     citations: CitedResults,
     latency_ms: float,
+    expected_citations: list[BenchmarkCitation] | None = None,
 ) -> QueryResult:
-    actual_lineage = list(dict.fromkeys(c.source_locator for c in citations))
+    actual_citations = _dedupe_citations(
+        [
+            BenchmarkCitation(
+                source_alias=c.source_alias,
+                source_locator=c.source_locator,
+                document_version_id=c.document_version_id,
+                chunk_index=c.chunk_index,
+            )
+            for c in citations
+        ]
+    )
+    resolved_expected = (
+        list(expected_citations)
+        if expected_citations is not None
+        else _expected_citations_from_lineage(query.expected_lineage)
+    )
+    actual_lineage = list(dict.fromkeys(c.source_locator for c in actual_citations))
 
     if query.answerable:
-        expected_set = set(query.expected_lineage)
-        has_expected = any(loc in expected_set for loc in actual_lineage)
-        passed = has_expected
+        has_expected = _has_expected_support(actual_citations, resolved_expected)
+        has_only_expected = _only_expected_citations(
+            actual_citations, resolved_expected
+        )
+        passed = has_expected and has_only_expected
         verdict = "correct_answer" if passed else "missed_answer"
     else:
         passed = len(citations) == 0
@@ -229,15 +258,29 @@ def score_query(
         expected_lineage=list(query.expected_lineage),
         actual_lineage=actual_lineage,
         answerability_verdict=verdict,
+        expected_citations=resolved_expected,
+        actual_citations=actual_citations,
     )
 
 
 def _citation_precision_for_result(result: QueryResult) -> float | None:
-    if not result.actual_lineage:
+    actual_citations = _actual_citations_for_result(result)
+    expected_citations = _expected_citations_for_result(result)
+    if not actual_citations:
         return None
-    expected_set = set(result.expected_lineage)
-    hits = sum(1 for loc in result.actual_lineage if loc in expected_set)
-    return hits / len(result.actual_lineage)
+    hits = sum(
+        1
+        for actual in actual_citations
+        if any(_citation_matches(actual, expected) for expected in expected_citations)
+    )
+    return hits / len(actual_citations)
+
+
+def _recall_for_result(result: QueryResult) -> bool:
+    return _has_expected_support(
+        _actual_citations_for_result(result),
+        _expected_citations_for_result(result),
+    )
 
 
 def aggregate_by_class(results: list[QueryResult]) -> list[ClassSummary]:
@@ -257,7 +300,7 @@ def aggregate_by_class(results: list[QueryResult]) -> list[ClassSummary]:
             if r.answerability_verdict not in ("correct_no_answer", "false_answer")
         ]
         recall = (
-            sum(1 for r in answerable if r.passed) / len(answerable)
+            sum(1 for r in answerable if _recall_for_result(r)) / len(answerable)
             if answerable
             else 0.0
         )
@@ -287,14 +330,101 @@ def aggregate_by_class(results: list[QueryResult]) -> list[ClassSummary]:
 
 
 def resolve_corpus_version(corpus_path: Path) -> str:
-    """Derive a short version tag from the set of manifest files in the corpus."""
+    """Derive a short version tag from corpus file paths and contents."""
     manifest_files = sorted(
-        p
-        for p in corpus_path.rglob("*.yaml")
-        if "__pycache__" not in str(p)
+        p for p in corpus_path.rglob("*") if p.is_file() and "__pycache__" not in str(p)
     )
     h = hashlib.sha256()
     for p in manifest_files:
-        h.update(p.name.encode())
-        h.update(str(p.stat().st_mtime).encode())
+        h.update(str(p.relative_to(corpus_path)).encode("utf-8"))
+        h.update(b"\0")
+        h.update(p.read_bytes())
+        h.update(b"\0")
     return h.hexdigest()[:12]
+
+
+def _expected_citations_from_lineage(
+    expected_lineage: list[str],
+) -> list[BenchmarkCitation]:
+    return [
+        BenchmarkCitation(
+            source_alias="",
+            source_locator=locator,
+            document_version_id="",
+            chunk_index=-1,
+        )
+        for locator in expected_lineage
+    ]
+
+
+def _actual_citations_from_lineage(
+    actual_lineage: list[str],
+) -> list[BenchmarkCitation]:
+    return [
+        BenchmarkCitation(
+            source_alias="",
+            source_locator=locator,
+            document_version_id="",
+            chunk_index=-1,
+        )
+        for locator in actual_lineage
+    ]
+
+
+def _expected_citations_for_result(result: QueryResult) -> list[BenchmarkCitation]:
+    if result.expected_citations:
+        return result.expected_citations
+    return _expected_citations_from_lineage(result.expected_lineage)
+
+
+def _actual_citations_for_result(result: QueryResult) -> list[BenchmarkCitation]:
+    if result.actual_citations:
+        return result.actual_citations
+    return _actual_citations_from_lineage(result.actual_lineage)
+
+
+def _dedupe_citations(citations: list[BenchmarkCitation]) -> list[BenchmarkCitation]:
+    return list(dict.fromkeys(citations))
+
+
+def _has_expected_support(
+    actual_citations: list[BenchmarkCitation],
+    expected_citations: list[BenchmarkCitation],
+) -> bool:
+    return any(
+        any(_citation_matches(actual, expected) for expected in expected_citations)
+        for actual in actual_citations
+    )
+
+
+def _only_expected_citations(
+    actual_citations: list[BenchmarkCitation],
+    expected_citations: list[BenchmarkCitation],
+) -> bool:
+    return all(
+        any(_citation_matches(actual, expected) for expected in expected_citations)
+        for actual in actual_citations
+    )
+
+
+def _citation_matches(actual: BenchmarkCitation, expected: BenchmarkCitation) -> bool:
+    if actual.source_locator != expected.source_locator:
+        return False
+    if expected.source_alias and actual.source_alias != expected.source_alias:
+        return False
+    if (
+        expected.document_version_id
+        and actual.document_version_id != expected.document_version_id
+    ):
+        return False
+    if expected.chunk_index >= 0 and actual.chunk_index != expected.chunk_index:
+        return False
+    return True
+
+
+def citation_precision_for_result(result: QueryResult) -> float | None:
+    return _citation_precision_for_result(result)
+
+
+def recall_satisfied(result: QueryResult) -> bool:
+    return _recall_for_result(result)

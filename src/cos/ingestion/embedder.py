@@ -1,5 +1,8 @@
 """Embedding generation for text chunks."""
 
+import hashlib
+import math
+import re
 import ssl
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -76,8 +79,75 @@ async def _embed_via_voyage(
     ]
 
 
+_BENCHMARK_VECTOR_SIZE = 1024
+_TOKEN_PATTERN = re.compile(r"[a-z0-9]+")
+_BENCHMARK_SYNONYMS = {
+    "holiday": "leave",
+    "holidays": "leave",
+    "entitlement": "leave",
+    "entitlements": "leave",
+    "permanent": "fulltime",
+    "full-time": "fulltime",
+    "staff": "employee",
+    "employees": "employee",
+    "days": "day",
+    "summarise": "summarize",
+    "summarised": "summarize",
+    "summarising": "summarize",
+    "briefing": "brief",
+    "attrition": "turnover",
+}
+
+
+async def _embed_via_benchmark(
+    chunks: list[str],
+    model: str,
+    api_key: str,
+    transport: VoyageTransportConfig | None = None,
+) -> list[EmbeddingResult]:
+    del api_key, transport
+    return [
+        EmbeddingResult(
+            vector=_benchmark_vector(chunk),
+            model=model,
+            provider="benchmark",
+        )
+        for chunk in chunks
+    ]
+
+
+def _benchmark_vector(text: str) -> list[float]:
+    vector = [0.0] * _BENCHMARK_VECTOR_SIZE
+    tokens = _normalized_tokens(text)
+    if not tokens:
+        vector[0] = 1.0
+        return vector
+
+    for token in tokens:
+        digest = hashlib.sha256(token.encode("utf-8")).digest()
+        primary_index = int.from_bytes(digest[:4], "big") % _BENCHMARK_VECTOR_SIZE
+        secondary_index = int.from_bytes(digest[4:8], "big") % _BENCHMARK_VECTOR_SIZE
+        sign = 1.0 if digest[8] % 2 == 0 else -1.0
+        vector[primary_index] += 1.0
+        vector[secondary_index] += 0.25 * sign
+
+    norm = math.sqrt(sum(value * value for value in vector))
+    if norm == 0.0:
+        vector[0] = 1.0
+        return vector
+    return [value / norm for value in vector]
+
+
+def _normalized_tokens(text: str) -> list[str]:
+    tokens: list[str] = []
+    for raw in _TOKEN_PATTERN.findall(text.lower()):
+        tokens.append(_BENCHMARK_SYNONYMS.get(raw, raw))
+    return tokens
+
+
 _EMBED_PROVIDERS: dict[str, Any] = {
     "anthropic": _embed_via_voyage,
+    "benchmark": _embed_via_benchmark,
 }
 
 

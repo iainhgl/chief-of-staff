@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -12,25 +11,41 @@ import psycopg
 from psycopg_pool import AsyncConnectionPool
 
 from cos.config import CosConfig
-from cos.ingestion.embedder import EmbeddingResult, VoyageTransportConfig, embed
+from cos.ingestion.embedder import embed
 from cos.retrieval.benchmark import (
+    SINGLE_LINEAGE_CLASSES,
+    BenchmarkCitation,
     BenchmarkQuery,
     BenchmarkReport,
     ClassSummary,
-    FixtureDoc,
     CorpusError,
+    FixtureDoc,
     QueryResult,
-    SINGLE_LINEAGE_CLASSES,
     aggregate_by_class,
+    citation_precision_for_result,
     load_fixture_docs,
     load_queries,
+    recall_satisfied,
     resolve_corpus_version,
     score_query,
 )
-from cos.retrieval.citations import CitedResults, narrow_to_lineage
+from cos.retrieval.citations import narrow_to_lineage
 from cos.retrieval.search import hybrid_search
 from cos.store.db import store_document_canonical
 from cos.store.models import ChunkRecord, EmbeddingRecord
+
+_BENCHMARK_PROVIDER = "benchmark"
+_BENCHMARK_MODEL = "benchmark-static"
+_BENCHMARK_SOURCE_PREFIX = "benchmark"
+
+
+@dataclass(frozen=True)
+class SeededFixture:
+    source_path: str
+    source_type: str
+    source_locator: str
+    source_alias: str
+    citation: BenchmarkCitation
 
 
 class RetrievalEvalService:
@@ -47,18 +62,35 @@ class RetrievalEvalService:
         fixture_docs = load_fixture_docs(corpus_path)
         corpus_version = resolve_corpus_version(corpus_path)
         run_timestamp = datetime.now(timezone.utc).isoformat()
-
-        async with self._pool.connection() as conn:
-            await self._seed_fixtures(conn, corpus_path / "generated", fixture_docs)
-
+        benchmark_config = _benchmark_config(self._config)
+        seeded_fixtures: dict[str, SeededFixture] = {}
         results: list[QueryResult] = []
-        async with self._pool.connection() as conn:
-            for query in queries:
-                result = await self._run_query(conn, query)
-                results.append(result)
+        try:
+            async with self._pool.connection() as conn:
+                seeded = await self._seed_fixtures(
+                    conn,
+                    corpus_path / "generated",
+                    fixture_docs,
+                    benchmark_config,
+                )
+            seeded_fixtures = {fixture.source_locator: fixture for fixture in seeded}
 
-        async with self._pool.connection() as conn:
-            await self._cleanup_fixtures(conn, fixture_docs)
+            async with self._pool.connection() as conn:
+                for query in queries:
+                    expected_citations = _resolve_expected_citations(
+                        query,
+                        seeded_fixtures,
+                    )
+                    result = await self._run_query(
+                        conn,
+                        query,
+                        benchmark_config,
+                        expected_citations=expected_citations,
+                    )
+                    results.append(result)
+        finally:
+            async with self._pool.connection() as conn:
+                await self._cleanup_fixtures(conn, fixture_docs)
 
         per_class = aggregate_by_class(results)
         return _build_report(run_timestamp, corpus_version, results, per_class)
@@ -68,31 +100,17 @@ class RetrievalEvalService:
         conn: psycopg.AsyncConnection,  # type: ignore[type-arg]
         generated_dir: Path,
         docs: list[FixtureDoc],
-    ) -> None:
+        benchmark_config: CosConfig,
+    ) -> list[SeededFixture]:
+        seeded: list[SeededFixture] = []
         for doc in docs:
             content_path = generated_dir / doc.filename
             if not content_path.exists():
                 raise CorpusError(f"Fixture document not found: {content_path}")
 
             content = content_path.read_text(encoding="utf-8")
-            sha256 = hashlib.sha256(content.encode()).hexdigest()
-            source_path = doc.source_locator
-
-            embedding_results = await embed(
-                [content],
-                provider=self._config.embedding.provider,
-                model=self._config.embedding.model,
-                api_key=(
-                    self._config.embedding.api_key.get_secret_value()
-                    if self._config.embedding.api_key
-                    else ""
-                ),
-                transport=VoyageTransportConfig(
-                    ca_bundle_path=self._config.embedding.ca_bundle_path,
-                    proxy_url=self._config.embedding.proxy_url,
-                    trust_env=self._config.embedding.trust_env,
-                ),
-            )
+            source_path = _benchmark_source_path(doc)
+            source_type = _benchmark_source_type(doc.source_type)
 
             chunks = [
                 ChunkRecord(
@@ -103,61 +121,101 @@ class RetrievalEvalService:
             ]
             embeddings = [
                 EmbeddingRecord(
-                    vector=embedding_results[0].vector,
-                    model=self._config.embedding.model,
-                    provider=self._config.embedding.provider,
+                    vector=(
+                        await embed(
+                            [content],
+                            provider=benchmark_config.embedding.provider,
+                            model=benchmark_config.embedding.model,
+                            api_key="",
+                        )
+                    )[0].vector,
+                    model=benchmark_config.embedding.model,
+                    provider=benchmark_config.embedding.provider,
                 )
             ]
 
             await store_document_canonical(
                 conn,
                 source_path=source_path,
-                sha256=sha256,
+                sha256=_content_sha256(content),
                 byte_size=len(content.encode()),
-                source_type=doc.source_type,
+                source_type=source_type,
                 source_locator=doc.source_locator,
                 source_alias=doc.source_alias,
                 chunks=chunks,
                 embeddings=embeddings,
             )
+            seeded.append(
+                SeededFixture(
+                    source_path=source_path,
+                    source_type=source_type,
+                    source_locator=doc.source_locator,
+                    source_alias=doc.source_alias,
+                    citation=await _resolve_seeded_citation(conn, source_path, doc),
+                )
+            )
+        return seeded
 
     async def _run_query(
         self,
         conn: psycopg.AsyncConnection,  # type: ignore[type-arg]
         query: BenchmarkQuery,
+        benchmark_config: CosConfig,
+        expected_citations: list[BenchmarkCitation],
     ) -> QueryResult:
         t0 = time.monotonic()
         cited = await hybrid_search(
             query.query,
             conn,
-            self._config,
+            benchmark_config,
             role_pack=None,
-            min_score=self._config.retrieval.min_score,
-            max_chunks_per_source=self._config.retrieval.max_chunks_per_source,
+            min_score=benchmark_config.retrieval.min_score,
+            max_chunks_per_source=benchmark_config.retrieval.max_chunks_per_source,
         )
         latency_ms = (time.monotonic() - t0) * 1000.0
 
         if cited and query.query_class in SINGLE_LINEAGE_CLASSES:
             cited = narrow_to_lineage(cited)
 
-        return score_query(query, cited, latency_ms)
+        return score_query(
+            query,
+            cited,
+            latency_ms,
+            expected_citations=expected_citations,
+        )
 
     async def _cleanup_fixtures(
         self,
         conn: psycopg.AsyncConnection,  # type: ignore[type-arg]
         docs: list[FixtureDoc],
     ) -> None:
+        source_paths = [_benchmark_source_path(doc) for doc in docs]
+        benchmark_source_types = [
+            _benchmark_source_type(doc.source_type) for doc in docs
+        ]
         locators = [doc.source_locator for doc in docs]
-        # Remove all document rows whose source_path matches a fixture locator.
-        # Cascades through chunks and embeddings.
         await conn.execute(
             "DELETE FROM documents WHERE source_path = ANY(%s)",
-            (locators,),
+            (source_paths,),
         )
-        # Remove the source registry entries.
         await conn.execute(
-            "DELETE FROM sources WHERE source_locator = ANY(%s)",
-            (locators,),
+            """
+            DELETE FROM sources
+            WHERE source_type = ANY(%s)
+              AND source_locator = ANY(%s)
+            """,
+            (benchmark_source_types, locators),
+        )
+        await conn.execute(
+            """
+            DELETE FROM content_blobs cb
+            WHERE NOT EXISTS (
+                SELECT 1 FROM document_versions dv WHERE dv.content_blob_id = cb.id
+            )
+              AND NOT EXISTS (
+                SELECT 1 FROM source_versions sv WHERE sv.content_blob_id = cb.id
+            )
+            """
         )
 
 
@@ -176,23 +234,19 @@ def _build_report(
         if r.answerability_verdict not in ("correct_no_answer", "false_answer")
     ]
     overall_recall = (
-        sum(1 for r in answerable if r.passed) / len(answerable) if answerable else 0.0
+        sum(1 for r in answerable if recall_satisfied(r)) / len(answerable)
+        if answerable
+        else 0.0
     )
 
-    all_actual = [loc for r in results for loc in r.actual_lineage]
-    all_expected_sets = [set(r.expected_lineage) for r in results if r.actual_lineage]
-    if all_expected_sets and all_actual:
-        precision_values = []
-        for r in results:
-            if r.actual_lineage:
-                expected_set = set(r.expected_lineage)
-                hits = sum(1 for loc in r.actual_lineage if loc in expected_set)
-                precision_values.append(hits / len(r.actual_lineage))
-        overall_precision = (
-            sum(precision_values) / len(precision_values) if precision_values else 0.0
-        )
-    else:
-        overall_precision = 0.0
+    precision_values = [
+        precision
+        for r in results
+        if (precision := citation_precision_for_result(r)) is not None
+    ]
+    overall_precision = (
+        sum(precision_values) / len(precision_values) if precision_values else 0.0
+    )
 
     avg_latency = sum(r.latency_ms for r in results) / total if results else 0.0
 
@@ -241,6 +295,12 @@ def report_to_dict(report: BenchmarkReport) -> dict:  # type: ignore[type-arg]
                 "latency_ms": r.latency_ms,
                 "expected_lineage": r.expected_lineage,
                 "actual_lineage": r.actual_lineage,
+                "expected_citations": [
+                    _citation_to_dict(citation) for citation in r.expected_citations
+                ],
+                "actual_citations": [
+                    _citation_to_dict(citation) for citation in r.actual_citations
+                ],
                 "answerability_verdict": r.answerability_verdict,
             }
             for r in report.per_query
@@ -271,3 +331,91 @@ def format_human_summary(report: BenchmarkReport) -> str:
             f"avg {s.avg_latency_ms:.0f}ms"
         )
     return "\n".join(lines)
+
+
+def _benchmark_config(config: CosConfig) -> CosConfig:
+    return config.model_copy(
+        update={
+            "embedding": config.embedding.model_copy(
+                update={
+                    "provider": _BENCHMARK_PROVIDER,
+                    "model": _BENCHMARK_MODEL,
+                    "api_key": None,
+                    "ca_bundle_path": None,
+                    "proxy_url": None,
+                    "trust_env": False,
+                }
+            )
+        }
+    )
+
+
+def _benchmark_source_type(source_type: str) -> str:
+    return f"{_BENCHMARK_SOURCE_PREFIX}:{source_type}"
+
+
+def _benchmark_source_path(doc: FixtureDoc) -> str:
+    return (
+        f"{_BENCHMARK_SOURCE_PREFIX}://{doc.source_type}/"
+        f"{doc.source_locator.replace('://', '/')}"
+    )
+
+
+def _content_sha256(content: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+async def _resolve_seeded_citation(
+    conn: psycopg.AsyncConnection,  # type: ignore[type-arg]
+    source_path: str,
+    doc: FixtureDoc,
+) -> BenchmarkCitation:
+    result = await conn.execute(
+        """
+        SELECT dv.id::text
+        FROM documents d
+        JOIN document_versions dv
+          ON dv.document_id = d.id
+         AND dv.version = d.current_version
+        WHERE d.source_path = %s
+        """,
+        (source_path,),
+    )
+    row = await result.fetchone()
+    if row is None:
+        raise RuntimeError(
+            f"Failed to resolve seeded fixture version for {source_path}"
+        )
+    return BenchmarkCitation(
+        source_alias=doc.source_alias,
+        source_locator=doc.source_locator,
+        document_version_id=row[0],
+        chunk_index=0,
+    )
+
+
+def _resolve_expected_citations(
+    query: BenchmarkQuery,
+    seeded_fixtures: dict[str, SeededFixture],
+) -> list[BenchmarkCitation]:
+    expected_citations: list[BenchmarkCitation] = []
+    for locator in query.expected_lineage:
+        fixture = seeded_fixtures.get(locator)
+        if fixture is None:
+            raise CorpusError(
+                f"Expected lineage {locator!r} for query {query.id!r} "
+                "does not map to a seeded fixture document"
+            )
+        expected_citations.append(fixture.citation)
+    return expected_citations
+
+
+def _citation_to_dict(citation: BenchmarkCitation) -> dict[str, str | int]:
+    return {
+        "source_alias": citation.source_alias,
+        "source_locator": citation.source_locator,
+        "document_version_id": citation.document_version_id,
+        "chunk_index": citation.chunk_index,
+    }

@@ -9,8 +9,8 @@ from conftest import TEST_DSN, make_test_config
 from cos.retrieval.benchmark import (
     SINGLE_LINEAGE_CLASSES,
     VALID_QUERY_CLASSES,
+    BenchmarkCitation,
     BenchmarkQuery,
-    ClassSummary,
     CorpusError,
     QueryResult,
     aggregate_by_class,
@@ -79,14 +79,18 @@ def test_load_queries_without_stress_fuzz_excludes_fuzz() -> None:
 def test_load_queries_all_have_valid_query_class() -> None:
     queries = load_queries(_CORPUS_PATH, include_stress_fuzz=True)
     for q in queries:
-        assert q.query_class in VALID_QUERY_CLASSES, f"{q.id} has invalid class {q.query_class!r}"
+        assert q.query_class in VALID_QUERY_CLASSES, (
+            f"{q.id} has invalid class {q.query_class!r}"
+        )
 
 
 def test_load_queries_answerable_cases_have_expected_lineage() -> None:
     queries = load_queries(_CORPUS_PATH, include_stress_fuzz=True)
     for q in queries:
         if q.answerable:
-            assert q.expected_lineage, f"{q.id} is answerable but has no expected_lineage"
+            assert q.expected_lineage, (
+                f"{q.id} is answerable but has no expected_lineage"
+            )
 
 
 def test_load_queries_no_answer_cases_have_empty_lineage() -> None:
@@ -94,7 +98,8 @@ def test_load_queries_no_answer_cases_have_empty_lineage() -> None:
     for q in queries:
         if not q.answerable:
             assert q.expected_lineage == [], (
-                f"{q.id} is not answerable but has expected_lineage {q.expected_lineage!r}"
+                f"{q.id} is not answerable but has expected_lineage "
+                f"{q.expected_lineage!r}"
             )
 
 
@@ -256,6 +261,22 @@ def test_score_query_cross_doc_synthesis_any_expected_lineage_passes() -> None:
     assert result.passed
 
 
+def test_score_query_fails_when_unexpected_citation_is_present() -> None:
+    query = BenchmarkQuery(
+        id="q1",
+        query="compare email vs file",
+        query_class="cross_doc_synthesis",
+        answerable=True,
+        expected_lineage=["loc://a", "loc://b"],
+    )
+    result = score_query(
+        query,
+        [_make_chunk("loc://a", "loc://a"), _make_chunk("loc://unexpected", "loc://unexpected")],
+        latency_ms=30.0,
+    )
+    assert not result.passed
+
+
 def test_score_query_latency_captured() -> None:
     query = BenchmarkQuery(
         id="q1",
@@ -318,6 +339,28 @@ def test_aggregate_by_class_precision_correct() -> None:
     assert summaries[0].citation_precision == pytest.approx(0.5)
 
 
+def test_aggregate_by_class_uses_full_citation_contract_when_available() -> None:
+    results = [
+        QueryResult(
+            query_id="q1",
+            query_class="direct_fact",
+            passed=False,
+            latency_ms=10.0,
+            expected_lineage=["loc://a"],
+            actual_lineage=["loc://a"],
+            answerability_verdict="missed_answer",
+            expected_citations=[
+                BenchmarkCitation("alias", "loc://a", "version-1", 0),
+            ],
+            actual_citations=[
+                BenchmarkCitation("alias", "loc://a", "version-2", 0),
+            ],
+        ),
+    ]
+    summaries = aggregate_by_class(results)
+    assert summaries[0].citation_precision == pytest.approx(0.0)
+
+
 def test_aggregate_by_class_no_answer_excluded_from_recall() -> None:
     results = [
         QueryResult(
@@ -336,8 +379,24 @@ def test_aggregate_by_class_no_answer_excluded_from_recall() -> None:
 
 def test_aggregate_by_class_avg_latency() -> None:
     results = [
-        QueryResult("q1", "direct_fact", True, 100.0, ["loc://a"], ["loc://a"], "correct_answer"),
-        QueryResult("q2", "direct_fact", True, 200.0, ["loc://a"], ["loc://a"], "correct_answer"),
+        QueryResult(
+            "q1",
+            "direct_fact",
+            True,
+            100.0,
+            ["loc://a"],
+            ["loc://a"],
+            "correct_answer",
+        ),
+        QueryResult(
+            "q2",
+            "direct_fact",
+            True,
+            200.0,
+            ["loc://a"],
+            ["loc://a"],
+            "correct_answer",
+        ),
     ]
     summaries = aggregate_by_class(results)
     assert summaries[0].avg_latency_ms == pytest.approx(150.0)
@@ -345,8 +404,24 @@ def test_aggregate_by_class_avg_latency() -> None:
 
 def test_aggregate_by_class_multiple_classes() -> None:
     results = [
-        QueryResult("q1", "direct_fact", True, 10.0, ["loc://a"], ["loc://a"], "correct_answer"),
-        QueryResult("q2", "briefing", True, 20.0, ["loc://b"], ["loc://b"], "correct_answer"),
+        QueryResult(
+            "q1",
+            "direct_fact",
+            True,
+            10.0,
+            ["loc://a"],
+            ["loc://a"],
+            "correct_answer",
+        ),
+        QueryResult(
+            "q2",
+            "briefing",
+            True,
+            20.0,
+            ["loc://b"],
+            ["loc://b"],
+            "correct_answer",
+        ),
         QueryResult("q3", "no_answer", True, 5.0, [], [], "correct_no_answer"),
     ]
     summaries = aggregate_by_class(results)
@@ -358,6 +433,32 @@ def test_resolve_corpus_version_returns_12_char_hex() -> None:
     version = resolve_corpus_version(_CORPUS_PATH)
     assert len(version) == 12
     int(version, 16)  # must be valid hex
+
+
+def test_resolve_corpus_version_ignores_mtime_only_changes(tmp_path: Path) -> None:
+    corpus = tmp_path / "corpus"
+    gold = corpus / "gold"
+    gold.mkdir(parents=True)
+    manifest = gold / "queries.yaml"
+    manifest.write_text("queries: []\n")
+    first = resolve_corpus_version(corpus)
+    manifest.touch()
+    second = resolve_corpus_version(corpus)
+    assert first == second
+
+
+def test_resolve_corpus_version_changes_when_file_content_changes(
+    tmp_path: Path,
+) -> None:
+    corpus = tmp_path / "corpus"
+    gold = corpus / "gold"
+    gold.mkdir(parents=True)
+    manifest = gold / "queries.yaml"
+    manifest.write_text("queries: []\n")
+    first = resolve_corpus_version(corpus)
+    manifest.write_text("queries:\n  - id: q1\n")
+    second = resolve_corpus_version(corpus)
+    assert first != second
 
 
 def test_single_lineage_classes_correct() -> None:
@@ -389,9 +490,19 @@ async def _store_eval_doc(
         source_type=source_type,
         source_locator=source_locator,
         source_alias=source_alias,
-        chunks=[ChunkRecord(content=content, chunk_index=0, token_count=len(content.split()))],
+        chunks=[
+            ChunkRecord(
+                content=content,
+                chunk_index=0,
+                token_count=len(content.split()),
+            )
+        ],
         embeddings=[
-            EmbeddingRecord(vector=_FIXED_VECTOR, model="voyage-3", provider="anthropic")
+            EmbeddingRecord(
+                vector=_FIXED_VECTOR,
+                model="voyage-3",
+                provider="anthropic",
+            )
         ],
     )
 

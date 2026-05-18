@@ -1,6 +1,6 @@
 # Story 7.1: Retrieval Evaluation Corpus & Benchmark Harness
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -331,3 +331,11 @@ None — deterministic test failures resolved without needing persistent debug l
 | Date | Author | Change |
 |------|--------|--------|
 | 2026-05-15 | claude-sonnet-4-6 | Implemented all 6 tasks; 50 new tests passing; status → review |
+
+### Review Findings
+
+- [x] [Review][Patch] Benchmark still depends on live embedding calls, so runs are not offline or deterministic [src/cos/services/retrieval_eval.py:81]
+- [x] [Review][Patch] Seeded fixture rows are not cleaned up on failure and can collide with real canonical documents [src/cos/services/retrieval_eval.py:41]
+- [x] [Review][Patch] Query pass/fail ignores citation contamination, allowing the CLI to report success despite precision regressions [src/cos/retrieval/benchmark.py:215]
+- [x] [Review][Patch] Citation precision only scores `source_locator`, not the full citation contract required by the story [src/cos/retrieval/benchmark.py:213]
+- [x] [Review][Patch] Corpus versioning uses file mtimes, which is unstable and contradicts the documented versioning contract [src/cos/retrieval/benchmark.py:289]

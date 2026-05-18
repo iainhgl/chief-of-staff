@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from conftest import make_test_config
 
-from cos.retrieval.benchmark import BenchmarkQuery, CorpusError
+from cos.retrieval.benchmark import BenchmarkCitation
 from cos.retrieval.citations import CitedChunk
 from cos.services.retrieval_eval import (
     RetrievalEvalService,
@@ -16,6 +16,12 @@ from cos.services.retrieval_eval import (
 )
 
 _CORPUS_PATH = Path(__file__).parents[1] / "fixtures" / "retrieval_eval"
+_SEEDED_CITATION = BenchmarkCitation(
+    source_alias="local://local-leave-policy",
+    source_locator="local://local-leave-policy",
+    document_version_id="seeded-version-1",
+    chunk_index=0,
+)
 
 
 def _make_pool(cited_results_by_query: dict) -> MagicMock:
@@ -29,13 +35,17 @@ def _make_pool(cited_results_by_query: dict) -> MagicMock:
     return pool
 
 
-def _make_cited_chunk(source_locator: str, source_alias: str = "") -> CitedChunk:
+def _make_cited_chunk(
+    source_locator: str,
+    source_alias: str = "",
+    document_version_id: str = "seeded-version-1",
+) -> CitedChunk:
     return CitedChunk(
         content="fixture content",
         source_document_id="12345678-1234-1234-1234-123456789012",
         source_alias=source_alias or source_locator,
         source_locator=source_locator,
-        document_version_id="",
+        document_version_id=document_version_id,
         chunk_index=0,
         score=0.9,
     )
@@ -71,6 +81,10 @@ async def test_run_benchmark_loads_and_runs_all_gold_queries(tmp_path: Path) -> 
             return_value=[MagicMock(vector=[0.1] * 1024)]
         )),
         patch("cos.services.retrieval_eval.store_document_canonical", new=AsyncMock()),
+        patch(
+            "cos.services.retrieval_eval._resolve_seeded_citation",
+            new=AsyncMock(return_value=_SEEDED_CITATION),
+        ),
         patch("cos.services.retrieval_eval.hybrid_search", new=_fake_search),
     ):
         service = RetrievalEvalService(config, pool)
@@ -91,7 +105,14 @@ async def test_run_benchmark_with_fuzz_includes_fuzz_queries(tmp_path: Path) -> 
             return_value=[MagicMock(vector=[0.1] * 1024)]
         )),
         patch("cos.services.retrieval_eval.store_document_canonical", new=AsyncMock()),
-        patch("cos.services.retrieval_eval.hybrid_search", new=AsyncMock(return_value=[])),
+        patch(
+            "cos.services.retrieval_eval._resolve_seeded_citation",
+            new=AsyncMock(return_value=_SEEDED_CITATION),
+        ),
+        patch(
+            "cos.services.retrieval_eval.hybrid_search",
+            new=AsyncMock(return_value=[]),
+        ),
     ):
         service = RetrievalEvalService(config, pool)
         report = await service.run_benchmark(_CORPUS_PATH, include_stress_fuzz=True)
@@ -117,6 +138,10 @@ async def test_run_benchmark_correct_answer_counted_as_passed(tmp_path: Path) ->
             return_value=[MagicMock(vector=[0.1] * 1024)]
         )),
         patch("cos.services.retrieval_eval.store_document_canonical", new=AsyncMock()),
+        patch(
+            "cos.services.retrieval_eval._resolve_seeded_citation",
+            new=AsyncMock(return_value=_SEEDED_CITATION),
+        ),
         patch("cos.services.retrieval_eval.hybrid_search", new=_fake_search),
     ):
         service = RetrievalEvalService(config, pool)
@@ -138,7 +163,14 @@ async def test_run_benchmark_no_answer_case_correct_when_empty(tmp_path: Path) -
             return_value=[MagicMock(vector=[0.1] * 1024)]
         )),
         patch("cos.services.retrieval_eval.store_document_canonical", new=AsyncMock()),
-        patch("cos.services.retrieval_eval.hybrid_search", new=AsyncMock(return_value=[])),
+        patch(
+            "cos.services.retrieval_eval._resolve_seeded_citation",
+            new=AsyncMock(return_value=_SEEDED_CITATION),
+        ),
+        patch(
+            "cos.services.retrieval_eval.hybrid_search",
+            new=AsyncMock(return_value=[]),
+        ),
     ):
         service = RetrievalEvalService(config, pool)
         report = await service.run_benchmark(_CORPUS_PATH)
@@ -150,12 +182,20 @@ async def test_run_benchmark_no_answer_case_correct_when_empty(tmp_path: Path) -
 
 
 @pytest.mark.asyncio
-async def test_run_benchmark_single_lineage_class_applies_narrowing(tmp_path: Path) -> None:
+async def test_run_benchmark_single_lineage_class_applies_narrowing(
+    tmp_path: Path,
+) -> None:
     config = make_test_config(tmp_path)
     pool = _make_pool_with_connection()
 
-    chunk_a = _make_cited_chunk("local://local-leave-policy")
-    chunk_b = _make_cited_chunk("gmail://msg-leave-policy-001")
+    chunk_a = _make_cited_chunk(
+        "local://local-leave-policy",
+        document_version_id="seeded-version-1",
+    )
+    chunk_b = _make_cited_chunk(
+        "gmail://msg-leave-policy-001",
+        document_version_id="seeded-version-2",
+    )
     chunk_a.score = 0.9
 
     returned_chunks = [chunk_a, chunk_b]
@@ -168,6 +208,10 @@ async def test_run_benchmark_single_lineage_class_applies_narrowing(tmp_path: Pa
             return_value=[MagicMock(vector=[0.1] * 1024)]
         )),
         patch("cos.services.retrieval_eval.store_document_canonical", new=AsyncMock()),
+        patch(
+            "cos.services.retrieval_eval._resolve_seeded_citation",
+            new=AsyncMock(return_value=_SEEDED_CITATION),
+        ),
         patch("cos.services.retrieval_eval.hybrid_search", new=_fake_search),
     ):
         service = RetrievalEvalService(config, pool)
@@ -185,8 +229,14 @@ async def test_run_benchmark_cross_doc_class_not_narrowed(tmp_path: Path) -> Non
     config = make_test_config(tmp_path)
     pool = _make_pool_with_connection()
 
-    chunk_a = _make_cited_chunk("local://local-leave-policy")
-    chunk_b = _make_cited_chunk("gmail://msg-leave-policy-001")
+    chunk_a = _make_cited_chunk(
+        "local://local-leave-policy",
+        document_version_id="seeded-version-1",
+    )
+    chunk_b = _make_cited_chunk(
+        "gmail://msg-leave-policy-001",
+        document_version_id="seeded-version-2",
+    )
 
     async def _fake_search(query, conn, cfg, **kwargs):  # type: ignore[no-untyped-def]
         if "compare" in query.lower():
@@ -198,6 +248,10 @@ async def test_run_benchmark_cross_doc_class_not_narrowed(tmp_path: Path) -> Non
             return_value=[MagicMock(vector=[0.1] * 1024)]
         )),
         patch("cos.services.retrieval_eval.store_document_canonical", new=AsyncMock()),
+        patch(
+            "cos.services.retrieval_eval._resolve_seeded_citation",
+            new=AsyncMock(return_value=_SEEDED_CITATION),
+        ),
         patch("cos.services.retrieval_eval.hybrid_search", new=_fake_search),
     ):
         service = RetrievalEvalService(config, pool)
@@ -209,16 +263,98 @@ async def test_run_benchmark_cross_doc_class_not_narrowed(tmp_path: Path) -> Non
     assert len(cds_result.actual_lineage) == 2
 
 
+@pytest.mark.asyncio
+async def test_run_benchmark_uses_benchmark_provider_and_namespaced_source_identity(
+    tmp_path: Path,
+) -> None:
+    config = make_test_config(tmp_path)
+    pool = _make_pool_with_connection()
+    store_document = AsyncMock()
+    seeded_citation = AsyncMock(return_value=_SEEDED_CITATION)
+
+    with (
+        patch("cos.services.retrieval_eval.embed", new=AsyncMock(
+            return_value=[MagicMock(vector=[0.1] * 1024)]
+        )) as embed_mock,
+        patch(
+            "cos.services.retrieval_eval.store_document_canonical",
+            new=store_document,
+        ),
+        patch(
+            "cos.services.retrieval_eval._resolve_seeded_citation",
+            new=seeded_citation,
+        ),
+        patch(
+            "cos.services.retrieval_eval.hybrid_search",
+            new=AsyncMock(return_value=[]),
+        ),
+    ):
+        service = RetrievalEvalService(config, pool)
+        await service.run_benchmark(_CORPUS_PATH)
+
+    assert embed_mock.await_count == 5
+    assert all(
+        call.kwargs["provider"] == "benchmark"
+        for call in embed_mock.await_args_list
+    )
+    first_call = store_document.await_args_list[0]
+    assert first_call.kwargs["source_type"].startswith("benchmark:")
+    assert first_call.kwargs["source_path"].startswith("benchmark://")
+
+
+@pytest.mark.asyncio
+async def test_run_benchmark_cleans_up_when_query_execution_fails(
+    tmp_path: Path,
+) -> None:
+    config = make_test_config(tmp_path)
+    pool = _make_pool_with_connection()
+
+    with (
+        patch("cos.services.retrieval_eval.embed", new=AsyncMock(
+            return_value=[MagicMock(vector=[0.1] * 1024)]
+        )),
+        patch("cos.services.retrieval_eval.store_document_canonical", new=AsyncMock()),
+        patch(
+            "cos.services.retrieval_eval._resolve_seeded_citation",
+            new=AsyncMock(return_value=_SEEDED_CITATION),
+        ),
+        patch(
+            "cos.services.retrieval_eval.hybrid_search",
+            new=AsyncMock(side_effect=RuntimeError("boom")),
+        ),
+    ):
+        service = RetrievalEvalService(config, pool)
+        cleanup = AsyncMock()
+        service._cleanup_fixtures = cleanup  # type: ignore[method-assign]
+        with pytest.raises(RuntimeError, match="boom"):
+            await service.run_benchmark(_CORPUS_PATH)
+
+    cleanup.assert_awaited_once()
+
+
 # ── Report building and serialisation ────────────────────────────────────────
 
 
 def test_report_to_dict_contains_required_top_level_keys(tmp_path: Path) -> None:
     from cos.retrieval.benchmark import QueryResult
     results = [
-        QueryResult("q1", "direct_fact", True, 50.0, ["loc://a"], ["loc://a"], "correct_answer")
+        QueryResult(
+            "q1",
+            "direct_fact",
+            True,
+            50.0,
+            ["loc://a"],
+            ["loc://a"],
+            "correct_answer",
+        )
     ]
     per_class = aggregate_by_class_simple(results)
-    report = _build_report("2026-01-01T00:00:00+00:00", "abc123def456", results, per_class)
+    report = _build_report(
+        "2026-01-01T00:00:00+00:00",
+        "abc123def456",
+        results,
+        per_class,
+    )
     d = report_to_dict(report)
 
     assert "run_timestamp" in d
@@ -231,10 +367,23 @@ def test_report_to_dict_contains_required_top_level_keys(tmp_path: Path) -> None
 def test_report_summary_fields_present(tmp_path: Path) -> None:
     from cos.retrieval.benchmark import QueryResult
     results = [
-        QueryResult("q1", "direct_fact", True, 50.0, ["loc://a"], ["loc://a"], "correct_answer")
+        QueryResult(
+            "q1",
+            "direct_fact",
+            True,
+            50.0,
+            ["loc://a"],
+            ["loc://a"],
+            "correct_answer",
+        )
     ]
     per_class = aggregate_by_class_simple(results)
-    report = _build_report("2026-01-01T00:00:00+00:00", "abc123def456", results, per_class)
+    report = _build_report(
+        "2026-01-01T00:00:00+00:00",
+        "abc123def456",
+        results,
+        per_class,
+    )
     d = report_to_dict(report)
     summary = d["summary"]
 
@@ -249,7 +398,15 @@ def test_report_summary_fields_present(tmp_path: Path) -> None:
 def test_report_per_query_has_required_fields() -> None:
     from cos.retrieval.benchmark import QueryResult
     results = [
-        QueryResult("q1", "direct_fact", True, 42.0, ["loc://a"], ["loc://a"], "correct_answer")
+        QueryResult(
+            "q1",
+            "direct_fact",
+            True,
+            42.0,
+            ["loc://a"],
+            ["loc://a"],
+            "correct_answer",
+        )
     ]
     per_class = aggregate_by_class_simple(results)
     report = _build_report("2026-01-01T00:00:00+00:00", "ver", results, per_class)
@@ -262,13 +419,23 @@ def test_report_per_query_has_required_fields() -> None:
     assert "latency_ms" in pq
     assert "expected_lineage" in pq
     assert "actual_lineage" in pq
+    assert "expected_citations" in pq
+    assert "actual_citations" in pq
     assert "answerability_verdict" in pq
 
 
 def test_report_per_class_has_required_fields() -> None:
     from cos.retrieval.benchmark import QueryResult
     results = [
-        QueryResult("q1", "direct_fact", True, 42.0, ["loc://a"], ["loc://a"], "correct_answer")
+        QueryResult(
+            "q1",
+            "direct_fact",
+            True,
+            42.0,
+            ["loc://a"],
+            ["loc://a"],
+            "correct_answer",
+        )
     ]
     per_class = aggregate_by_class_simple(results)
     report = _build_report("2026-01-01T00:00:00+00:00", "ver", results, per_class)
@@ -286,10 +453,23 @@ def test_report_per_class_has_required_fields() -> None:
 def test_format_human_summary_contains_pass_rate() -> None:
     from cos.retrieval.benchmark import QueryResult
     results = [
-        QueryResult("q1", "direct_fact", True, 50.0, ["loc://a"], ["loc://a"], "correct_answer")
+        QueryResult(
+            "q1",
+            "direct_fact",
+            True,
+            50.0,
+            ["loc://a"],
+            ["loc://a"],
+            "correct_answer",
+        )
     ]
     per_class = aggregate_by_class_simple(results)
-    report = _build_report("2026-01-01T00:00:00+00:00", "abc123def456", results, per_class)
+    report = _build_report(
+        "2026-01-01T00:00:00+00:00",
+        "abc123def456",
+        results,
+        per_class,
+    )
     summary = format_human_summary(report)
 
     assert "1/1" in summary
@@ -299,8 +479,24 @@ def test_format_human_summary_contains_pass_rate() -> None:
 def test_build_report_overall_recall_correct() -> None:
     from cos.retrieval.benchmark import QueryResult
     results = [
-        QueryResult("q1", "direct_fact", True, 10.0, ["loc://a"], ["loc://a"], "correct_answer"),
-        QueryResult("q2", "direct_fact", False, 10.0, ["loc://b"], ["loc://c"], "missed_answer"),
+        QueryResult(
+            "q1",
+            "direct_fact",
+            True,
+            10.0,
+            ["loc://a"],
+            ["loc://a"],
+            "correct_answer",
+        ),
+        QueryResult(
+            "q2",
+            "direct_fact",
+            False,
+            10.0,
+            ["loc://b"],
+            ["loc://c"],
+            "missed_answer",
+        ),
     ]
     per_class = aggregate_by_class_simple(results)
     report = _build_report("ts", "ver", results, per_class)
@@ -310,7 +506,15 @@ def test_build_report_overall_recall_correct() -> None:
 def test_build_report_no_answer_excluded_from_recall() -> None:
     from cos.retrieval.benchmark import QueryResult
     results = [
-        QueryResult("q1", "direct_fact", True, 10.0, ["loc://a"], ["loc://a"], "correct_answer"),
+        QueryResult(
+            "q1",
+            "direct_fact",
+            True,
+            10.0,
+            ["loc://a"],
+            ["loc://a"],
+            "correct_answer",
+        ),
         QueryResult("q2", "no_answer", True, 5.0, [], [], "correct_no_answer"),
     ]
     per_class = aggregate_by_class_simple(results)
