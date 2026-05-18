@@ -600,6 +600,8 @@ async def test_query_emits_structured_telemetry_on_success(
     assert data["candidate_counts"]["merged"] == 7
     assert data["candidate_counts"]["post_threshold"] == 6
     assert data["candidate_counts"]["post_pruning"] == 4
+    assert data["candidate_counts"]["final"] == 1
+    assert data["candidate_counts"]["post_lineage"] == 1
     assert "retrieval" in data["latency_ms"]
     assert "synthesis" in data["latency_ms"]
     assert "total" in data["latency_ms"]
@@ -654,6 +656,79 @@ async def test_query_emits_telemetry_on_synthesis_failure(
     assert data["outcome"] == "synthesis_degraded"
     assert data["failure_stage"] == "synthesis"
     assert data["latency_ms"]["synthesis"] is not None
+
+
+@pytest.mark.asyncio
+async def test_query_emits_telemetry_on_retrieval_failure_and_reraises(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with caplog.at_level(logging.ERROR):
+        with patch(_PATCH, new=AsyncMock(side_effect=RuntimeError("db down"))):
+            with pytest.raises(RuntimeError, match="db down"):
+                await service.query("what is X?", role_pack=None)
+
+    data = _parse_telemetry_log(caplog)
+
+    assert data["outcome"] == "retrieval_failed"
+    assert data["failure_stage"] == "retrieval"
+    assert data["latency_ms"]["synthesis"] is None
+    assert data["candidate_counts"]["post_lineage"] is None
+
+
+@pytest.mark.asyncio
+async def test_query_skipped_lineage_stage_logs_null_post_lineage_count(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    stats = SearchStats(
+        keyword_candidate_count=2,
+        semantic_candidate_count=2,
+        merged_candidate_count=2,
+        post_threshold_count=2,
+        post_pruning_count=2,
+        final_candidate_count=2,
+    )
+    chunks = [
+        _make_chunk(content="policy doc"),
+        CitedChunk(
+            content="policy email",
+            source_document_id="12345678-1234-1234-1234-123456789013",
+            source_alias="policy-email",
+            source_locator="gmail://msg-leave-policy-001",
+            document_version_id="ver-email-1",
+            chunk_index=0,
+            score=0.8,
+        ),
+    ]
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with caplog.at_level(logging.INFO):
+        with patch(_PATCH, new=AsyncMock(return_value=(chunks, stats))):
+            await service.query(
+                "compare the leave policy described in the email with the policy document",
+                role_pack=None,
+            )
+
+    data = _parse_telemetry_log(caplog)
+
+    assert data["query_mode"] == "compare"
+    assert data["candidate_counts"]["final"] == 2
+    assert data["candidate_counts"]["post_lineage"] is None
 
 
 @pytest.mark.asyncio

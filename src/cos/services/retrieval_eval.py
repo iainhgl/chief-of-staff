@@ -181,6 +181,7 @@ class RetrievalEvalService:
         )
         latency_ms = (time.monotonic() - t0) * 1000.0
 
+        pre_lineage_cited = list(cited)
         post_lineage_count: int | None = None
         if cited and query.query_class in SINGLE_LINEAGE_CLASSES:
             cited = narrow_to_lineage(cited)
@@ -192,6 +193,7 @@ class RetrievalEvalService:
             "merged": stats.merged_candidate_count,
             "post_threshold": stats.post_threshold_count,
             "post_pruning": stats.post_pruning_count,
+            "final": stats.final_candidate_count,
             "post_lineage": post_lineage_count,
         }
 
@@ -206,10 +208,29 @@ class RetrievalEvalService:
             synthesis_mode="not_run",
         )
 
+        pre_lineage_support = (
+            recall_satisfied(
+                score_query(
+                    query,
+                    pre_lineage_cited,
+                    latency_ms,
+                    expected_citations=expected_citations,
+                )
+            )
+            if post_lineage_count is not None
+            else False
+        )
+
         # Attribute failure to the earliest pipeline stage that lost evidence
         if not result.passed:
             result.failure_stage = attribute_failure(
-                result.answerability_verdict, candidate_counts
+                result.answerability_verdict,
+                candidate_counts,
+                lineage_narrowing_lost_support=(
+                    post_lineage_count is not None
+                    and pre_lineage_support
+                    and not recall_satisfied(result)
+                ),
             )
 
         return result

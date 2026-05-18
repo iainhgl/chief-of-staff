@@ -411,6 +411,7 @@ async def test_run_benchmark_query_result_has_candidate_counts(
     assert counts["merged"] == 4
     assert counts["post_threshold"] == 4
     assert counts["post_pruning"] == 2
+    assert counts["final"] == 0
 
 
 @pytest.mark.asyncio
@@ -440,6 +441,85 @@ async def test_run_benchmark_failed_query_has_failure_stage(tmp_path: Path) -> N
                 f"query {result.query_id}: expected candidate_selection, "
                 f"got {result.failure_stage}"
             )
+
+
+@pytest.mark.asyncio
+async def test_run_benchmark_pruning_loss_is_attributed_to_pruning(
+    tmp_path: Path,
+) -> None:
+    config = make_test_config(tmp_path)
+    pool = _make_pool_with_connection()
+    stats = SearchStats(
+        keyword_candidate_count=3,
+        semantic_candidate_count=2,
+        merged_candidate_count=4,
+        post_threshold_count=2,
+        post_pruning_count=0,
+        final_candidate_count=0,
+    )
+
+    with (
+        patch("cos.services.retrieval_eval.embed", new=AsyncMock(
+            return_value=[MagicMock(vector=[0.1] * 1024)]
+        )),
+        patch("cos.services.retrieval_eval.store_document_canonical", new=AsyncMock()),
+        patch(
+            "cos.services.retrieval_eval._resolve_seeded_citation",
+            new=AsyncMock(return_value=_SEEDED_CITATION),
+        ),
+        patch(_SEARCH_PATCH, new=AsyncMock(return_value=([], stats))),
+    ):
+        service = RetrievalEvalService(config, pool)
+        report = await service.run_benchmark(_CORPUS_PATH)
+
+    for result in report.per_query:
+        if result.answerability_verdict == "missed_answer":
+            assert result.failure_stage == "pruning"
+
+
+@pytest.mark.asyncio
+async def test_run_benchmark_lineage_loss_is_attributed_to_lineage_narrowing(
+    tmp_path: Path,
+) -> None:
+    config = make_test_config(tmp_path)
+    pool = _make_pool_with_connection()
+    wrong_lineage = _make_cited_chunk(
+        "gmail://msg-leave-policy-001",
+        document_version_id="gmail-version-1",
+    )
+    expected_lineage = _make_cited_chunk("local://local-leave-policy")
+    stats = SearchStats(
+        keyword_candidate_count=2,
+        semantic_candidate_count=2,
+        merged_candidate_count=2,
+        post_threshold_count=2,
+        post_pruning_count=2,
+        final_candidate_count=2,
+    )
+
+    async def _fake_search(query, conn, cfg, **kwargs):  # type: ignore[no-untyped-def]
+        if "annual leave" in query.lower():
+            return [wrong_lineage, expected_lineage], stats
+        return [], SearchStats()
+
+    with (
+        patch("cos.services.retrieval_eval.embed", new=AsyncMock(
+            return_value=[MagicMock(vector=[0.1] * 1024)]
+        )),
+        patch("cos.services.retrieval_eval.store_document_canonical", new=AsyncMock()),
+        patch(
+            "cos.services.retrieval_eval._resolve_seeded_citation",
+            new=AsyncMock(return_value=_SEEDED_CITATION),
+        ),
+        patch(_SEARCH_PATCH, new=_fake_search),
+    ):
+        service = RetrievalEvalService(config, pool)
+        report = await service.run_benchmark(_CORPUS_PATH)
+
+    result = {r.query_id: r for r in report.per_query}["gold-df-001"]
+    assert not result.passed
+    assert result.answerability_verdict == "missed_answer"
+    assert result.failure_stage == "lineage_narrowing"
 
 
 @pytest.mark.asyncio
@@ -649,7 +729,7 @@ def test_report_per_query_has_new_observability_fields() -> None:
         "missed_answer",
         trace_id="trace-abc",
         query_mode="direct_fact",
-        candidate_counts={"merged": 0},
+        candidate_counts={"merged": 0, "final": 0},
         failure_stage="candidate_selection",
         synthesis_mode="not_run",
     )
@@ -660,7 +740,7 @@ def test_report_per_query_has_new_observability_fields() -> None:
     pq = d["per_query"][0]
     assert pq["trace_id"] == "trace-abc"
     assert pq["query_mode"] == "direct_fact"
-    assert pq["candidate_counts"] == {"merged": 0}
+    assert pq["candidate_counts"] == {"merged": 0, "final": 0}
     assert pq["failure_stage"] == "candidate_selection"
     assert pq["synthesis_mode"] == "not_run"
 

@@ -1,6 +1,6 @@
 # Story 7.2: Retrieval Observability & Structured Eval Logging
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -304,3 +304,10 @@ gpt-5.4
 - `tests/retrieval/test_benchmark_harness.py` (modified — 11 new tests for observability fields and `attribute_failure`)
 - `tests/services/test_retrieval_service.py` (modified — updated all patches + 6 new telemetry/content-safety tests)
 - `tests/services/test_retrieval_eval_service.py` (modified — updated all patches + 7 new benchmark metadata tests)
+
+### Review Findings
+
+- [x] [Review][Patch] Retrieval failures before synthesis emit no structured telemetry [src/cos/services/retrieval.py:229]
+- [x] [Review][Patch] Benchmark failure attribution ignores pruning losses and reports them as citation precision [src/cos/retrieval/benchmark.py:304]
+- [x] [Review][Patch] Lineage-stage telemetry is misleading and benchmark lineage attribution is unreachable [src/cos/services/retrieval.py:260]
+- [x] [Review][Patch] Final top-k truncation is computed but never exposed in logs or benchmark output [src/cos/retrieval/search.py:287]

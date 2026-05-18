@@ -280,7 +280,7 @@ def score_query(
         actual_citations=actual_citations,
         trace_id=trace_id,
         query_mode=query_mode,
-        candidate_counts=candidate_counts if candidate_counts is not None else {},
+        candidate_counts=dict(candidate_counts) if candidate_counts is not None else {},
         failure_stage=failure_stage,
         synthesis_mode=synthesis_mode,
     )
@@ -289,6 +289,8 @@ def score_query(
 def attribute_failure(
     verdict: str,
     candidate_counts: dict[str, Any],
+    *,
+    lineage_narrowing_lost_support: bool = False,
 ) -> str | None:
     """Return the retrieval stage most likely responsible for a failed query.
 
@@ -298,17 +300,30 @@ def attribute_failure(
     """
     if verdict in ("correct_answer", "correct_no_answer"):
         return None
-    if verdict == "false_answer":
+
+    merged = _count_value(candidate_counts, "merged")
+    post_threshold = _count_value(candidate_counts, "post_threshold")
+    post_pruning = _count_value(candidate_counts, "post_pruning")
+    final = _count_value(candidate_counts, "final")
+
+    if merged == 0:
         return "candidate_selection"
-    # missed_answer: walk the pipeline stages
-    if candidate_counts.get("merged", 0) == 0:
-        return "candidate_selection"
-    if candidate_counts.get("post_threshold", 0) == 0:
+    if post_threshold == 0:
         return "threshold_filtering"
-    post_lineage = candidate_counts.get("post_lineage")
-    if post_lineage is not None and post_lineage == 0:
+    if post_pruning == 0:
+        return "pruning"
+    if final == 0:
+        return "top_k_truncation"
+    if lineage_narrowing_lost_support:
         return "lineage_narrowing"
+    if verdict == "false_answer":
+        return "citation_precision"
     return "citation_precision"
+
+
+def _count_value(candidate_counts: dict[str, Any], key: str) -> int | None:
+    value = candidate_counts.get(key)
+    return value if isinstance(value, int) else None
 
 
 def _citation_precision_for_result(result: QueryResult) -> float | None:

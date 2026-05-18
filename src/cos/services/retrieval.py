@@ -174,7 +174,11 @@ def _emit_retrieval_log(
     outcome: str,
     failure_stage: str | None,
 ) -> None:
-    level = "ERROR" if outcome == "synthesis_degraded" else "INFO"
+    level = (
+        "ERROR"
+        if outcome in {"synthesis_degraded", "retrieval_failed"}
+        else "INFO"
+    )
     record: dict[str, Any] = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "level": level,
@@ -188,6 +192,7 @@ def _emit_retrieval_log(
             "merged": stats.merged_candidate_count,
             "post_threshold": stats.post_threshold_count,
             "post_pruning": stats.post_pruning_count,
+            "final": stats.final_candidate_count,
             "post_lineage": post_lineage_count,
         },
         "latency_ms": {
@@ -225,18 +230,35 @@ class RetrievalService:
         trace_id = str(uuid.uuid4())
         query_mode = _detect_query_type(text)
         t_start = time.monotonic()
-
-        async with self._pool.connection() as conn:
-            t_retrieval = time.monotonic()
-            cited_results, search_stats = await hybrid_search_with_trace(
-                text,
-                conn,
-                self._config,
-                role_pack,
-                min_score=self._config.retrieval.min_score,
-                max_chunks_per_source=self._config.retrieval.max_chunks_per_source,
-            )
+        t_retrieval = time.monotonic()
+        search_stats = SearchStats()
+        try:
+            async with self._pool.connection() as conn:
+                cited_results, search_stats = await hybrid_search_with_trace(
+                    text,
+                    conn,
+                    self._config,
+                    role_pack,
+                    min_score=self._config.retrieval.min_score,
+                    max_chunks_per_source=self._config.retrieval.max_chunks_per_source,
+                )
+        except Exception:
             retrieval_latency_ms = (time.monotonic() - t_retrieval) * 1000.0
+            _emit_retrieval_log(
+                trace_id=trace_id,
+                query_mode=query_mode,
+                stats=search_stats,
+                post_lineage_count=None,
+                retrieval_latency_ms=retrieval_latency_ms,
+                synthesis_latency_ms=None,
+                total_latency_ms=(time.monotonic() - t_start) * 1000.0,
+                provider=self._config.llm.provider,
+                model=self._config.llm.model,
+                outcome="retrieval_failed",
+                failure_stage="retrieval",
+            )
+            raise
+        retrieval_latency_ms = (time.monotonic() - t_retrieval) * 1000.0
 
         if not cited_results:
             _emit_retrieval_log(
@@ -257,29 +279,10 @@ class RetrievalService:
                 citations=[],
             )
 
+        post_lineage_count: int | None = None
         if not _is_multi_source_query(text):
             cited_results = narrow_to_lineage(cited_results)
-
-        post_lineage_count = len(cited_results)
-
-        if not cited_results:
-            _emit_retrieval_log(
-                trace_id=trace_id,
-                query_mode=query_mode,
-                stats=search_stats,
-                post_lineage_count=0,
-                retrieval_latency_ms=retrieval_latency_ms,
-                synthesis_latency_ms=None,
-                total_latency_ms=(time.monotonic() - t_start) * 1000.0,
-                provider=self._config.llm.provider,
-                model=self._config.llm.model,
-                outcome="no_content",
-                failure_stage="lineage_narrowing",
-            )
-            return CitedResponse(
-                answer="No relevant content found in the knowledge base.",
-                citations=[],
-            )
+            post_lineage_count = len(cited_results)
 
         prompt = _build_synthesis_prompt(text, role_pack)
         context = [chunk.content for chunk in cited_results]

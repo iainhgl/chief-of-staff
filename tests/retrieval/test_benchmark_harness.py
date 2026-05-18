@@ -686,6 +686,21 @@ def test_score_query_stores_candidate_counts() -> None:
     assert result.candidate_counts == counts
 
 
+def test_score_query_copies_candidate_counts() -> None:
+    query = BenchmarkQuery(
+        id="q1",
+        query="test",
+        query_class="direct_fact",
+        answerable=True,
+        expected_lineage=["loc://a"],
+    )
+    chunk = _make_chunk("loc://a", "loc://a")
+    counts = {"merged": 1}
+    result = score_query(query, [chunk], latency_ms=50.0, candidate_counts=counts)
+    counts["merged"] = 0
+    assert result.candidate_counts == {"merged": 1}
+
+
 def test_score_query_defaults_preserve_backward_compat() -> None:
     query = BenchmarkQuery(
         id="q1",
@@ -715,7 +730,8 @@ def test_attribute_failure_correct_no_answer_returns_none() -> None:
 
 
 def test_attribute_failure_false_answer_returns_candidate_selection() -> None:
-    assert attribute_failure("false_answer", {}) == "candidate_selection"
+    counts = {"merged": 3, "post_threshold": 2, "post_pruning": 1, "final": 1}
+    assert attribute_failure("false_answer", counts) == "citation_precision"
 
 
 def test_attribute_failure_missed_answer_zero_merged_returns_candidate_selection() -> None:
@@ -728,17 +744,28 @@ def test_attribute_failure_missed_answer_zero_post_threshold_returns_threshold_f
     assert attribute_failure("missed_answer", counts) == "threshold_filtering"
 
 
-def test_attribute_failure_missed_answer_zero_post_lineage_returns_lineage_narrowing() -> None:
-    counts = {"merged": 5, "post_threshold": 3, "post_lineage": 0}
-    assert attribute_failure("missed_answer", counts) == "lineage_narrowing"
+def test_attribute_failure_missed_answer_zero_post_pruning_returns_pruning() -> None:
+    counts = {"merged": 5, "post_threshold": 3, "post_pruning": 0}
+    assert attribute_failure("missed_answer", counts) == "pruning"
+
+
+def test_attribute_failure_missed_answer_zero_final_returns_top_k_truncation() -> None:
+    counts = {"merged": 5, "post_threshold": 3, "post_pruning": 2, "final": 0}
+    assert attribute_failure("missed_answer", counts) == "top_k_truncation"
+
+
+def test_attribute_failure_missed_answer_lineage_loss_returns_lineage_narrowing() -> None:
+    counts = {"merged": 5, "post_threshold": 3, "post_pruning": 2, "final": 1}
+    assert (
+        attribute_failure(
+            "missed_answer",
+            counts,
+            lineage_narrowing_lost_support=True,
+        )
+        == "lineage_narrowing"
+    )
 
 
 def test_attribute_failure_missed_answer_with_candidates_returns_citation_precision() -> None:
-    counts = {"merged": 5, "post_threshold": 3, "post_lineage": 2}
-    assert attribute_failure("missed_answer", counts) == "citation_precision"
-
-
-def test_attribute_failure_missed_answer_no_post_lineage_key_returns_citation_precision() -> None:
-    # post_lineage not present means lineage narrowing stage did not run
-    counts = {"merged": 5, "post_threshold": 3}
+    counts = {"merged": 5, "post_threshold": 3, "post_pruning": 2, "final": 1}
     assert attribute_failure("missed_answer", counts) == "citation_precision"
