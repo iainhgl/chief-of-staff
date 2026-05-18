@@ -1,0 +1,46 @@
+queries:
+  # Noisy phrasing — direct_fact with misleading domain terms
+  - id: fuzz-df-001
+    query: What is the holiday entitlement for permanent staff annual leave days?
+    query_class: direct_fact
+    answerable: true
+    expected_lineage:
+      - local://local-leave-policy
+    notes: Near-synonym noise ("holiday", "entitlement", "permanent staff") should still
+      retrieve the leave policy via semantic matching
+
+  # Noisy phrasing — exact_phrase with extra surrounding words
+  - id: fuzz-ep-001
+    query: Tell me about the 9-box grid methodology used for succession planning
+    query_class: exact_phrase
+    answerable: true
+    expected_lineage:
+      - local://local-succession-plan
+    notes: Phrase is embedded in a longer question; retrieval must still surface it
+
+  # Empty-corpus no-answer for a topic that sounds plausible but has no match
+  - id: fuzz-na-001
+    query: What is the company's policy on remote work abroad?
+    query_class: no_answer
+    answerable: false
+    expected_lineage: []
+    notes: Remote-work-abroad policy does not exist; any grounded citation is a failure
+
+  # Cross-doc noise — similar topic, should narrow to one lineage on direct ask
+  - id: fuzz-df-002
+    query: What was the voluntary turnover rate in Q4 2024?
+    query_class: direct_fact
+    answerable: true
+    expected_lineage:
+      - mcp://note-retention-q4-2024
+    notes: Q4 2024 turnover is stated only in the MCP note; calendar event covers
+      annualised rate not Q4 specifically — single-lineage grounding must apply
+
+  # Briefing over a very narrow corpus
+  - id: fuzz-br-001
+    query: Summarise the succession planning status and timeline
+    query_class: briefing
+    answerable: true
+    expected_lineage:
+      - local://local-succession-plan
+    notes: Only one source has succession data; briefing should still return that source

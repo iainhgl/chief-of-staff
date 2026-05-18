@@ -117,24 +117,26 @@ What Iain needs to validate the core pipeline is working:
 
 _At this stage, all content is manually ingested (no live connectors). This is enough to validate that the knowledge pipeline and retrieval logic work correctly._
 
-### Growth — First Real Users (Phases 2–3)
+### Growth — Sequenced Expansion After Epic 6 (Phases 2–4)
 
-What makes it genuinely operational for two users with different roles:
-- Canonical document identity and exact-byte deduplication foundation for cross-source ingestion before connector expansion
-- Calendar and email connectivity (read): meeting context, email-based document ingestion
-- Bidirectional messaging channel (Telegram initially; WhatsApp via Twilio as a later option): inbound questions and note capture, outbound briefs and digests
-- Role pack abstraction: second role configured without code changes
-- Open internet search: augment retrieval with live external context
-- Scheduled jobs: daily brief generation, calendar check
-- Improved ingestion: drag-and-drop or folder-watch for frictionless capture
+What makes the platform genuinely operational for two users with different roles, in the approved order after Epic 6:
+- Retrieval trust foundation first: evaluation corpus, benchmark queries, observability, and retrieval/citation hardening before broader ambient expansion
+- Interactive Telegram slice next: bidirectional messaging for inbound questions and note capture, with Telegram as the first real mobile access path
+- Structured LLM boundary and provider portability after that: richer internal request/response contracts plus direct provider expansion without changing retrieval or ingestion code
+- Open internet search only after the retrieval baseline and reactive messaging path are trustworthy: augment local retrieval with live external context when needed
+- Proactive scheduling after the reactive and trust foundations are proven: daily brief generation and meeting prep from calendar events
+- Role pack abstraction remains part of growth validation: second role configured without core-code changes
+- Improved ingestion remains in scope as a later growth convenience, not ahead of retrieval trust
 
-### Vision — Future (Phases 4–5)
+### Vision — Future Platformization (Phases 5+)
 
-To add only when the Growth tier is stable and proven useful:
+To add only when the sequenced Growth layers are stable and proven useful:
+- Durable task runtime for long-running, resumable, approval-aware workflows
+- Internal model-routing policy and local/self-hosted model endpoint support
+- Advanced retrieval modes: full-context retrieval, hierarchical summaries, graph-retrieval pilots
 - Governance hardening: permissions, audit trail, confidence scoring, approval workflows
 - Write-back actions: draft and send (email, calendar, messaging) with approval step
-- Multi-provider model support including adversarial review patterns
-- Proactive briefings and richer ambient intelligence behaviours
+- Multi-agent or heavier orchestration patterns only if the narrower task substrate proves insufficient
 
 ## User Journeys
 
@@ -437,24 +439,31 @@ _This section expands on the Product Scope summary above with detailed capabilit
 
 ### Post-MVP Features
 
-**Phase 2 — Growth (First Real Users):**
-- Canonical document identity and exact-byte deduplication foundation across all ingestion sources
+**Phase 2 — Retrieval Trust and Interactive Messaging:**
+- Retrieval evaluation corpus, benchmark harness, and observability
+- Retrieval and citation hardening against the evaluation set
+- Telegram bot: bidirectional inbound Q&A and note capture
+- `ingest_document` MCP tool: allows note capture from any MCP client
+- Second role pack validation continues as the main product-level portability check
+
+**Phase 3 — External Context and Proactive Delivery:**
+- Web search MCP tool (Brave or Tavily): LLM-callable for live external context
+- Scheduled jobs: daily brief generation and calendar-driven meeting prep
 - Gmail connector (OAuth 2.0): read email, ingest attachments
 - Google Calendar connector: read upcoming events for meeting prep
-- Telegram bot: bidirectional — inbound questions and note capture, outbound scheduled briefs
-- `ingest_document` MCP tool: allows note capture from any MCP client
-- Web search MCP tool (Brave or Tavily): LLM-callable for live external context
-- Scheduled jobs: daily brief generation, calendar check
-- Second role pack: validates role pack abstraction works without code changes
 - Semantic near-duplicate warning layer after exact-byte deduplication and identity resolution are in place
 
-**Phase 3 — Expansion (Vision):**
+**Phase 4 — Platform Portability and Task Foundations:**
+- Structured LLM boundary with provider metadata and direct multi-provider support
+- Durable task/runtime substrate for async, resumable, approval-aware workflows
+- Outlook / Microsoft 365 connectors if demanded by real users
+- WhatsApp via Twilio (if a specific user requires it)
+
+**Phase 5 — Expansion (Vision):**
 - Governance hardening: permissions, audit trail, confidence scoring
 - Write-back actions with approval step (draft and send via email/messaging)
-- Multi-provider model support including adversarial review patterns
-- Outlook / Microsoft 365 connectors
-- WhatsApp via Twilio (if a specific user requires it)
-- Proactive briefings and richer ambient intelligence behaviours
+- Internal model routing and local/self-hosted endpoint support
+- Advanced retrieval modes and richer orchestration patterns only where benchmarks justify them
 
 ### Risk Mitigation Strategy
 

@@ -1,0 +1,64 @@
+queries:
+  # direct_fact — single-lineage grounding (Story 6.14 contract)
+  - id: gold-df-001
+    query: How many days of annual leave do employees get?
+    query_class: direct_fact
+    answerable: true
+    expected_lineage:
+      - local://local-leave-policy
+    notes: Definitive answer in local-leave-policy.md; gmail note is a secondary echo
+
+  # exact_phrase — verbatim phrase retrieval
+  - id: gold-ep-001
+    query: "9-box grid methodology"
+    query_class: exact_phrase
+    answerable: true
+    expected_lineage:
+      - local://local-succession-plan
+    notes: Exact phrase appears only in succession plan
+
+  # date_timeline — date-anchored fact
+  - id: gold-dt-001
+    query: When did the updated leave policy take effect?
+    query_class: date_timeline
+    answerable: true
+    expected_lineage:
+      - local://local-leave-policy
+    notes: Effective date 2025-01-15 stated in leave policy
+
+  # single_doc_interpretation — interpretation of one document
+  - id: gold-sdi-001
+    query: What did the Q1 business review conclude about attrition?
+    query_class: single_doc_interpretation
+    answerable: true
+    expected_lineage:
+      - calendar://event-q1-review-001
+    notes: Attrition conclusions are in the calendar event document
+
+  # cross_doc_synthesis — explicit multi-source comparison
+  - id: gold-cds-001
+    query: Compare the leave policy described in the email with the policy document
+    query_class: cross_doc_synthesis
+    answerable: true
+    expected_lineage:
+      - local://local-leave-policy
+      - gmail://msg-leave-policy-001
+    notes: Explicit compare query; both lineages must be reachable
+
+  # briefing — aggregation style
+  - id: gold-br-001
+    query: Brief me on the current retention situation across all sources
+    query_class: briefing
+    answerable: true
+    expected_lineage:
+      - mcp://note-retention-q4-2024
+      - calendar://event-q1-review-001
+    notes: Multi-source briefing; both retention notes are acceptable evidence
+
+  # no_answer — threshold / unsupported query (Story 6.13 contract)
+  - id: gold-na-001
+    query: What is the company pension contribution rate?
+    query_class: no_answer
+    answerable: false
+    expected_lineage: []
+    notes: Pension data does not exist in the corpus; must return no-relevant-content

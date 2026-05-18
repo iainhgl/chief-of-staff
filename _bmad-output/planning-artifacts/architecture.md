@@ -82,6 +82,25 @@ Critical NFRs that will drive architectural decisions:
 8. **Immutability of managed copies** — original bytes and Markdown working copies are write-once artifacts stored under internal storage keys derived from content identity, not under user-provided filenames; version records are additive and previous versions remain addressable
 9. **Configuration-driven behaviour** — no environment-specific branching in code; all variable behaviour (role, provider, channels) resolved from `config.yaml` at startup
 
+## Approved Post-Epic-6 Delivery Sequence
+
+The approved BMAD course correction preserves Epics 1 through 6 as implemented history and resequences the growth backlog from Epic 7 onward as follows:
+
+1. **Epic 7 — Retrieval Trust, Evaluation & Observability**
+2. **Epic 8 — Interactive Telegram Messaging**
+3. **Epic 9 — Structured LLM Boundary & Provider Portability**
+4. **Epic 10 — Web Augmentation & External Context**
+5. **Epic 11 — Proactive Briefings & Meeting Prep**
+6. **Epic 12 — Agent-Safe Task Runtime**
+7. **Epic 13 — Internal Model Routing & Local Endpoints**
+8. **Epic 14 — Advanced Retrieval Modes & Orchestration Pilots**
+
+This sequence is intentional:
+- retrieval trust and measurement land before amplification through ambient channels
+- interactive Telegram lands before web augmentation and proactive scheduling
+- provider portability lands before routing policy
+- durable orchestration and advanced retrieval modes stay out of the first interactive-user slice
+
 ## Starter Template Evaluation
 
 ### Primary Technology Domain

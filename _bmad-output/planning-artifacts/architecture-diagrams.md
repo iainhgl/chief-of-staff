@@ -1,7 +1,7 @@
 ---
 type: 'architecture-diagrams'
 architectureRef: 'architecture.md'
-date: '2026-05-05'
+date: '2026-05-15'
 ---
 
 # CoS Platform — Architecture Diagrams
@@ -35,16 +35,16 @@ C4Context
     UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")
 ```
 
-### Phase 2 — First Real Users (Growth tier additions)
+### Growth Roadmap End-State (sequenced delivery after Epic 6)
 
 ```mermaid
 C4Context
-    title CoS Platform — System Context (Phase 2, Growth additions)
+    title CoS Platform — System Context (Growth roadmap end-state)
 
     Person(iain, "Iain (Operator)", "Configures instances, sets up role packs")
     Person(users, "Sarah / Marcus (Users)", "Senior professionals. Interact via Telegram; receive proactive briefs.")
 
-    System(cos, "CoS Platform", "Now includes canonical identity hardening, connectors, scheduler, and bidirectional messaging.")
+    System(cos, "CoS Platform", "Growth roadmap end-state after the approved Epic 7+ sequence: retrieval trust, interactive messaging, provider portability, web augmentation, and proactive delivery.")
 
     System_Ext(claude_desktop, "Claude Desktop", "MCP client")
     System_Ext(claude_api, "Claude API (Anthropic)", "LLM synthesis")
@@ -100,11 +100,11 @@ C4Container
     UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")
 ```
 
-### Phase 2 — Container additions and baseline migration
+### Growth Roadmap End-State — Container additions on top of the baseline
 
 ```mermaid
 C4Container
-    title CoS Platform — Container Diagram (Phase 2 migration + additions on top of implemented baseline)
+    title CoS Platform — Container Diagram (Growth roadmap end-state)
 
     Person(users, "Sarah / Marcus", "Role pack users")
     System_Ext(telegram_api, "Telegram Bot API", "Bidirectional messaging")
@@ -112,8 +112,8 @@ C4Container
     System_Ext(calendar_api, "Google Calendar API", "Event reading")
     System_Ext(web_search, "Web Search API", "Live internet search")
 
-    System_Boundary(cos_platform, "CoS Platform — Docker Compose (Phase 2)") {
-        Container(cos, "cos (extended)", "Python 3.12 / uv", "Runs the Epic 6 migration/hardening flow on top of the implemented Phase 1 baseline, then adds the canonical ingest decision engine, APScheduler for scheduled briefs, and Gmail, Calendar, and Telegram connector modules. Adds web_search and ingest_document MCP tools.")
+    System_Boundary(cos_platform, "CoS Platform — Docker Compose (Growth roadmap)") {
+        Container(cos, "cos (extended)", "Python 3.12 / uv", "Runs the Epic 6 migration/hardening flow on top of the implemented Phase 1 baseline, then adds the approved Epic 7+ layers in sequence: retrieval-trust instrumentation, Telegram messaging, structured LLM/provider portability, web_search, and later scheduler-driven briefings.")
         ContainerDb(postgres, "Postgres + pgvector", "pgvector/pgvector:pg16", "Carries the implemented baseline schema from Epics 1-5, then is migrated in Epic 6 to canonical identity tables for content blobs and source lineage; jobs table (002_jobs.sql) is added for background connector-triggered ingestion.")
         Container(tika, "Apache Tika", "apache/tika", "Unchanged from Phase 1.")
         ContainerDb(filesystem, "Local Filesystem", "Docker bind mount", "Adds tokens/ directory for OAuth credentials (gitignored).")
@@ -326,7 +326,7 @@ sequenceDiagram
     Note over COS: Platform operational. Claude Desktop can now connect.
 ```
 
-### 4.4 Scheduled Morning Brief (Phase 2)
+### 4.4 Scheduled Morning Brief (Epic 11)
 
 ```mermaid
 sequenceDiagram
@@ -364,7 +364,7 @@ sequenceDiagram
     SCH->>DB: log(job_id, result, provenance)
 ```
 
-### 4.5 Inbound Telegram Message — Q&A or Note Capture (Phase 2)
+### 4.5 Inbound Telegram Message — Q&A or Note Capture (Epic 8)
 
 ```mermaid
 sequenceDiagram
@@ -502,32 +502,30 @@ flowchart LR
         OR1["OutputRouter\n(local channel)"]
     end
 
-    subgraph P2["Phase 2 — First Real Users"]
+    subgraph P2["Approved Growth Sequence — Epics 7-11"]
         direction TB
-        ID2["Canonical Identity Migration + Hardening\n(implemented baseline -> content_blobs + sources + source_versions)"]
-        DEDUPE2["Hash-First Dedupe\n+ re-ingest semantics"]
-        CITES2["Source Alias Citations\n+ migration/backfill"]
-        SCH2["APScheduler\n(daily brief)"]
-        BOT2["Telegram Bot\n(bidirectional)"]
-        GMAIL2["Gmail Connector\n(ingest email)"]
-        CAL2["Calendar Connector\n(meeting prep)"]
-        WEB2["Web Search Tool\n(MCP tool)"]
-        JOBS2[("jobs table\n(Phase 2 schema)")]
+        E7["Epic 7\nRetrieval trust + eval + observability"]
+        E8["Epic 8\nInteractive Telegram messaging"]
+        E9["Epic 9\nStructured LLM boundary + provider portability"]
+        E10["Epic 10\nWeb augmentation"]
+        E11["Epic 11\nProactive briefings + meeting prep"]
+        JOBS2[("jobs table\n(background work substrate)")]
         TG2["Telegram Channel\n(OutputRouter)"]
     end
 
-    subgraph P3["Vision Phases 4-5 — Governance & Write-back"]
+    subgraph P3["Later Roadmap — Epics 12-14"]
         direction TB
-        GOV3["Governance Layer\n(audit, confidence)"]
-        WB3["Write-back Actions\n(approval step)"]
-        MULTI3["Multi-provider\nLLM support"]
+        E12["Epic 12\nAgent-safe task runtime"]
+        E13["Epic 13\nModel routing + local endpoints"]
+        E14["Epic 14\nAdvanced retrieval + orchestration pilots"]
     end
 
     P1 --> P2 --> P3
-    ID2 --> DEDUPE2 --> CITES2 --> JOBS2
-    JOBS2 --> GMAIL2
-    JOBS2 --> BOT2
-    CAL2 --> SCH2
+    E7 --> E8 --> E9 --> E10 --> E11
+    E11 --> E12
+    E12 --> E13 --> E14
+    JOBS2 --> E8
+    JOBS2 --> E11
 ```
 
 ---
@@ -540,7 +538,7 @@ The OutputRouter is the single enforcement point for NFR7 (fail-closed egress). 
 flowchart TD
     REQ[Output request:\nchannel + content]
     VAL{Channel in\nconfig.output_channels?}
-    SUPP[Suppress output\nLog structured error:\n component=output_router]
+    SUPP[Suppress output\nLog structured error:\n component=output]
     ROUTE{Select channel\nhandler}
     LOCAL[output/channels/local.py\nReturn in MCP response]
     TG[output/channels/telegram.py\nPOST to Telegram Bot API]
