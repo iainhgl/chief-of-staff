@@ -1,3 +1,5 @@
+import json
+import logging
 from collections.abc import AsyncIterator
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -7,7 +9,10 @@ from conftest import make_test_config
 
 from cos.llm.adapter import LLMAdapter
 from cos.retrieval.citations import CitedChunk, CitedResponse
+from cos.retrieval.telemetry import SearchStats
 from cos.services.retrieval import RetrievalService
+
+_PATCH = "cos.services.retrieval.hybrid_search_with_trace"
 
 
 @pytest.fixture(autouse=True)
@@ -45,6 +50,12 @@ def _make_chunk(content: str = "workforce segmentation framework") -> CitedChunk
     )
 
 
+def _search_result(
+    chunks: list[CitedChunk], stats: SearchStats | None = None
+) -> tuple[list[CitedChunk], SearchStats]:
+    return chunks, stats or SearchStats(final_candidate_count=len(chunks))
+
+
 @pytest.mark.asyncio
 async def test_query_returns_cited_response_with_answer(
     tmp_path: Path,
@@ -57,10 +68,7 @@ async def test_query_returns_cited_response_with_answer(
         llm_adapter=mock_llm_adapter,
     )
 
-    with patch(
-        "cos.services.retrieval.hybrid_search",
-        new=AsyncMock(return_value=[_make_chunk()]),
-    ):
+    with patch(_PATCH, new=AsyncMock(return_value=_search_result([_make_chunk()]))):
         response = await service.query(
             "what is workforce segmentation?",
             role_pack=None,
@@ -83,7 +91,7 @@ async def test_query_empty_search_returns_no_content_found(
         llm_adapter=mock_llm_adapter,
     )
 
-    with patch("cos.services.retrieval.hybrid_search", new=AsyncMock(return_value=[])):
+    with patch(_PATCH, new=AsyncMock(return_value=_search_result([]))):
         response = await service.query("unknown topic", role_pack=None)
 
     assert "no relevant content" in (response.answer or "").lower()
@@ -104,10 +112,7 @@ async def test_query_llm_error_returns_degraded_response(
         llm_adapter=failing_adapter,
     )
 
-    with patch(
-        "cos.services.retrieval.hybrid_search",
-        new=AsyncMock(return_value=[_make_chunk()]),
-    ):
+    with patch(_PATCH, new=AsyncMock(return_value=_search_result([_make_chunk()]))):
         response = await service.query("what is X?", role_pack=None)
 
     assert response.answer is None
@@ -127,8 +132,8 @@ async def test_query_passes_chunk_contents_to_llm_adapter(
     )
 
     with patch(
-        "cos.services.retrieval.hybrid_search",
-        new=AsyncMock(return_value=[_make_chunk(content="specific chunk text")]),
+        _PATCH,
+        new=AsyncMock(return_value=_search_result([_make_chunk(content="specific chunk text")])),
     ):
         await service.query("what is X?", role_pack=None)
 
@@ -149,10 +154,7 @@ async def test_query_includes_role_tone_in_prompt(
         llm_adapter=mock_llm_adapter,
     )
 
-    with patch(
-        "cos.services.retrieval.hybrid_search",
-        new=AsyncMock(return_value=[_make_chunk()]),
-    ):
+    with patch(_PATCH, new=AsyncMock(return_value=_search_result([_make_chunk()]))):
         await service.query("what is workforce segmentation?", role_pack=role_pack)
 
     prompt = mock_llm_adapter.complete.call_args.kwargs["prompt"]
@@ -196,9 +198,9 @@ async def test_query_passes_retrieval_filters_to_search(
         pool=mock_pool,
         llm_adapter=mock_llm_adapter,
     )
-    search_mock = AsyncMock(return_value=pruned_results)
+    search_mock = AsyncMock(return_value=_search_result(pruned_results))
 
-    with patch("cos.services.retrieval.hybrid_search", new=search_mock):
+    with patch(_PATCH, new=search_mock):
         response = await service.query("HR planning", role_pack=None)
 
     assert response.citations == pruned_results
@@ -219,10 +221,7 @@ async def test_query_all_filtered_returns_no_content_response(
         llm_adapter=mock_llm_adapter,
     )
 
-    with patch(
-        "cos.services.retrieval.hybrid_search",
-        new=AsyncMock(return_value=[]),
-    ):
+    with patch(_PATCH, new=AsyncMock(return_value=_search_result([]))):
         response = await service.query("filtered topic", role_pack=None)
 
     assert "no relevant content" in (response.answer or "").lower()
@@ -246,10 +245,7 @@ async def test_query_llm_receives_only_pruned_context(
         llm_adapter=mock_llm_adapter,
     )
 
-    with patch(
-        "cos.services.retrieval.hybrid_search",
-        new=AsyncMock(return_value=pruned_results),
-    ):
+    with patch(_PATCH, new=AsyncMock(return_value=_search_result(pruned_results))):
         # compare query keeps multi-source evidence so both chunks reach the LLM
         await service.query("compare HR planning across all sources", role_pack=None)
 
@@ -275,10 +271,7 @@ async def test_query_citations_match_pruned_evidence_set(
         llm_adapter=mock_llm_adapter,
     )
 
-    with patch(
-        "cos.services.retrieval.hybrid_search",
-        new=AsyncMock(return_value=pruned_results),
-    ):
+    with patch(_PATCH, new=AsyncMock(return_value=_search_result(pruned_results))):
         # compare query keeps multi-source evidence so citations match the full set
         response = await service.query("compare HR documents", role_pack=None)
 
@@ -320,10 +313,7 @@ async def test_query_adds_query_type_instruction_to_prompt(
         llm_adapter=mock_llm_adapter,
     )
 
-    with patch(
-        "cos.services.retrieval.hybrid_search",
-        new=AsyncMock(return_value=[_make_chunk()]),
-    ):
+    with patch(_PATCH, new=AsyncMock(return_value=_search_result([_make_chunk()]))):
         await service.query(query, role_pack=None)
 
     prompt = mock_llm_adapter.complete.call_args.kwargs["prompt"]
@@ -371,8 +361,8 @@ async def test_direct_factual_query_narrows_to_single_lineage(
     )
 
     with patch(
-        "cos.services.retrieval.hybrid_search",
-        new=AsyncMock(return_value=[gmail_chunk, local_chunk]),
+        _PATCH,
+        new=AsyncMock(return_value=_search_result([gmail_chunk, local_chunk])),
     ):
         response = await service.query(
             "what is the leave policy?", role_pack=None
@@ -403,8 +393,8 @@ async def test_compare_query_allows_multi_source_evidence(
     )
 
     with patch(
-        "cos.services.retrieval.hybrid_search",
-        new=AsyncMock(return_value=[gmail_chunk, local_chunk]),
+        _PATCH,
+        new=AsyncMock(return_value=_search_result([gmail_chunk, local_chunk])),
     ):
         response = await service.query(
             "compare the leave policy email vs the local file", role_pack=None
@@ -433,8 +423,8 @@ async def test_explicit_summary_query_across_two_sources_keeps_multi_source_evid
     )
 
     with patch(
-        "cos.services.retrieval.hybrid_search",
-        new=AsyncMock(return_value=[gmail_chunk, local_chunk]),
+        _PATCH,
+        new=AsyncMock(return_value=_search_result([gmail_chunk, local_chunk])),
     ):
         response = await service.query(
             "summarise the email and the local file", role_pack=None
@@ -462,8 +452,8 @@ async def test_single_source_query_with_aggregate_word_still_grounds_to_one_line
     )
 
     with patch(
-        "cos.services.retrieval.hybrid_search",
-        new=AsyncMock(return_value=[primary_chunk, sibling_chunk]),
+        _PATCH,
+        new=AsyncMock(return_value=_search_result([primary_chunk, sibling_chunk])),
     ):
         response = await service.query(
             "what is the aggregate retention rate?", role_pack=None
@@ -486,10 +476,7 @@ async def test_grounding_no_usable_lineage_returns_no_content(
         llm_adapter=mock_llm_adapter,
     )
 
-    with patch(
-        "cos.services.retrieval.hybrid_search",
-        new=AsyncMock(return_value=[]),
-    ):
+    with patch(_PATCH, new=AsyncMock(return_value=_search_result([]))):
         response = await service.query("what is the retention rate?", role_pack=None)
 
     assert "no relevant content" in (response.answer or "").lower()
@@ -514,8 +501,8 @@ async def test_legacy_backfill_uses_source_locator_as_lineage_key(
     )
 
     with patch(
-        "cos.services.retrieval.hybrid_search",
-        new=AsyncMock(return_value=[primary_chunk, sibling_chunk]),
+        _PATCH,
+        new=AsyncMock(return_value=_search_result([primary_chunk, sibling_chunk])),
     ):
         response = await service.query(
             "what does primary say?", role_pack=None
@@ -549,8 +536,8 @@ async def test_direct_factual_query_multiple_chunks_same_lineage_all_survive(
     )
 
     with patch(
-        "cos.services.retrieval.hybrid_search",
-        new=AsyncMock(return_value=[chunk_a, chunk_b, sibling]),
+        _PATCH,
+        new=AsyncMock(return_value=_search_result([chunk_a, chunk_b, sibling])),
     ):
         response = await service.query(
             "what did the email say about leave?", role_pack=None
@@ -558,3 +545,187 @@ async def test_direct_factual_query_multiple_chunks_same_lineage_all_survive(
 
     assert len(response.citations) == 2
     assert all(c.document_version_id == "ver-aaa-001" for c in response.citations)
+
+
+# ── Telemetry tests (Story 7.2) ──────────────────────────────────────────────
+
+
+def _parse_telemetry_log(caplog: pytest.LogCaptureFixture) -> dict:
+    """Extract the first JSON log record from the retrieval component."""
+    for record in caplog.records:
+        try:
+            data = json.loads(record.getMessage())
+            if data.get("component") == "retrieval" and data.get("event") == "retrieval_run":
+                return data
+        except (json.JSONDecodeError, AttributeError):
+            pass
+    raise AssertionError("No retrieval_run telemetry log found in captured records")
+
+
+@pytest.mark.asyncio
+async def test_query_emits_structured_telemetry_on_success(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    stats = SearchStats(
+        keyword_candidate_count=3,
+        semantic_candidate_count=5,
+        merged_candidate_count=7,
+        post_threshold_count=6,
+        post_pruning_count=4,
+        final_candidate_count=1,
+    )
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with caplog.at_level(logging.INFO):
+        with patch(_PATCH, new=AsyncMock(return_value=([_make_chunk()], stats))):
+            await service.query("what is workforce segmentation?", role_pack=None)
+
+    data = _parse_telemetry_log(caplog)
+
+    assert data["component"] == "retrieval"
+    assert data["event"] == "retrieval_run"
+    assert data["outcome"] == "success"
+    assert data["failure_stage"] is None
+    assert data["query_mode"] == "question"
+    assert "trace_id" in data
+    assert data["candidate_counts"]["keyword"] == 3
+    assert data["candidate_counts"]["semantic"] == 5
+    assert data["candidate_counts"]["merged"] == 7
+    assert data["candidate_counts"]["post_threshold"] == 6
+    assert data["candidate_counts"]["post_pruning"] == 4
+    assert "retrieval" in data["latency_ms"]
+    assert "synthesis" in data["latency_ms"]
+    assert "total" in data["latency_ms"]
+    assert data["provider"] == "anthropic"
+    assert data["model"] == "claude-3-haiku-20240307"
+
+
+@pytest.mark.asyncio
+async def test_query_emits_telemetry_on_no_content(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with caplog.at_level(logging.INFO):
+        with patch(_PATCH, new=AsyncMock(return_value=_search_result([]))):
+            await service.query("unknown topic", role_pack=None)
+
+    data = _parse_telemetry_log(caplog)
+
+    assert data["outcome"] == "no_content"
+    assert data["failure_stage"] == "retrieval"
+    assert data["latency_ms"]["synthesis"] is None
+
+
+@pytest.mark.asyncio
+async def test_query_emits_telemetry_on_synthesis_failure(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    failing_adapter = AsyncMock(spec=LLMAdapter)
+    failing_adapter.complete = AsyncMock(side_effect=Exception("API down"))
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=failing_adapter,
+    )
+
+    with caplog.at_level(logging.ERROR):
+        with patch(_PATCH, new=AsyncMock(return_value=_search_result([_make_chunk()]))):
+            await service.query("what is X?", role_pack=None)
+
+    data = _parse_telemetry_log(caplog)
+
+    assert data["outcome"] == "synthesis_degraded"
+    assert data["failure_stage"] == "synthesis"
+    assert data["latency_ms"]["synthesis"] is not None
+
+
+@pytest.mark.asyncio
+async def test_query_telemetry_does_not_log_raw_query_text(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    raw_query = "SENSITIVE_QUERY_TEXT_DO_NOT_LOG"
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with caplog.at_level(logging.INFO):
+        with patch(_PATCH, new=AsyncMock(return_value=_search_result([_make_chunk()]))):
+            await service.query(raw_query, role_pack=None)
+
+    for record in caplog.records:
+        assert raw_query not in record.getMessage(), (
+            f"Raw query text appeared in log: {record.getMessage()!r}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_query_telemetry_does_not_log_chunk_content(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    sensitive_content = "SENSITIVE_CHUNK_CONTENT_DO_NOT_LOG"
+    chunk = _make_chunk(content=sensitive_content)
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with caplog.at_level(logging.INFO):
+        with patch(_PATCH, new=AsyncMock(return_value=([chunk], SearchStats()))):
+            await service.query("what is X?", role_pack=None)
+
+    for record in caplog.records:
+        assert sensitive_content not in record.getMessage(), (
+            f"Chunk content appeared in log: {record.getMessage()!r}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_query_telemetry_query_mode_is_not_raw_text(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    raw_query = "what is the leave policy for senior staff?"
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with caplog.at_level(logging.INFO):
+        with patch(_PATCH, new=AsyncMock(return_value=_search_result([_make_chunk()]))):
+            await service.query(raw_query, role_pack=None)
+
+    data = _parse_telemetry_log(caplog)
+    valid_modes = {"question", "summarise", "compare", "draft", "prioritise"}
+    assert data["query_mode"] in valid_modes, (
+        f"query_mode {data['query_mode']!r} is not a safe mode token"
+    )
+    assert data["query_mode"] != raw_query

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import time
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import psycopg
 from psycopg_pool import AsyncConnectionPool
@@ -13,6 +15,7 @@ from psycopg_pool import AsyncConnectionPool
 from cos.config import CosConfig
 from cos.ingestion.embedder import embed
 from cos.retrieval.benchmark import (
+    BENCHMARK_SCHEMA_VERSION,
     SINGLE_LINEAGE_CLASSES,
     BenchmarkCitation,
     BenchmarkQuery,
@@ -22,6 +25,7 @@ from cos.retrieval.benchmark import (
     FixtureDoc,
     QueryResult,
     aggregate_by_class,
+    attribute_failure,
     citation_precision_for_result,
     load_fixture_docs,
     load_queries,
@@ -30,7 +34,7 @@ from cos.retrieval.benchmark import (
     score_query,
 )
 from cos.retrieval.citations import narrow_to_lineage
-from cos.retrieval.search import hybrid_search
+from cos.retrieval.search import hybrid_search_with_trace
 from cos.store.db import store_document_canonical
 from cos.store.models import ChunkRecord, EmbeddingRecord
 
@@ -93,7 +97,10 @@ class RetrievalEvalService:
                 await self._cleanup_fixtures(conn, fixture_docs)
 
         per_class = aggregate_by_class(results)
-        return _build_report(run_timestamp, corpus_version, results, per_class)
+        retrieval_settings = _retrieval_settings_from_config(benchmark_config)
+        return _build_report(
+            run_timestamp, corpus_version, results, per_class, retrieval_settings
+        )
 
     async def _seed_fixtures(
         self,
@@ -164,7 +171,7 @@ class RetrievalEvalService:
         expected_citations: list[BenchmarkCitation],
     ) -> QueryResult:
         t0 = time.monotonic()
-        cited = await hybrid_search(
+        cited, stats = await hybrid_search_with_trace(
             query.query,
             conn,
             benchmark_config,
@@ -174,15 +181,38 @@ class RetrievalEvalService:
         )
         latency_ms = (time.monotonic() - t0) * 1000.0
 
+        post_lineage_count: int | None = None
         if cited and query.query_class in SINGLE_LINEAGE_CLASSES:
             cited = narrow_to_lineage(cited)
+            post_lineage_count = len(cited)
 
-        return score_query(
+        candidate_counts: dict[str, Any] = {
+            "keyword": stats.keyword_candidate_count,
+            "semantic": stats.semantic_candidate_count,
+            "merged": stats.merged_candidate_count,
+            "post_threshold": stats.post_threshold_count,
+            "post_pruning": stats.post_pruning_count,
+            "post_lineage": post_lineage_count,
+        }
+
+        result = score_query(
             query,
             cited,
             latency_ms,
             expected_citations=expected_citations,
+            trace_id=str(uuid.uuid4()),
+            query_mode=query.query_class,
+            candidate_counts=candidate_counts,
+            synthesis_mode="not_run",
         )
+
+        # Attribute failure to the earliest pipeline stage that lost evidence
+        if not result.passed:
+            result.failure_stage = attribute_failure(
+                result.answerability_verdict, candidate_counts
+            )
+
+        return result
 
     async def _cleanup_fixtures(
         self,
@@ -224,6 +254,7 @@ def _build_report(
     corpus_version: str,
     results: list[QueryResult],
     per_class: list[ClassSummary],
+    retrieval_settings: dict[str, Any] | None = None,
 ) -> BenchmarkReport:
     total = len(results)
     passed = sum(1 for r in results if r.passed)
@@ -261,13 +292,17 @@ def _build_report(
         total_queries=total,
         passed_queries=passed,
         avg_latency_ms=avg_latency,
+        retrieval_settings=retrieval_settings if retrieval_settings is not None else {},
+        schema_version=BENCHMARK_SCHEMA_VERSION,
     )
 
 
 def report_to_dict(report: BenchmarkReport) -> dict:  # type: ignore[type-arg]
     return {
+        "schema_version": report.schema_version,
         "run_timestamp": report.run_timestamp,
         "corpus_version": report.corpus_version,
+        "retrieval_settings": report.retrieval_settings,
         "summary": {
             "total_queries": report.total_queries,
             "passed_queries": report.passed_queries,
@@ -302,6 +337,11 @@ def report_to_dict(report: BenchmarkReport) -> dict:  # type: ignore[type-arg]
                     _citation_to_dict(citation) for citation in r.actual_citations
                 ],
                 "answerability_verdict": r.answerability_verdict,
+                "trace_id": r.trace_id,
+                "query_mode": r.query_mode,
+                "candidate_counts": r.candidate_counts,
+                "failure_stage": r.failure_stage,
+                "synthesis_mode": r.synthesis_mode,
             }
             for r in report.per_query
         ],
@@ -348,6 +388,15 @@ def _benchmark_config(config: CosConfig) -> CosConfig:
             )
         }
     )
+
+
+def _retrieval_settings_from_config(config: CosConfig) -> dict[str, Any]:
+    return {
+        "min_score": config.retrieval.min_score,
+        "max_chunks_per_source": config.retrieval.max_chunks_per_source,
+        "embedding_provider": config.embedding.provider,
+        "embedding_model": config.embedding.model,
+    }
 
 
 def _benchmark_source_type(source_type: str) -> str:

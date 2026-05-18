@@ -1,6 +1,8 @@
 import json
 import logging
 import re
+import time
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -9,7 +11,8 @@ from psycopg_pool import AsyncConnectionPool
 from cos.config import CosConfig
 from cos.llm.adapter import LLMAdapter
 from cos.retrieval.citations import CitedResponse, narrow_to_lineage
-from cos.retrieval.search import hybrid_search
+from cos.retrieval.search import hybrid_search_with_trace
+from cos.retrieval.telemetry import SearchStats
 
 _COMPARE_SIGNALS = (
     "compare ",
@@ -157,6 +160,56 @@ def _build_synthesis_prompt(text: str, role_pack: Any) -> str:
     return "\n".join(parts)
 
 
+def _emit_retrieval_log(
+    *,
+    trace_id: str,
+    query_mode: str,
+    stats: SearchStats,
+    post_lineage_count: int | None,
+    retrieval_latency_ms: float,
+    synthesis_latency_ms: float | None,
+    total_latency_ms: float,
+    provider: str,
+    model: str,
+    outcome: str,
+    failure_stage: str | None,
+) -> None:
+    level = "ERROR" if outcome == "synthesis_degraded" else "INFO"
+    record: dict[str, Any] = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "level": level,
+        "component": "retrieval",
+        "event": "retrieval_run",
+        "trace_id": trace_id,
+        "query_mode": query_mode,
+        "candidate_counts": {
+            "keyword": stats.keyword_candidate_count,
+            "semantic": stats.semantic_candidate_count,
+            "merged": stats.merged_candidate_count,
+            "post_threshold": stats.post_threshold_count,
+            "post_pruning": stats.post_pruning_count,
+            "post_lineage": post_lineage_count,
+        },
+        "latency_ms": {
+            "retrieval": round(retrieval_latency_ms, 2),
+            "synthesis": (
+                round(synthesis_latency_ms, 2)
+                if synthesis_latency_ms is not None
+                else None
+            ),
+            "total": round(total_latency_ms, 2),
+        },
+        "provider": provider,
+        "model": model,
+        "outcome": outcome,
+        "failure_stage": failure_stage,
+    }
+    if level == "ERROR":
+        logging.error(json.dumps(record))
+    else:
+        logging.info(json.dumps(record))
+
+
 class RetrievalService:
     def __init__(
         self,
@@ -169,8 +222,13 @@ class RetrievalService:
         self._llm_adapter = llm_adapter
 
     async def query(self, text: str, role_pack: Any) -> CitedResponse:
+        trace_id = str(uuid.uuid4())
+        query_mode = _detect_query_type(text)
+        t_start = time.monotonic()
+
         async with self._pool.connection() as conn:
-            cited_results = await hybrid_search(
+            t_retrieval = time.monotonic()
+            cited_results, search_stats = await hybrid_search_with_trace(
                 text,
                 conn,
                 self._config,
@@ -178,8 +236,22 @@ class RetrievalService:
                 min_score=self._config.retrieval.min_score,
                 max_chunks_per_source=self._config.retrieval.max_chunks_per_source,
             )
+            retrieval_latency_ms = (time.monotonic() - t_retrieval) * 1000.0
 
         if not cited_results:
+            _emit_retrieval_log(
+                trace_id=trace_id,
+                query_mode=query_mode,
+                stats=search_stats,
+                post_lineage_count=None,
+                retrieval_latency_ms=retrieval_latency_ms,
+                synthesis_latency_ms=None,
+                total_latency_ms=(time.monotonic() - t_start) * 1000.0,
+                provider=self._config.llm.provider,
+                model=self._config.llm.model,
+                outcome="no_content",
+                failure_stage="retrieval",
+            )
             return CitedResponse(
                 answer="No relevant content found in the knowledge base.",
                 citations=[],
@@ -188,7 +260,22 @@ class RetrievalService:
         if not _is_multi_source_query(text):
             cited_results = narrow_to_lineage(cited_results)
 
+        post_lineage_count = len(cited_results)
+
         if not cited_results:
+            _emit_retrieval_log(
+                trace_id=trace_id,
+                query_mode=query_mode,
+                stats=search_stats,
+                post_lineage_count=0,
+                retrieval_latency_ms=retrieval_latency_ms,
+                synthesis_latency_ms=None,
+                total_latency_ms=(time.monotonic() - t_start) * 1000.0,
+                provider=self._config.llm.provider,
+                model=self._config.llm.model,
+                outcome="no_content",
+                failure_stage="lineage_narrowing",
+            )
             return CitedResponse(
                 answer="No relevant content found in the knowledge base.",
                 citations=[],
@@ -197,18 +284,37 @@ class RetrievalService:
         prompt = _build_synthesis_prompt(text, role_pack)
         context = [chunk.content for chunk in cited_results]
 
+        t_synthesis = time.monotonic()
         try:
             answer = await self._llm_adapter.complete(prompt=prompt, context=context)
+            synthesis_latency_ms = (time.monotonic() - t_synthesis) * 1000.0
+            _emit_retrieval_log(
+                trace_id=trace_id,
+                query_mode=query_mode,
+                stats=search_stats,
+                post_lineage_count=post_lineage_count,
+                retrieval_latency_ms=retrieval_latency_ms,
+                synthesis_latency_ms=synthesis_latency_ms,
+                total_latency_ms=(time.monotonic() - t_start) * 1000.0,
+                provider=self._config.llm.provider,
+                model=self._config.llm.model,
+                outcome="success",
+                failure_stage=None,
+            )
         except Exception:
-            logging.error(
-                json.dumps(
-                    {
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                        "level": "ERROR",
-                        "component": "retrieval",
-                        "message": "LLM synthesis failed",
-                    }
-                )
+            synthesis_latency_ms = (time.monotonic() - t_synthesis) * 1000.0
+            _emit_retrieval_log(
+                trace_id=trace_id,
+                query_mode=query_mode,
+                stats=search_stats,
+                post_lineage_count=post_lineage_count,
+                retrieval_latency_ms=retrieval_latency_ms,
+                synthesis_latency_ms=synthesis_latency_ms,
+                total_latency_ms=(time.monotonic() - t_start) * 1000.0,
+                provider=self._config.llm.provider,
+                model=self._config.llm.model,
+                outcome="synthesis_degraded",
+                failure_stage="synthesis",
             )
             return CitedResponse(answer=None, citations=cited_results)
 

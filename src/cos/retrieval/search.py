@@ -10,6 +10,7 @@ from pgvector.psycopg import register_vector_async  # type: ignore[import-untype
 from cos.config import CosConfig
 from cos.ingestion.embedder import VoyageTransportConfig, embed
 from cos.retrieval.citations import CitedChunk, CitedResults, prune_citations
+from cos.retrieval.telemetry import SearchStats
 from cos.rolepack.loader import RolePackConfig
 
 _RRF_K = 60
@@ -77,8 +78,30 @@ async def hybrid_search(
     min_score: float = 0.0,
     max_chunks_per_source: int | None = None,
 ) -> CitedResults:
+    results, _ = await hybrid_search_with_trace(
+        query,
+        conn,
+        config,
+        role_pack=role_pack,
+        top_k=top_k,
+        min_score=min_score,
+        max_chunks_per_source=max_chunks_per_source,
+    )
+    return results
+
+
+async def hybrid_search_with_trace(
+    query: str,
+    conn: psycopg.AsyncConnection[Any],
+    config: CosConfig,
+    role_pack: RolePackConfig | None = None,
+    top_k: int = 10,
+    min_score: float = 0.0,
+    max_chunks_per_source: int | None = None,
+) -> tuple[CitedResults, SearchStats]:
+    """Run hybrid search and return results together with stage-count telemetry."""
     if not query.strip():
-        return []
+        return [], SearchStats()
 
     await register_vector_async(conn)
     candidate_limit = _candidate_limit(top_k, max_chunks_per_source)
@@ -160,7 +183,10 @@ async def hybrid_search(
     ]
 
     if not keyword_hits and not semantic_hits:
-        return []
+        return [], SearchStats(
+            keyword_candidate_count=0,
+            semantic_candidate_count=0,
+        )
 
     merged_scores: dict[str, dict[str, Any]] = {}
     for hits in (keyword_hits, semantic_hits):
@@ -252,8 +278,21 @@ async def hybrid_search(
             )
         )
 
+    post_threshold_count = len(cited_results)
+
     cited_results.sort(key=_result_sort_key)
     if max_chunks_per_source is not None:
         cited_results = prune_citations(cited_results, max_chunks_per_source)
 
-    return cited_results[:top_k]
+    post_pruning_count = len(cited_results)
+    final = cited_results[:top_k]
+
+    stats = SearchStats(
+        keyword_candidate_count=len(keyword_hits),
+        semantic_candidate_count=len(semantic_hits),
+        merged_candidate_count=len(merged_scores),
+        post_threshold_count=post_threshold_count,
+        post_pruning_count=post_pruning_count,
+        final_candidate_count=len(final),
+    )
+    return final, stats

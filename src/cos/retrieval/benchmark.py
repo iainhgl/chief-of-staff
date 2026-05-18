@@ -5,10 +5,13 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import yaml
 
 from cos.retrieval.citations import CitedResults
+
+BENCHMARK_SCHEMA_VERSION = "7.2"
 
 VALID_QUERY_CLASSES = frozenset(
     {
@@ -63,6 +66,12 @@ class QueryResult:
     answerability_verdict: str
     expected_citations: list["BenchmarkCitation"] = field(default_factory=list)
     actual_citations: list["BenchmarkCitation"] = field(default_factory=list)
+    # Observability fields added in Story 7.2 — all optional with safe defaults
+    trace_id: str = ""
+    query_mode: str = ""
+    candidate_counts: dict[str, Any] = field(default_factory=dict)
+    failure_stage: str | None = None
+    synthesis_mode: str = "not_run"
 
 
 @dataclass
@@ -87,6 +96,9 @@ class BenchmarkReport:
     total_queries: int
     passed_queries: int
     avg_latency_ms: float
+    # Run-level metadata added in Story 7.2 — all optional with safe defaults
+    retrieval_settings: dict[str, Any] = field(default_factory=dict)
+    schema_version: str = BENCHMARK_SCHEMA_VERSION
 
 
 class CorpusError(ValueError):
@@ -220,6 +232,12 @@ def score_query(
     citations: CitedResults,
     latency_ms: float,
     expected_citations: list[BenchmarkCitation] | None = None,
+    *,
+    trace_id: str = "",
+    query_mode: str = "",
+    candidate_counts: dict[str, Any] | None = None,
+    failure_stage: str | None = None,
+    synthesis_mode: str = "not_run",
 ) -> QueryResult:
     actual_citations = _dedupe_citations(
         [
@@ -260,7 +278,37 @@ def score_query(
         answerability_verdict=verdict,
         expected_citations=resolved_expected,
         actual_citations=actual_citations,
+        trace_id=trace_id,
+        query_mode=query_mode,
+        candidate_counts=candidate_counts if candidate_counts is not None else {},
+        failure_stage=failure_stage,
+        synthesis_mode=synthesis_mode,
     )
+
+
+def attribute_failure(
+    verdict: str,
+    candidate_counts: dict[str, Any],
+) -> str | None:
+    """Return the retrieval stage most likely responsible for a failed query.
+
+    Returns None when the verdict indicates a pass.  For failures, walks the
+    candidate-count chain from the earliest stage inward to identify where
+    evidence was lost.
+    """
+    if verdict in ("correct_answer", "correct_no_answer"):
+        return None
+    if verdict == "false_answer":
+        return "candidate_selection"
+    # missed_answer: walk the pipeline stages
+    if candidate_counts.get("merged", 0) == 0:
+        return "candidate_selection"
+    if candidate_counts.get("post_threshold", 0) == 0:
+        return "threshold_filtering"
+    post_lineage = candidate_counts.get("post_lineage")
+    if post_lineage is not None and post_lineage == 0:
+        return "lineage_narrowing"
+    return "citation_precision"
 
 
 def _citation_precision_for_result(result: QueryResult) -> float | None:

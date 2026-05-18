@@ -14,6 +14,7 @@ from cos.retrieval.benchmark import (
     CorpusError,
     QueryResult,
     aggregate_by_class,
+    attribute_failure,
     load_fixture_docs,
     load_queries,
     resolve_corpus_version,
@@ -644,3 +645,100 @@ async def test_db_cross_doc_query_returns_results_from_multiple_sources(
 
     locators = {c.source_locator for c in results}
     assert len(locators) >= 1
+
+
+# ── Observability fields on QueryResult (Story 7.2) ──────────────────────────
+
+
+def test_score_query_stores_trace_id_and_query_mode() -> None:
+    query = BenchmarkQuery(
+        id="q1",
+        query="test",
+        query_class="direct_fact",
+        answerable=True,
+        expected_lineage=["loc://a"],
+    )
+    chunk = _make_chunk("loc://a", "loc://a")
+    result = score_query(
+        query,
+        [chunk],
+        latency_ms=50.0,
+        trace_id="trace-xyz",
+        query_mode="direct_fact",
+        synthesis_mode="not_run",
+    )
+    assert result.trace_id == "trace-xyz"
+    assert result.query_mode == "direct_fact"
+    assert result.synthesis_mode == "not_run"
+
+
+def test_score_query_stores_candidate_counts() -> None:
+    query = BenchmarkQuery(
+        id="q1",
+        query="test",
+        query_class="direct_fact",
+        answerable=True,
+        expected_lineage=["loc://a"],
+    )
+    chunk = _make_chunk("loc://a", "loc://a")
+    counts = {"keyword": 2, "semantic": 3, "merged": 4, "post_threshold": 4}
+    result = score_query(query, [chunk], latency_ms=50.0, candidate_counts=counts)
+    assert result.candidate_counts == counts
+
+
+def test_score_query_defaults_preserve_backward_compat() -> None:
+    query = BenchmarkQuery(
+        id="q1",
+        query="test",
+        query_class="direct_fact",
+        answerable=True,
+        expected_lineage=["loc://a"],
+    )
+    chunk = _make_chunk("loc://a", "loc://a")
+    result = score_query(query, [chunk], latency_ms=50.0)
+    assert result.trace_id == ""
+    assert result.query_mode == ""
+    assert result.candidate_counts == {}
+    assert result.failure_stage is None
+    assert result.synthesis_mode == "not_run"
+
+
+# ── attribute_failure unit tests ─────────────────────────────────────────────
+
+
+def test_attribute_failure_correct_answer_returns_none() -> None:
+    assert attribute_failure("correct_answer", {}) is None
+
+
+def test_attribute_failure_correct_no_answer_returns_none() -> None:
+    assert attribute_failure("correct_no_answer", {}) is None
+
+
+def test_attribute_failure_false_answer_returns_candidate_selection() -> None:
+    assert attribute_failure("false_answer", {}) == "candidate_selection"
+
+
+def test_attribute_failure_missed_answer_zero_merged_returns_candidate_selection() -> None:
+    counts = {"keyword": 0, "semantic": 0, "merged": 0}
+    assert attribute_failure("missed_answer", counts) == "candidate_selection"
+
+
+def test_attribute_failure_missed_answer_zero_post_threshold_returns_threshold_filtering() -> None:
+    counts = {"merged": 5, "post_threshold": 0}
+    assert attribute_failure("missed_answer", counts) == "threshold_filtering"
+
+
+def test_attribute_failure_missed_answer_zero_post_lineage_returns_lineage_narrowing() -> None:
+    counts = {"merged": 5, "post_threshold": 3, "post_lineage": 0}
+    assert attribute_failure("missed_answer", counts) == "lineage_narrowing"
+
+
+def test_attribute_failure_missed_answer_with_candidates_returns_citation_precision() -> None:
+    counts = {"merged": 5, "post_threshold": 3, "post_lineage": 2}
+    assert attribute_failure("missed_answer", counts) == "citation_precision"
+
+
+def test_attribute_failure_missed_answer_no_post_lineage_key_returns_citation_precision() -> None:
+    # post_lineage not present means lineage narrowing stage did not run
+    counts = {"merged": 5, "post_threshold": 3}
+    assert attribute_failure("missed_answer", counts) == "citation_precision"
