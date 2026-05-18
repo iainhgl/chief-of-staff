@@ -377,11 +377,20 @@ def benchmark(
         "--output",
         help="Write JSON report to this file path (default: print to stdout).",
     ),
+    config: str | None = typer.Option(
+        None,
+        "--config",
+        help=(
+            "Path to config file (default: config.yaml). "
+            "Use a host-accessible config (database.host: localhost) "
+            "when running from the host against Docker-backed services."
+        ),
+    ),
 ) -> None:
     """Run the retrieval benchmark harness and emit a structured report."""
     try:
         result = asyncio.run(
-            _run_benchmark(Path(corpus), include_fuzz=include_fuzz)
+            _run_benchmark(Path(corpus), include_fuzz=include_fuzz, config_path=config)
         )
     except typer.Exit:
         raise
@@ -405,11 +414,15 @@ def benchmark(
         raise typer.Exit(code=1)
 
 
-async def _run_benchmark(corpus_path: Path, include_fuzz: bool) -> object:
+async def _run_benchmark(
+    corpus_path: Path,
+    include_fuzz: bool,
+    config_path: str | None = None,
+) -> object:
     from cos.services.retrieval_eval import RetrievalEvalService
     from cos.store.db import create_pool
 
-    config = CosConfig.load()
+    config = CosConfig.load(config_path) if config_path else CosConfig.load()
     if not corpus_path.is_dir():
         typer.echo(f"Error: corpus path not found: {corpus_path}", err=True)
         raise typer.Exit(code=1)

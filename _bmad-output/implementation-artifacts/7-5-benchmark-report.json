@@ -1,0 +1,532 @@
+{
+  "schema_version": "7.4",
+  "run_timestamp": "2026-05-18T16:25:51.710544+00:00",
+  "corpus_version": "95feacc7c383",
+  "retrieval_settings": {
+    "min_score": 0.0,
+    "max_chunks_per_source": 2,
+    "embedding_provider": "benchmark",
+    "embedding_model": "benchmark-static"
+  },
+  "summary": {
+    "total_queries": 8,
+    "passed_queries": 3,
+    "overall_pass_rate": 0.375,
+    "overall_recall": 0.7142857142857143,
+    "overall_citation_precision": 0.4625,
+    "avg_latency_ms": 8.430666749518423
+  },
+  "per_class": [
+    {
+      "query_class": "briefing",
+      "total": 1,
+      "passed": 1,
+      "recall": 1.0,
+      "citation_precision": 1.0,
+      "avg_latency_ms": 7.114041996828746
+    },
+    {
+      "query_class": "cross_doc_synthesis",
+      "total": 1,
+      "passed": 0,
+      "recall": 1.0,
+      "citation_precision": 0.2,
+      "avg_latency_ms": 8.628707997559104
+    },
+    {
+      "query_class": "date_timeline",
+      "total": 1,
+      "passed": 0,
+      "recall": 0.0,
+      "citation_precision": 0.0,
+      "avg_latency_ms": 6.328750001557637
+    },
+    {
+      "query_class": "direct_fact",
+      "total": 1,
+      "passed": 1,
+      "recall": 1.0,
+      "citation_precision": 1.0,
+      "avg_latency_ms": 14.598000001569744
+    },
+    {
+      "query_class": "exact_phrase",
+      "total": 1,
+      "passed": 1,
+      "recall": 1.0,
+      "citation_precision": 1.0,
+      "avg_latency_ms": 7.460708999133203
+    },
+    {
+      "query_class": "no_answer",
+      "total": 1,
+      "passed": 0,
+      "recall": 0.0,
+      "citation_precision": 0.0,
+      "avg_latency_ms": 7.057250000798376
+    },
+    {
+      "query_class": "single_doc_interpretation",
+      "total": 2,
+      "passed": 0,
+      "recall": 0.5,
+      "citation_precision": 0.25,
+      "avg_latency_ms": 8.128937499350286
+    }
+  ],
+  "per_query": [
+    {
+      "query_id": "gold-df-001",
+      "query_class": "direct_fact",
+      "pass": true,
+      "latency_ms": 14.598000001569744,
+      "expected_lineage": [
+        "local://local-leave-policy"
+      ],
+      "actual_lineage": [
+        "local://local-leave-policy"
+      ],
+      "expected_citations": [
+        {
+          "source_alias": "local://local-leave-policy",
+          "source_locator": "local://local-leave-policy",
+          "document_version_id": "b9e5fad9-cbef-4246-aefc-7c53243220df",
+          "chunk_index": 0
+        }
+      ],
+      "actual_citations": [
+        {
+          "source_alias": "local://local-leave-policy",
+          "source_locator": "local://local-leave-policy",
+          "document_version_id": "b9e5fad9-cbef-4246-aefc-7c53243220df",
+          "chunk_index": 0
+        }
+      ],
+      "answerability_verdict": "correct_answer",
+      "trace_id": "7121a48e-71bf-4dc6-ad14-597c4ad6d409",
+      "query_mode": "direct_fact",
+      "candidate_counts": {
+        "keyword": 0,
+        "semantic": 25,
+        "merged": 25,
+        "post_threshold": 25,
+        "post_pruning": 24,
+        "final": 10,
+        "document_candidates": 9,
+        "post_lineage": 1,
+        "post_evidence_selection": 1,
+        "expansion_mode": "none",
+        "expanded_context": null
+      },
+      "failure_stage": null,
+      "synthesis_mode": "not_run"
+    },
+    {
+      "query_id": "gold-ep-001",
+      "query_class": "exact_phrase",
+      "pass": true,
+      "latency_ms": 7.460708999133203,
+      "expected_lineage": [
+        "local://local-succession-plan"
+      ],
+      "actual_lineage": [
+        "local://local-succession-plan"
+      ],
+      "expected_citations": [
+        {
+          "source_alias": "local://local-succession-plan",
+          "source_locator": "local://local-succession-plan",
+          "document_version_id": "ab978e70-2755-4b1e-95fa-3d239f2846ce",
+          "chunk_index": 0
+        }
+      ],
+      "actual_citations": [
+        {
+          "source_alias": "local://local-succession-plan",
+          "source_locator": "local://local-succession-plan",
+          "document_version_id": "ab978e70-2755-4b1e-95fa-3d239f2846ce",
+          "chunk_index": 0
+        }
+      ],
+      "answerability_verdict": "correct_answer",
+      "trace_id": "fa0aa38e-feeb-4b8a-8d6e-6c98f8cfa45a",
+      "query_mode": "exact_phrase",
+      "candidate_counts": {
+        "keyword": 1,
+        "semantic": 19,
+        "merged": 19,
+        "post_threshold": 19,
+        "post_pruning": 19,
+        "final": 10,
+        "document_candidates": 10,
+        "post_lineage": 1,
+        "post_evidence_selection": 1,
+        "expansion_mode": "none",
+        "expanded_context": null
+      },
+      "failure_stage": null,
+      "synthesis_mode": "not_run"
+    },
+    {
+      "query_id": "gold-dt-001",
+      "query_class": "date_timeline",
+      "pass": false,
+      "latency_ms": 6.328750001557637,
+      "expected_lineage": [
+        "local://local-leave-policy"
+      ],
+      "actual_lineage": [
+        "gmail://msg-leave-policy-001"
+      ],
+      "expected_citations": [
+        {
+          "source_alias": "local://local-leave-policy",
+          "source_locator": "local://local-leave-policy",
+          "document_version_id": "b9e5fad9-cbef-4246-aefc-7c53243220df",
+          "chunk_index": 0
+        }
+      ],
+      "actual_citations": [
+        {
+          "source_alias": "gmail://msg-leave-policy-001",
+          "source_locator": "gmail://msg-leave-policy-001",
+          "document_version_id": "5f494f02-16a0-46ae-a553-4714b159fc66",
+          "chunk_index": 0
+        }
+      ],
+      "answerability_verdict": "missed_answer",
+      "trace_id": "89c9956b-07eb-4dbc-af70-8e5762f1314c",
+      "query_mode": "date_timeline",
+      "candidate_counts": {
+        "keyword": 0,
+        "semantic": 24,
+        "merged": 24,
+        "post_threshold": 24,
+        "post_pruning": 23,
+        "final": 10,
+        "document_candidates": 9,
+        "post_lineage": 1,
+        "post_evidence_selection": 1,
+        "expansion_mode": "none",
+        "expanded_context": null
+      },
+      "failure_stage": "lineage_narrowing",
+      "synthesis_mode": "not_run"
+    },
+    {
+      "query_id": "gold-sdi-001",
+      "query_class": "single_doc_interpretation",
+      "pass": false,
+      "latency_ms": 7.350291998591274,
+      "expected_lineage": [
+        "calendar://event-q1-review-001"
+      ],
+      "actual_lineage": [
+        "local://local-performance-policy"
+      ],
+      "expected_citations": [
+        {
+          "source_alias": "calendar://event-q1-review-001",
+          "source_locator": "calendar://event-q1-review-001",
+          "document_version_id": "b8593d86-65e1-4701-9286-d859ff1ad0f0",
+          "chunk_index": 0
+        }
+      ],
+      "actual_citations": [
+        {
+          "source_alias": "local://local-performance-policy",
+          "source_locator": "local://local-performance-policy",
+          "document_version_id": "8cc19ca0-e5f5-4fab-a173-5be18e0d8021",
+          "chunk_index": 1
+        },
+        {
+          "source_alias": "local://local-performance-policy",
+          "source_locator": "local://local-performance-policy",
+          "document_version_id": "8cc19ca0-e5f5-4fab-a173-5be18e0d8021",
+          "chunk_index": 2
+        }
+      ],
+      "answerability_verdict": "missed_answer",
+      "trace_id": "191a317b-3b6e-476c-b832-ba2d0039128f",
+      "query_mode": "single_doc_interpretation",
+      "candidate_counts": {
+        "keyword": 0,
+        "semantic": 26,
+        "merged": 26,
+        "post_threshold": 26,
+        "post_pruning": 25,
+        "final": 10,
+        "document_candidates": 9,
+        "post_lineage": 2,
+        "post_evidence_selection": 2,
+        "expansion_mode": "bounded",
+        "expanded_context": 3
+      },
+      "failure_stage": "citation_precision",
+      "synthesis_mode": "not_run"
+    },
+    {
+      "query_id": "gold-sdi-002",
+      "query_class": "single_doc_interpretation",
+      "pass": false,
+      "latency_ms": 8.907583000109298,
+      "expected_lineage": [
+        "local://local-performance-policy"
+      ],
+      "actual_lineage": [
+        "local://local-performance-policy"
+      ],
+      "expected_citations": [
+        {
+          "source_alias": "local://local-performance-policy",
+          "source_locator": "local://local-performance-policy",
+          "document_version_id": "8cc19ca0-e5f5-4fab-a173-5be18e0d8021",
+          "chunk_index": 1
+        }
+      ],
+      "actual_citations": [
+        {
+          "source_alias": "local://local-performance-policy",
+          "source_locator": "local://local-performance-policy",
+          "document_version_id": "8cc19ca0-e5f5-4fab-a173-5be18e0d8021",
+          "chunk_index": 1
+        },
+        {
+          "source_alias": "local://local-performance-policy",
+          "source_locator": "local://local-performance-policy",
+          "document_version_id": "8cc19ca0-e5f5-4fab-a173-5be18e0d8021",
+          "chunk_index": 2
+        }
+      ],
+      "answerability_verdict": "missed_answer",
+      "trace_id": "ccdb5fbd-5405-431a-8299-13f23bf0548a",
+      "query_mode": "single_doc_interpretation",
+      "candidate_counts": {
+        "keyword": 0,
+        "semantic": 12,
+        "merged": 12,
+        "post_threshold": 12,
+        "post_pruning": 11,
+        "final": 10,
+        "document_candidates": 9,
+        "post_lineage": 2,
+        "post_evidence_selection": 2,
+        "expansion_mode": "bounded",
+        "expanded_context": 3
+      },
+      "failure_stage": "citation_precision",
+      "synthesis_mode": "not_run"
+    },
+    {
+      "query_id": "gold-cds-001",
+      "query_class": "cross_doc_synthesis",
+      "pass": false,
+      "latency_ms": 8.628707997559104,
+      "expected_lineage": [
+        "local://local-leave-policy",
+        "gmail://msg-leave-policy-001"
+      ],
+      "actual_lineage": [
+        "local://local-performance-policy",
+        "gmail://msg-leave-policy-001",
+        "local://local-leave-policy",
+        "mcp://note-retention-q4-2024",
+        "calendar://event-q1-review-001",
+        "local://local-succession-plan",
+        "mcp_note://claude-code/epic-6-retrieval-mcp-001",
+        "/data/uat-docs/local/epic-6-local-note.md",
+        "/data/uat-docs/local/epic-6-local-brief.md"
+      ],
+      "expected_citations": [
+        {
+          "source_alias": "local://local-leave-policy",
+          "source_locator": "local://local-leave-policy",
+          "document_version_id": "b9e5fad9-cbef-4246-aefc-7c53243220df",
+          "chunk_index": 0
+        },
+        {
+          "source_alias": "gmail://msg-leave-policy-001",
+          "source_locator": "gmail://msg-leave-policy-001",
+          "document_version_id": "5f494f02-16a0-46ae-a553-4714b159fc66",
+          "chunk_index": 0
+        }
+      ],
+      "actual_citations": [
+        {
+          "source_alias": "local://local-performance-policy",
+          "source_locator": "local://local-performance-policy",
+          "document_version_id": "8cc19ca0-e5f5-4fab-a173-5be18e0d8021",
+          "chunk_index": 1
+        },
+        {
+          "source_alias": "gmail://msg-leave-policy-001",
+          "source_locator": "gmail://msg-leave-policy-001",
+          "document_version_id": "5f494f02-16a0-46ae-a553-4714b159fc66",
+          "chunk_index": 0
+        },
+        {
+          "source_alias": "local://local-performance-policy",
+          "source_locator": "local://local-performance-policy",
+          "document_version_id": "8cc19ca0-e5f5-4fab-a173-5be18e0d8021",
+          "chunk_index": 2
+        },
+        {
+          "source_alias": "local://local-leave-policy",
+          "source_locator": "local://local-leave-policy",
+          "document_version_id": "b9e5fad9-cbef-4246-aefc-7c53243220df",
+          "chunk_index": 0
+        },
+        {
+          "source_alias": "mcp://note-retention-q4-2024",
+          "source_locator": "mcp://note-retention-q4-2024",
+          "document_version_id": "c30154d2-3eca-4751-b4fe-02bcd53d813d",
+          "chunk_index": 0
+        },
+        {
+          "source_alias": "calendar://event-q1-review-001",
+          "source_locator": "calendar://event-q1-review-001",
+          "document_version_id": "b8593d86-65e1-4701-9286-d859ff1ad0f0",
+          "chunk_index": 0
+        },
+        {
+          "source_alias": "local://local-succession-plan",
+          "source_locator": "local://local-succession-plan",
+          "document_version_id": "ab978e70-2755-4b1e-95fa-3d239f2846ce",
+          "chunk_index": 0
+        },
+        {
+          "source_alias": "Epic-6-Retrieval-MCP-Note.md",
+          "source_locator": "mcp_note://claude-code/epic-6-retrieval-mcp-001",
+          "document_version_id": "98f6f4ad-49c7-4d07-b7b4-ab1b6eb163d3",
+          "chunk_index": 0
+        },
+        {
+          "source_alias": "epic-6-local-note.md",
+          "source_locator": "/data/uat-docs/local/epic-6-local-note.md",
+          "document_version_id": "42e1ea01-61bf-435d-8ae6-103315c11723",
+          "chunk_index": 0
+        },
+        {
+          "source_alias": "epic-6-local-brief.md",
+          "source_locator": "/data/uat-docs/local/epic-6-local-brief.md",
+          "document_version_id": "1ad3cffd-a85e-487a-b13f-8146b207083a",
+          "chunk_index": 0
+        }
+      ],
+      "answerability_verdict": "missed_answer",
+      "trace_id": "35fa840f-5585-4421-930a-532e12b97643",
+      "query_mode": "cross_doc_synthesis",
+      "candidate_counts": {
+        "keyword": 0,
+        "semantic": 22,
+        "merged": 22,
+        "post_threshold": 22,
+        "post_pruning": 21,
+        "final": 10,
+        "document_candidates": 9,
+        "post_lineage": null,
+        "post_evidence_selection": 10,
+        "expansion_mode": "none",
+        "expanded_context": null
+      },
+      "failure_stage": "citation_precision",
+      "synthesis_mode": "not_run"
+    },
+    {
+      "query_id": "gold-br-001",
+      "query_class": "briefing",
+      "pass": true,
+      "latency_ms": 7.114041996828746,
+      "expected_lineage": [
+        "mcp://note-retention-q4-2024",
+        "calendar://event-q1-review-001"
+      ],
+      "actual_lineage": [
+        "mcp://note-retention-q4-2024"
+      ],
+      "expected_citations": [
+        {
+          "source_alias": "mcp://note-retention-q4-2024",
+          "source_locator": "mcp://note-retention-q4-2024",
+          "document_version_id": "c30154d2-3eca-4751-b4fe-02bcd53d813d",
+          "chunk_index": 0
+        },
+        {
+          "source_alias": "calendar://event-q1-review-001",
+          "source_locator": "calendar://event-q1-review-001",
+          "document_version_id": "b8593d86-65e1-4701-9286-d859ff1ad0f0",
+          "chunk_index": 0
+        }
+      ],
+      "actual_citations": [
+        {
+          "source_alias": "mcp://note-retention-q4-2024",
+          "source_locator": "mcp://note-retention-q4-2024",
+          "document_version_id": "c30154d2-3eca-4751-b4fe-02bcd53d813d",
+          "chunk_index": 0
+        }
+      ],
+      "answerability_verdict": "correct_answer",
+      "trace_id": "7576300e-ea05-45fe-989f-f95e2dfb3237",
+      "query_mode": "briefing",
+      "candidate_counts": {
+        "keyword": 0,
+        "semantic": 14,
+        "merged": 14,
+        "post_threshold": 14,
+        "post_pruning": 13,
+        "final": 10,
+        "document_candidates": 8,
+        "post_lineage": 1,
+        "post_evidence_selection": 1,
+        "expansion_mode": "none",
+        "expanded_context": null
+      },
+      "failure_stage": null,
+      "synthesis_mode": "not_run"
+    },
+    {
+      "query_id": "gold-na-001",
+      "query_class": "no_answer",
+      "pass": false,
+      "latency_ms": 7.057250000798376,
+      "expected_lineage": [],
+      "actual_lineage": [
+        "local://local-performance-policy"
+      ],
+      "expected_citations": [],
+      "actual_citations": [
+        {
+          "source_alias": "local://local-performance-policy",
+          "source_locator": "local://local-performance-policy",
+          "document_version_id": "8cc19ca0-e5f5-4fab-a173-5be18e0d8021",
+          "chunk_index": 1
+        },
+        {
+          "source_alias": "local://local-performance-policy",
+          "source_locator": "local://local-performance-policy",
+          "document_version_id": "8cc19ca0-e5f5-4fab-a173-5be18e0d8021",
+          "chunk_index": 2
+        }
+      ],
+      "answerability_verdict": "false_answer",
+      "trace_id": "9119d89d-23ba-4268-8dbe-15657f53d74d",
+      "query_mode": "no_answer",
+      "candidate_counts": {
+        "keyword": 0,
+        "semantic": 9,
+        "merged": 9,
+        "post_threshold": 9,
+        "post_pruning": 8,
+        "final": 8,
+        "document_candidates": 7,
+        "post_lineage": 2,
+        "post_evidence_selection": 2,
+        "expansion_mode": "none",
+        "expanded_context": null
+      },
+      "failure_stage": "citation_precision",
+      "synthesis_mode": "not_run"
+    }
+  ]
+}

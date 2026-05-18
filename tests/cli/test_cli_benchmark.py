@@ -128,3 +128,37 @@ def test_benchmark_command_exits_one_on_unexpected_exception() -> None:
 
     assert result.exit_code == 1
     assert "Benchmark failed" in result.output
+
+
+# ── --config flag (host-vs-container bridge) ─────────────────────────────────
+
+
+def test_benchmark_command_passes_config_path_to_run_benchmark(
+    tmp_path: Path,
+) -> None:
+    """--config forwards the path to _run_benchmark for host-side execution."""
+    report = _make_report(pass_rate=1.0)
+    host_config = tmp_path / "config.host.yaml"
+    host_config.write_text("dummy")
+
+    with patch("cos.cli._run_benchmark", new=AsyncMock(return_value=report)) as mock:
+        result = runner.invoke(
+            app,
+            ["benchmark", "--corpus", _CORPUS_PATH, "--config", str(host_config)],
+        )
+
+    assert result.exit_code == 0, result.output
+    _, kwargs = mock.call_args
+    assert kwargs.get("config_path") == str(host_config)
+
+
+def test_benchmark_command_uses_default_config_when_config_flag_omitted() -> None:
+    """Without --config, config_path is None so CosConfig.load() uses config.yaml."""
+    report = _make_report(pass_rate=1.0)
+
+    with patch("cos.cli._run_benchmark", new=AsyncMock(return_value=report)) as mock:
+        result = runner.invoke(app, ["benchmark", "--corpus", _CORPUS_PATH])
+
+    assert result.exit_code == 0, result.output
+    _, kwargs = mock.call_args
+    assert kwargs.get("config_path") is None
