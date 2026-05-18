@@ -1,6 +1,6 @@
 # Story 7.5: Operator Validation — Retrieval Trust Regression Suite
 
-Status: in-progress
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -244,6 +244,7 @@ Use these files as the source of truth when defining the validation flow:
 - 2026-05-18: Story created, sprint status advanced to `ready-for-dev`.
 - 2026-05-18: Initial validation pass captured benchmark evidence, extended `docs/manual-testing.md` with the Epic 7 regression section, and added the `--config` flag to `cos benchmark`.
 - 2026-05-18: Code review fixes aligned the runbook with benchmark semantics (`config.host.yaml`, clean benchmark DB gate, `briefing` subset behavior) and returned the story to `in-progress` pending a clean gold benchmark pass.
+- 2026-05-18: Query-aware retrieval hardening fixed the remaining gold regressions, the clean benchmark gate passed 8/8 on a fresh Compose DB, and the story returned to `review`.
 
 ## Dev Agent Record
 
@@ -260,8 +261,32 @@ claude-sonnet-4-6
 - No repo `project-context.md` file was found; the story was grounded in the planning artifacts, current Epic 7 story chain, and the live benchmark/manual-testing surfaces.
 - **Tooling fix applied (Task 2 blocker):** `cos benchmark` had no way to run from the host against the Docker-backed database. The default `config.yaml` has `database.host: postgres` (Docker network only), while the corpus lives on the host at `tests/fixtures/retrieval_eval`. Added a `--config` option to the `benchmark` CLI command so operators can supply `config.host.yaml` (with `database.host: localhost`). Two focused tests added: `test_benchmark_command_passes_config_path_to_run_benchmark` and `test_benchmark_command_uses_default_config_when_config_flag_omitted`. All 9 CLI benchmark tests pass.
 - **Diagnostic benchmark run executed (2026-05-18T16:25:51.710544+00:00):** Gold corpus run against the shared live platform (corpus version `95feacc7c383`, schema version `7.4`). JSON report saved to `_bmad-output/implementation-artifacts/7-5-benchmark-report.json`.
-- **Authoritative gate still pending:** the attached report is evidence capture only, not the Epic 8 release gate, because the database was populated with non-fixture UAT content and the gold corpus failed 5 of 8 queries. Story 7.5 remains `in-progress` until the benchmark is rerun on a clean benchmark database and the required gold checks pass.
+- **Retrieval hardening applied after the diagnostic run:** query-aware lineage narrowing, document-first anchor selection, and evidence filtering now require stronger lexical support for factual queries, preserve legacy fallback when fixtures have zero textual support, prefer canonical local policy sources over secondary echoes when the query does not request a connector, and keep bounded citations on the best matching chunk. Focused regression coverage was added in `tests/retrieval/test_citations.py` and `tests/services/test_retrieval_eval_service.py`.
+- **Authoritative gate executed (2026-05-18T20:46:22.966999+00:00):** Gold corpus rerun on a fresh Compose benchmark database with `config.host.yaml` (`database.host: localhost`, `retrieval.min_score: 0.005`). Corpus version `95feacc7c383`, schema version `7.4`, and all 8 of 8 gold queries passed. Story 7.5 is back in `review`.
 - **Review fixes applied:** `docs/manual-testing.md` now distinguishes clean benchmark gate runs from populated-database diagnostic runs, the `gold-na-001` remediation updates the host benchmark config actually used by `--config`, and the `gold-br-001` expectation now matches the harness contract for `briefing` queries.
+
+#### Authoritative benchmark results (clean benchmark DB)
+
+| Metric | Value |
+|--------|-------|
+| Run timestamp | 2026-05-18T20:46:22.966999+00:00 |
+| Corpus version | 95feacc7c383 |
+| Gold queries | 8 / 8 passed (100%) |
+| Overall recall | 100% |
+| Overall citation precision | 100% |
+| Average latency | 8ms (PRD target: <5000ms — **all interactive classes within target**) |
+
+Per-class:
+
+| Class | Pass | Recall | Precision | Avg latency | Note |
+|-------|------|--------|-----------|-------------|------|
+| `briefing` | 1/1 ✓ | 100% | 100% | 8ms | |
+| `cross_doc_synthesis` | 1/1 ✓ | 100% | 100% | 9ms | |
+| `date_timeline` | 1/1 ✓ | 100% | 100% | 8ms | |
+| `direct_fact` | 1/1 ✓ | 100% | 100% | 11ms | |
+| `exact_phrase` | 1/1 ✓ | 100% | 100% | 9ms | |
+| `no_answer` | 1/1 ✓ | 0% | 0% | 8ms | expected unsupported-query decline; no citations returned |
+| `single_doc_interpretation` | 2/2 ✓ | 100% | 100% | 8ms | |
 
 #### Diagnostic benchmark results (shared live DB)
 
@@ -320,8 +345,13 @@ All interactive classes (`direct_fact`, `exact_phrase`, `date_timeline`, `single
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
 - `_bmad-output/implementation-artifacts/7-5-benchmark-report.json`
 - `docs/manual-testing.md`
+- `src/cos/retrieval/citations.py`
+- `src/cos/services/retrieval.py`
+- `src/cos/services/retrieval_eval.py`
 - `src/cos/cli.py`
 - `tests/cli/test_cli_benchmark.py`
+- `tests/retrieval/test_citations.py`
+- `tests/services/test_retrieval_eval_service.py`
 - `.gitignore`
 
 ### Review Findings

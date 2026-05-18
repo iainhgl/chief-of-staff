@@ -273,3 +273,154 @@ def test_select_document_first_anchors_falls_back_to_source_locator_for_legacy_c
     result = select_document_first_anchors([legacy_a, legacy_b0, legacy_b1])
 
     assert [chunk.source_locator for chunk in result] == ["loc://legacy-b", "loc://legacy-b"]
+
+
+def test_select_document_first_anchors_query_aware_prefers_business_review_calendar() -> None:
+    calendar = CitedChunk(
+        content=(
+            "# Q1 2025 Business Review\n"
+            "The Q1 review confirmed that the attrition rate of 8.2% is above target."
+        ),
+        source_document_id="12345678-1234-1234-1234-123456789012",
+        source_alias="calendar://event-q1-review-001",
+        source_locator="calendar://event-q1-review-001",
+        document_version_id="ver-cal",
+        chunk_index=0,
+        score=0.90,
+    )
+    perf_0 = CitedChunk(
+        content="Performance review process and annual review cadence.",
+        source_document_id="12345678-1234-1234-1234-123456789012",
+        source_alias="local://local-performance-policy",
+        source_locator="local://local-performance-policy",
+        document_version_id="ver-perf",
+        chunk_index=0,
+        score=0.81,
+    )
+    perf_1 = CitedChunk(
+        content="The HR business partner co-owns the below expectations programme.",
+        source_document_id="12345678-1234-1234-1234-123456789012",
+        source_alias="local://local-performance-policy",
+        source_locator="local://local-performance-policy",
+        document_version_id="ver-perf",
+        chunk_index=1,
+        score=0.80,
+    )
+
+    result = select_document_first_anchors(
+        [calendar, perf_0, perf_1],
+        query_text="What did the Q1 business review conclude about attrition?",
+        strict_matching=True,
+    )
+
+    assert [chunk.source_locator for chunk in result] == [
+        "calendar://event-q1-review-001"
+    ]
+    assert [chunk.chunk_index for chunk in result] == [0]
+
+
+def test_narrow_to_lineage_query_aware_prefers_local_policy_over_gmail_echo() -> None:
+    gmail = CitedChunk(
+        content=(
+            "# Re: Leave Policy Update\n"
+            "Just confirming the updated leave policy is effective from 2025-01-15."
+        ),
+        source_document_id="12345678-1234-1234-1234-123456789012",
+        source_alias="gmail://msg-leave-policy-001",
+        source_locator="gmail://msg-leave-policy-001",
+        document_version_id="ver-gmail",
+        chunk_index=0,
+        score=0.91,
+    )
+    local = CitedChunk(
+        content=(
+            "# Leave Policy\n"
+            "The company offers 25 days of annual leave.\n"
+            "Effective date: 2025-01-15"
+        ),
+        source_document_id="12345678-1234-1234-1234-123456789012",
+        source_alias="local://local-leave-policy",
+        source_locator="local://local-leave-policy",
+        document_version_id="ver-local",
+        chunk_index=0,
+        score=0.89,
+    )
+
+    result = narrow_to_lineage(
+        [gmail, local],
+        query_text="When did the updated leave policy take effect?",
+        strict_matching=True,
+    )
+
+    assert [chunk.source_locator for chunk in result] == ["local://local-leave-policy"]
+
+
+def test_narrow_to_lineage_query_aware_returns_empty_when_no_lineage_meets_floor() -> None:
+    local = CitedChunk(
+        content="The company offers annual leave and parental leave.",
+        source_document_id="12345678-1234-1234-1234-123456789012",
+        source_alias="local://local-leave-policy",
+        source_locator="local://local-leave-policy",
+        document_version_id="ver-local",
+        chunk_index=0,
+        score=0.90,
+    )
+    calendar = CitedChunk(
+        content="Attrition rate is 8.2% annualised.",
+        source_document_id="12345678-1234-1234-1234-123456789012",
+        source_alias="calendar://event-q1-review-001",
+        source_locator="calendar://event-q1-review-001",
+        document_version_id="ver-cal",
+        chunk_index=0,
+        score=0.89,
+    )
+
+    result = narrow_to_lineage(
+        [local, calendar],
+        query_text="What is the company pension contribution rate?",
+        strict_matching=True,
+    )
+
+    assert result == []
+
+
+def test_select_synthesis_evidence_query_aware_filters_low_overlap_lineages() -> None:
+    gmail = CitedChunk(
+        content="Updated leave policy is effective from 2025-01-15.",
+        source_document_id="12345678-1234-1234-1234-123456789012",
+        source_alias="gmail://msg-leave-policy-001",
+        source_locator="gmail://msg-leave-policy-001",
+        document_version_id="ver-gmail",
+        chunk_index=0,
+        score=0.90,
+    )
+    local = CitedChunk(
+        content="Leave Policy: annual leave is 25 days for all full-time employees.",
+        source_document_id="12345678-1234-1234-1234-123456789012",
+        source_alias="local://local-leave-policy",
+        source_locator="local://local-leave-policy",
+        document_version_id="ver-local",
+        chunk_index=0,
+        score=0.89,
+    )
+    distractor = CitedChunk(
+        content="Performance policy and the below expectations programme.",
+        source_document_id="12345678-1234-1234-1234-123456789012",
+        source_alias="local://local-performance-policy",
+        source_locator="local://local-performance-policy",
+        document_version_id="ver-perf",
+        chunk_index=1,
+        score=0.95,
+    )
+
+    result = select_synthesis_evidence(
+        [distractor, gmail, local],
+        require_multi_source=True,
+        query_text="Compare the leave policy described in the email with the policy document",
+        strict_matching=True,
+    )
+
+    assert [chunk.source_locator for chunk in result] == [
+        "gmail://msg-leave-policy-001",
+        "local://local-leave-policy",
+    ]

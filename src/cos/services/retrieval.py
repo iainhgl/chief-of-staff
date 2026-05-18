@@ -172,6 +172,7 @@ class RetrievalService:
         trace_id = str(uuid.uuid4())
         strategy = select_query_strategy_from_text(text)
         query_mode = _detect_query_type(text)
+        strict_query_matching = query_mode in {"question", "compare"}
         t_start = time.monotonic()
         t_retrieval = time.monotonic()
         search_stats = SearchStats()
@@ -216,27 +217,46 @@ class RetrievalService:
 
                 # Route by strategy ──────────────────────────────────────────
                 if strategy == QueryStrategy.BOUNDED:
-                    anchors = select_document_first_anchors(cited_results)
+                    anchors = select_document_first_anchors(
+                        cited_results,
+                        query_text=text,
+                        strict_matching=strict_query_matching,
+                    )
                     post_lineage_count = len(anchors)
                     expanded = await expand_bounded_context(conn, anchors)
                     synthesis_chunks = expanded.synthesis_chunks
-                    evidence = select_synthesis_evidence(expanded.evidence_chunks)
+                    evidence = select_synthesis_evidence(
+                        expanded.evidence_chunks,
+                        query_text=text,
+                        strict_matching=strict_query_matching,
+                    )
                     post_evidence_selection_count = len(evidence)
                     expansion_mode = "bounded"
                     expanded_context_count = len(synthesis_chunks)
                 elif strategy == QueryStrategy.MULTI_SOURCE:
                     post_lineage_count = None
                     evidence = select_synthesis_evidence(
-                        cited_results, require_multi_source=True
+                        cited_results,
+                        require_multi_source=True,
+                        query_text=text,
+                        strict_matching=strict_query_matching,
                     )
                     post_evidence_selection_count = len(evidence)
                     synthesis_chunks = evidence
                     expansion_mode = "none"
                     expanded_context_count = None
                 else:  # DEFAULT
-                    cited_results = narrow_to_lineage(cited_results)
+                    cited_results = narrow_to_lineage(
+                        cited_results,
+                        query_text=text,
+                        strict_matching=strict_query_matching,
+                    )
                     post_lineage_count = len(cited_results)
-                    evidence = select_synthesis_evidence(cited_results)
+                    evidence = select_synthesis_evidence(
+                        cited_results,
+                        query_text=text,
+                        strict_matching=strict_query_matching,
+                    )
                     post_evidence_selection_count = len(evidence)
                     synthesis_chunks = evidence
                     expansion_mode = "none"
