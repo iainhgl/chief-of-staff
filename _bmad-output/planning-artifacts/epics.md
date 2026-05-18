@@ -158,18 +158,18 @@ _Not applicable — this is an API backend platform with no UI. The primary inte
 | FR6 | Epic 2 | Version record on re-ingest of the same logical source |
 | FR7 | Epic 6 | Exact-byte deduplication across ingestion sources |
 | FR8 | Epic 6 | Semantic near-duplicate warning layer (Growth) |
-| FR9 | Epic 7 | Note capture via Telegram (Growth) |
+| FR9 | Epic 8 | Note capture via Telegram (Growth) |
 | FR10 | Epic 6 | Email ingestion via Gmail (Growth) |
-| FR11 | Epic 3 | Natural language query → cited answer |
-| FR12 | Epic 3 | Hybrid keyword + semantic search |
-| FR13 | Epic 3 | Document + chunk-level citations |
+| FR11 | Epic 3, Epic 7 | Natural language query → cited answer |
+| FR12 | Epic 3, Epic 7 | Hybrid keyword + semantic search |
+| FR13 | Epic 3, Epic 7 | Document + chunk-level citations |
 | FR14 | Epic 3 | Role pack retrieval priorities |
 | FR15 | Epic 3 | List documents with metadata |
-| FR16 | Epic 7 | Web search augmentation (Growth) |
-| FR17 | Epic 3 | Synthesise response in role pack tone |
+| FR16 | Epic 10 | Web search augmentation (Growth) |
+| FR17 | Epic 3, Epic 7 | Synthesise response in role pack tone |
 | FR18 | Epic 3 | Common workflow outputs |
-| FR19 | Epic 7 | Scheduled briefing via channel (Growth) |
-| FR20 | Epic 7 | Meeting prep from calendar (Growth) |
+| FR19 | Epic 11 | Scheduled briefing via channel (Growth) |
+| FR20 | Epic 11 | Meeting prep from calendar (Growth) |
 | FR21 | Epic 3 | Egress control — configured channels only |
 | FR22 | Epic 4 | Define role pack in config file |
 | FR23 | Epic 4 | Activate different role pack, no code change |
@@ -183,8 +183,8 @@ _Not applicable — this is an API backend platform with no UI. The primary inte
 | FR31 | Epic 1 | Single human-editable config artifact |
 | FR32 | Epic 6 | Google Calendar read (Growth) |
 | FR33 | Epic 6 | Gmail read and ingest (Growth) |
-| FR34 | Epic 7 | Telegram Q&A and note capture (Growth) |
-| FR35 | Epic 7 | Scheduled briefs via configured Telegram or email channel (Growth) |
+| FR34 | Epic 8 | Telegram Q&A and note capture (Growth) |
+| FR35 | Epic 11 | Scheduled briefs via configured Telegram or email channel (Growth) |
 | FR36 | Epic 3 | Enforce egress control |
 | FR37 | Epic 2 | Originals never modified or deleted |
 | FR38 | Epic 2 | View documents with provenance history |
@@ -688,7 +688,7 @@ So that responses are only ever delivered to explicitly configured channels and 
 
 **Given** `OutputRouter.send(channel, content)` is called with a channel name that does not exist in `CosConfig.output_channels`,
 **When** the router executes,
-**Then** the output is suppressed entirely, a structured JSON error is logged with `component: "output_router"` and the channel name, and the method returns without raising an exception.
+**Then** the output is suppressed entirely, a structured JSON error is logged with `component: "output"` and the channel name, and the method returns without raising an exception.
 
 **Given** `output/channels/local.py` is the handler for the `"local"` channel,
 **When** it delivers content,
@@ -1486,7 +1486,7 @@ So that synthetic note capture also uses the same canonical identity and provena
 
 As Iain (operator and first user),
 I want a smoke test proving canonical identity hardening and live-source ingestion work together,
-So that Epic 7 builds on a stable connected-ingestion base.
+So that the post-Epic-6 growth backlog builds on a stable connected-ingestion base.
 
 **Acceptance Criteria:**
 
@@ -1608,247 +1608,958 @@ So that normal operation does not keep re-scanning and re-queueing work that has
 **When** they follow the documented recovery path,
 **Then** a supported override exists without requiring manual database surgery.
 
-## Epic 7: Ambient Messaging Intelligence
+## Epic 7: Retrieval Trust, Evaluation & Observability
 
-Users interact with the platform through Telegram — asking questions, capturing notes, and receiving proactive morning briefs — without opening a dedicated interface. The platform comes to them, augmented by live web search when local knowledge is insufficient.
-**FRs covered:** FR9, FR16, FR19, FR20, FR34, FR35
+Retrieval quality is measured and hardened before broader ambient expansion. The platform gains an explicit evaluation corpus, benchmark harness, structured observability, and stricter evidence-selection rules so later Telegram, web, and scheduling features amplify a trustworthy retrieval layer rather than a fragile one.
+**FRs covered:** FR11, FR12, FR13, FR17
+**NFRs:** NFR1, NFR3, NFR12
+
+### Story 7.1: Retrieval Evaluation Corpus & Benchmark Harness
+
+As Iain (operator and maintainer),
+I want a repeatable retrieval evaluation corpus and harness,
+So that future retrieval changes can be compared against a stable baseline instead of being judged ad hoc.
+
+**Acceptance Criteria:**
+
+**Given** the benchmark assets are reviewed,
+**When** the corpus layout is inspected,
+**Then** it contains a generated candidate layer, a curated gold benchmark layer, and a stress/fuzz layer with a documented schema.
+
+**Given** benchmark queries are prepared,
+**When** they are classified,
+**Then** they cover direct fact lookup, exact phrase lookup, date/timeline, single-document interpretation, cross-document synthesis, briefing-style prompts, and no-answer cases.
+
+**Given** a benchmark run is executed,
+**When** the harness completes,
+**Then** it emits a structured report showing retrieval recall, citation precision, answerability handling, and latency per query class.
+
+---
+
+### Story 7.2: Retrieval Observability & Structured Eval Logging
+
+As an operator,
+I want retrieval and synthesis runs to emit structured metrics and traceable benchmark output,
+So that I can understand which provider, latency, and evidence path produced a result.
+
+**Acceptance Criteria:**
+
+**Given** a retrieval query runs,
+**When** logs are emitted,
+**Then** they include query type, candidate counts, filtered evidence counts, latency, and the model/provider used for synthesis without logging sensitive content or secrets.
+
+**Given** a benchmark run is executed,
+**When** results are written,
+**Then** each query record includes pass/fail status, timings, and machine-readable metadata that can be compared across runs.
+
+**Given** a retrieval regression occurs,
+**When** the operator reviews the benchmark output,
+**Then** they can identify whether the change came from retrieval candidate selection, evidence filtering, citation formatting, or synthesis.
+
+---
+
+### Story 7.3: Retrieval Evidence Selection & Citation Precision Hardening
+
+As a user,
+I want answers and citations to reflect only the evidence that actually supports the response,
+So that grounded Q&A remains trustworthy as the corpus becomes more mixed and connected.
+
+**Acceptance Criteria:**
+
+**Given** a retrieval candidate set is assembled,
+**When** synthesis begins,
+**Then** a configurable relevance floor is applied before evidence is passed to the model.
+
+**Given** an answer is returned,
+**When** citations are emitted,
+**Then** only evidence items that survived filtering and were eligible to support the answer are cited.
+
+**Given** retrieval does not find sufficient grounded evidence,
+**When** the request completes,
+**Then** the platform returns a clear insufficient-evidence outcome rather than forcing a weakly grounded synthesis.
+
+---
+
+### Story 7.4: Document-First Retrieval & Context Expansion
+
+As a user,
+I want retrieval to preserve more document context when needed,
+So that answers are less brittle on single-document and bounded-context questions.
+
+**Acceptance Criteria:**
+
+**Given** a query is classified as a bounded or document-centric question,
+**When** retrieval runs,
+**Then** documents are ranked before chunk-level expansion so the platform can preserve local context more effectively.
+
+**Given** a highly ranked chunk is selected,
+**When** context expansion is applied,
+**Then** adjacent or parent context is included according to documented rules rather than passing isolated fragments only.
+
+**Given** the benchmark harness is rerun after this change,
+**When** results are compared to the prior baseline,
+**Then** bounded-context query classes improve or hold steady with no material regression in direct factual lookup.
+
+---
+
+### Story 7.5: Operator Validation — Retrieval Trust Regression Suite
+
+As Iain (operator and first maintainer),
+I want a documented retrieval trust validation pass,
+So that Epic 8 and later growth work starts only after the grounded-answer baseline is proven stable.
+
+**Acceptance Criteria:**
+
+**Given** the evaluation corpus and hardening work are complete,
+**When** the validation suite is run against a representative mixed-source corpus,
+**Then** benchmark results are captured and attached to the implementation artifact.
+
+**Given** direct factual prompts are included in the validation set,
+**When** answers are inspected,
+**Then** single-source questions remain grounded to a single supporting lineage unless the prompt explicitly requests synthesis.
+
+**Given** latency-sensitive query classes are measured,
+**When** results are reviewed,
+**Then** interactive retrieval remains within the project’s stated performance expectations or the gap is documented explicitly.
+
+---
+
+### Story 7.6: Documentation & Housekeeping
+
+As Iain (operator and platform maintainer),
+I want the retrieval trust layer documented clearly,
+So that future BMAD workflows and implementation stories treat benchmarking and observability as part of the platform contract rather than optional extras.
+
+**Acceptance Criteria:**
+
+**Given** the retrieval trust work is complete,
+**When** `architecture.md` and `architecture-diagrams.md` are reviewed,
+**Then** they describe the evaluation harness, evidence-selection contract, and sequenced placement of retrieval hardening before Telegram/web/scheduler features.
+
+**Given** operator-facing docs are reviewed,
+**When** they are updated,
+**Then** they explain how to run the benchmark harness, where reports are stored, and how to interpret retrieval regressions.
+
+**Given** all Epic 7 documents are cross-checked,
+**When** reviewed together,
+**Then** benchmark terminology, evidence-selection rules, and observability fields are consistent across PRD, architecture, epics, and sprint tracking.
+
+## Epic 8: Interactive Telegram Messaging
+
+Users interact reactively with the platform through Telegram — asking questions and capturing notes — without yet depending on web augmentation or proactive scheduling. This is the smallest end-user messaging slice that validates mobile access and message-driven capture on top of the hardened retrieval base.
+**FRs covered:** FR9, FR34
 **NFRs:** NFR11, NFR20
 
-### Story 7.1: Telegram Bot Setup & Output Channel
+### Story 8.1: Telegram Bot Setup & Output Channel
 
 As an operator,
 I want to configure a Telegram bot that the platform can send messages to and receive messages from,
-So that Telegram is a live, verified channel before building the Q&A and briefing flows on top of it.
+So that Telegram is a live, verified channel before Q&A and note capture are built on top of it.
 
 **Acceptance Criteria:**
 
 **Given** a Telegram bot token is present in `config.yaml` under `connectors.telegram.bot_token`,
 **When** the `cos` container starts with Telegram enabled,
-**Then** `telegram_bot.py` begins polling the Telegram Bot API for updates using long-polling — no error on startup if the token is valid.
+**Then** `telegram_bot.py` begins polling the Telegram Bot API for updates using long-polling with graceful backoff.
 
 **Given** `output/channels/telegram.py` is implemented,
 **When** `OutputRouter.send(channel="telegram", content="test message")` is called,
-**Then** the message is delivered to the configured Telegram chat ID via the Bot API `sendMessage` endpoint — and the router validates the `telegram` channel against `CosConfig.output_channels` before dispatching.
+**Then** the message is delivered to the configured Telegram chat ID only after the router validates the `telegram` channel against the allowed output channels.
 
-**Given** `OutputRouter` attempts to send via Telegram and the Bot API returns an error (e.g. invalid chat ID),
+**Given** Telegram delivery fails,
 **When** the error is handled,
-**Then** the output is suppressed, a structured error is logged with `component: "output_router"`, and no exception propagates — fail-closed behaviour is preserved.
-
-**Given** the Telegram Bot API is temporarily unreachable,
-**When** the connector attempts to poll,
-**Then** the failure is logged and the connector backs off — the MCP server, retrieval path, and all other components remain fully operational (NFR11).
-
-**Given** a simple test message is sent to the bot from a Telegram client,
-**When** the platform polls and receives it,
-**Then** the raw message content and sender metadata are available to the message handler — confirming the inbound pipeline is wired up.
+**Then** output is suppressed, a structured error is logged with `component: "output"`, and the rest of the platform remains healthy.
 
 ---
 
-### Story 7.2: Telegram Inbound Q&A
+### Story 8.2: Telegram Inbound Q&A
 
 As a user,
 I want to send a question to the platform via Telegram and receive a cited answer,
-So that I can access my knowledge base from my phone without opening a laptop or a separate app.
+So that I can access my knowledge base from my phone without opening a laptop or separate interface.
 
 **Acceptance Criteria:**
 
 **Given** a message is received via the Telegram bot,
 **When** the message classifier runs,
-**Then** it classifies the message as a `question` if it is phrased as a query (ends with `?`, starts with an interrogative, or is a statement clearly seeking information) — and as a `note` otherwise.
+**Then** it identifies questions using documented heuristics and routes them to the reactive Q&A path.
 
-**Given** a message is classified as a `question`,
+**Given** a message is classified as a question,
 **When** the Q&A path executes,
-**Then** it calls `RetrievalService.query(text, role_pack)`, receives a `CitedResponse`, and delivers a reply via `OutputRouter.send(channel="telegram")` containing the synthesised answer and at least the top source reference.
+**Then** it calls `RetrievalService.query(...)` and delivers a concise Telegram-appropriate cited reply via `OutputRouter.send(channel="telegram")`.
 
-**Given** a question is answered and the response is delivered,
-**When** the Telegram message is reviewed,
-**Then** the answer is appropriately concise for a messaging context (not a full multi-page document) and includes the source document name so the user can follow up.
-
-**Given** a question is submitted but retrieval finds no relevant content,
-**When** the reply is delivered,
-**Then** the user receives a clear message such as "I couldn't find relevant content in your knowledge base for that question" — not silence, not an error code.
-
-**Given** the Claude API is temporarily unavailable when a Telegram question arrives,
-**When** synthesis fails,
-**Then** the user receives a plain-language apology message via Telegram — the failure is handled gracefully and does not crash the bot.
+**Given** no relevant grounded content is found or synthesis fails,
+**When** the reply is sent,
+**Then** the user receives a clear plain-language outcome rather than silence or an uncaught error.
 
 ---
 
-### Story 7.3: Telegram Note Capture
+### Story 8.3: Telegram Note Capture
 
 As a user,
-I want to send a short note or thought to the platform via Telegram and have it saved to my knowledge base immediately,
-So that I can capture ideas in the moment, from my phone, knowing they will be searchable later.
+I want to send a short note or thought to the platform via Telegram and have it saved immediately,
+So that in-the-moment capture becomes part of the searchable knowledge base.
 
 **Acceptance Criteria:**
 
-**Given** a message is received via Telegram and classified as a `note` (declarative statement, or prefixed with "Note:"),
+**Given** a message is classified as a note,
 **When** the note capture path executes,
-**Then** it calls `IngestService.ingest_note(text, metadata)` with the message content and metadata including `source: "telegram"`, `sender_id`, and `timestamp` — and the jobs queue from Epic 6 is used for the ingest operation.
+**Then** it routes the content into the Epic 6 ingest/job substrate with Telegram metadata including sender and timestamp.
 
-**Given** a note is ingested,
-**When** the confirmation reply is delivered via Telegram,
-**Then** the user receives a brief acknowledgement: "Note saved." — not silence, not a long status message.
+**Given** the note is ingested successfully,
+**When** confirmation is returned,
+**Then** the user receives a short acknowledgement such as `"Note saved."`.
 
-**Given** a note has been ingested via Telegram,
-**When** `list_documents` is called,
-**Then** the note appears with a readable `source_alias`, a canonical `document_version_id`, and a non-zero `chunk_count`, while the underlying provenance retains the Telegram locator.
-
-**Given** a subsequent `retrieve` query references the content of the captured note,
-**When** the retrieval runs,
-**Then** the note appears in the cited results — it is a full first-class document, searchable immediately after capture.
-
-**Given** a very short message (one or two words) is received via Telegram,
-**When** the classifier and ingestion run,
-**Then** the platform still ingests it as a note and confirms — single-word captures are valid and are not discarded.
+**Given** the note has been ingested,
+**When** `list_documents` or `retrieve` is used later,
+**Then** the note appears as a first-class document with canonical provenance and searchable content.
 
 ---
 
-### Story 7.4: Web Search MCP Tool
-
-As a user,
-I want the platform to search the live web when my knowledge base does not contain sufficient context,
-So that my answers are augmented with current information rather than being limited to what I have manually ingested.
-
-**Acceptance Criteria:**
-
-**Given** the `web_search` tool is registered on the MCP server and a web search API key (Brave or Tavily) is configured in `config.yaml`,
-**When** a connected MCP client (Claude Desktop or Claude Code) invokes `web_search` with a `query` string,
-**Then** the platform calls the configured search API, retrieves results, and returns them in the standard citation envelope format: `{"status": "ok", "data": {"results": [...]}, "citations": [...]}` where each result includes `title`, `url`, `snippet`, and `source: "web"`.
-
-**Given** web search results are returned,
-**When** their citation format is compared to local retrieval citations,
-**Then** both use the same `CitedResults` structure — `source_path` is the URL for web results — ensuring consistent behaviour when the LLM reasons over mixed local and web sources.
-
-**Given** a brief caching layer is implemented,
-**When** the same query is submitted twice within the cache window (configurable in `config.yaml`),
-**Then** the second call returns cached results without making a second API call — avoiding duplicate charges and rate-limit exposure.
-
-**Given** the web search API is unavailable or returns an error,
-**When** the `web_search` tool is called,
-**Then** it returns `{"status": "error", "error": "Web search unavailable", "detail": "..."}` — not an unhandled exception — and the LLM can fall back to local retrieval.
-
-**Given** `web_search` is called,
-**When** the request and response are logged,
-**Then** the search query is logged with `component: "connector"` but no API key value appears in any log entry.
-
----
-
-### Story 7.5: Scheduler Infrastructure & Morning Brief
-
-As a user,
-I want to receive a proactive morning brief via a configured output channel at a configured time each day,
-So that the platform surfaces relevant knowledge before I start work, without me having to ask.
-
-**Acceptance Criteria:**
-
-**Given** APScheduler is integrated and a brief time plus outbound channel are configured in `config.yaml` (e.g. `scheduler.morning_brief_time: "07:30"` and `scheduler.brief_channel: "telegram"` or `"email"`),
-**When** the scheduler triggers at the configured time,
-**Then** it fetches today's calendar events via `CalendarConnector`, retrieves relevant documents for each event via `RetrievalService`, synthesises a morning brief via `LLMAdapter`, and delivers it via `OutputRouter.send(channel=<configured brief channel>)`.
-
-**Given** a morning brief is delivered,
-**When** the outbound message is reviewed in the configured channel,
-**Then** it is appropriately formatted for that channel, references today's key meetings, and cites at least one relevant knowledge base document per meeting where relevant content exists.
-
-**Given** a scheduled brief job runs but the configured output channel is unavailable,
-**When** delivery fails,
-**Then** the failure is logged with `component: "scheduler"`, the job is marked as `failed` in the jobs table, and the next scheduled job runs normally at its configured time — one delivery failure does not stop the scheduler.
-
-**Given** a day with no calendar events,
-**When** the morning brief triggers,
-**Then** the brief still delivers — it covers general knowledge base context or a role-relevant summary rather than meeting-specific content — the user always receives something useful.
-
-**Given** the `cos` container restarts while the scheduler is between jobs,
-**When** it comes back up,
-**Then** APScheduler resumes from the configured schedule — no manual intervention is required to restart scheduled jobs.
-
----
-
-### Story 7.6: Meeting Prep from Calendar Events
-
-As a user,
-I want to receive contextual prep notes before each calendar meeting,
-So that I arrive at every meeting with relevant knowledge surfaced from my knowledge base, without having to ask.
-
-**Acceptance Criteria:**
-
-**Given** a meeting prep interval is configured in `config.yaml` (e.g. `scheduler.meeting_prep_minutes: 30`),
-**When** a calendar event is 30 minutes away,
-**Then** the scheduler triggers a meeting prep job, retrieves documents relevant to the meeting title and attendees via `RetrievalService`, synthesises a brief prep note via `LLMAdapter`, and delivers it via `OutputRouter.send(channel="telegram")`.
-
-**Given** a meeting prep note is delivered,
-**When** the Telegram message is reviewed,
-**Then** it is concise and meeting-specific — referencing the meeting title, key attendees where known, and citing at least one relevant knowledge base document where relevant content exists.
-
-**Given** a calendar event has no relevant content in the knowledge base,
-**When** the meeting prep job runs,
-**Then** the prep note is still delivered — it acknowledges the meeting and notes that no specific content was found, rather than sending nothing.
-
-**Given** a meeting prep job runs but delivery fails (Telegram unavailable),
-**When** the failure is handled,
-**Then** it is logged with `component: "scheduler"`, marked as `failed` in the jobs table, and the morning brief scheduler continues to run — meeting prep failure does not affect the daily brief schedule.
-
-**Given** multiple meetings are scheduled within the prep window simultaneously,
-**When** the scheduler evaluates upcoming events,
-**Then** a prep note is triggered for each event independently — each meeting gets its own prep job.
-
----
-
-### Story 7.7: Operator Validation — Ambient Intelligence Live
-
+### Story 8.4: Operator Validation — Interactive Telegram Live
 
 As Iain (operator and first user),
-I want to run a documented end-to-end smoke test of the full ambient intelligence layer,
-So that I can confirm the platform genuinely comes to the user through Telegram before handing it to a real user.
+I want a documented end-to-end smoke test for the reactive Telegram slice,
+So that I can validate interactive messaging before adding web or scheduler complexity.
 
 **Acceptance Criteria:**
 
 **Given** the Telegram bot is configured and the platform is running,
-**When** a question is sent to the bot from a Telegram client,
-**Then** a cited answer is received in Telegram within a reasonable response time (target: under 10 seconds from message sent to reply received).
+**When** a question is sent from a Telegram client,
+**Then** a cited answer is received within a reasonable interactive response time.
 
-**Given** a note is sent to the bot prefixed with "Note:",
+**Given** a note is sent prefixed with `"Note:"`,
 **When** the platform processes it,
-**Then** a "Note saved." confirmation is received in Telegram, and a subsequent `retrieve` query that references the note's content returns it as a cited source.
+**Then** a confirmation is received and a later retrieval query can cite the note.
 
-**Given** the morning brief schedule is temporarily set to trigger in 2 minutes for testing,
-**When** the scheduler fires,
-**Then** a morning brief is received in Telegram — formatted appropriately, referencing calendar events and relevant knowledge base documents.
-
-**Given** the `web_search` MCP tool is available in Claude Desktop or Claude Code,
-**When** a query is submitted that the local knowledge base cannot answer well,
-**Then** the LLM invokes `web_search`, augments the answer with live results, and the response distinguishes between local citations and web citations.
-
-**Given** all Telegram connector features are working,
-**When** the Telegram Bot API is temporarily blocked (simulated),
-**Then** `cos status` shows Telegram as degraded, all other components remain healthy, and `retrieve` queries from Claude Desktop or Claude Code continue to be answered normally.
+**Given** the Telegram Bot API is temporarily unavailable,
+**When** the failure is simulated,
+**Then** Telegram is reported as degraded while local MCP retrieval continues to function normally.
 
 ---
 
-### Story 7.8: Documentation & Housekeeping
+### Story 8.5: Documentation & Housekeeping
 
 As Iain (operator and platform maintainer),
-I want all documentation updated to reflect the complete ambient intelligence layer,
-So that a new user can configure Telegram, understand what they will receive and when, and operate the platform end-to-end from the documentation alone.
+I want all documentation updated to reflect the interactive Telegram slice only,
+So that users and future agents do not assume web augmentation or proactive briefings are already part of this epic.
 
 **Acceptance Criteria:**
 
-**Given** `docs/connectors.md` is updated for Epic 7,
+**Given** `docs/connectors.md` is updated for Epic 8,
 **When** it is reviewed,
-**Then** it covers: how to create a Telegram bot via BotFather, how to add the bot token to `config.yaml`, how to configure the chat ID for outbound delivery, how to enable and test the web search connector, and how to configure scheduler times for morning briefs and meeting prep.
+**Then** it covers Telegram setup, testing, inbound Q&A, and note capture without implying that morning briefs or web search are already included in the same delivery slice.
 
-**Given** a new `docs/user-guide.md` is created,
+**Given** a user-facing guide is updated,
 **When** it is reviewed,
-**Then** it covers the end-user experience: how to ask questions via Telegram, how to capture notes, what morning briefs look like and when they arrive, and how to interpret cited answers — written for a non-technical user (Sarah or Marcus, not Iain).
+**Then** it explains how to ask questions and capture notes through Telegram in plain language.
 
-**Given** the root `README.md` is updated,
+**Given** architecture and epic documents are cross-checked,
+**When** reviewed together,
+**Then** the Telegram capability is described consistently as reactive messaging only.
+
+## Epic 9: Structured LLM Boundary & Provider Portability
+
+The model boundary is upgraded before routing policy or local endpoint expansion. The platform gains richer request/response contracts, explicit model/provider metadata, and direct support for additional providers without disturbing retrieval or ingestion layers.
+**FRs covered:** Supports the existing provider-agnostic intent behind FR17 and FR31
+**NFRs:** NFR5, NFR6, NFR19
+
+### Story 9.1: LLM Request/Response Contract & Metadata
+
+As a maintainer,
+I want a richer internal LLM contract than plain `complete(prompt, context)`,
+So that future providers, audits, and workflow-specific model decisions have a stable interface.
+
+**Acceptance Criteria:**
+
+**Given** the LLM boundary is reviewed,
+**When** the interface is updated,
+**Then** it uses structured request/response objects that capture prompt intent, provider/model metadata, latency, and usage information.
+
+**Given** the existing Anthropic path is exercised,
+**When** the refactor lands,
+**Then** current retrieval-based synthesis still works without changing ingestion or retrieval call sites beyond the new typed contract.
+
+**Given** a response is returned,
+**When** it is logged or surfaced to internal callers,
+**Then** provider and model identifiers are available for audit and later routing logic.
+
+---
+
+### Story 9.2: OpenAI Provider Adapter
+
+As an operator,
+I want OpenAI to be a first-class provider option,
+So that the platform is no longer tied to a single model vendor.
+
+**Acceptance Criteria:**
+
+**Given** OpenAI credentials and model settings are added to config,
+**When** the provider is selected,
+**Then** the platform can complete the same structured LLM requests through a native OpenAI adapter.
+
+**Given** the adapter is used for grounded retrieval synthesis,
+**When** representative queries are run,
+**Then** the system returns responses through the same internal contract and audit fields as the Anthropic path.
+
+**Given** configuration is invalid,
+**When** startup or invocation occurs,
+**Then** the platform returns a structured configuration or provider error instead of failing opaquely.
+
+---
+
+### Story 9.3: Gemini Provider Adapter
+
+As an operator,
+I want Gemini to be a first-class provider option,
+So that provider diversity and fallback options improve further.
+
+**Acceptance Criteria:**
+
+**Given** Gemini credentials and model settings are added to config,
+**When** the provider is selected,
+**Then** the platform can execute the structured LLM request contract through a native Gemini adapter.
+
+**Given** the Gemini adapter is used,
+**When** benchmark retrieval prompts are run,
+**Then** provider/model metadata and error semantics match the shared internal contract.
+
+**Given** a provider-specific failure occurs,
+**When** it is handled,
+**Then** the failure is surfaced clearly without leaking secrets or breaking the rest of the platform.
+
+---
+
+### Story 9.4: Multi-Provider Config & Selection Semantics
+
+As a maintainer,
+I want the configuration model to support multiple registered providers cleanly,
+So that later routing and fallback work can build on explicit product-level semantics rather than ad hoc flags.
+
+**Acceptance Criteria:**
+
+**Given** multiple providers are configured,
+**When** the config is validated,
+**Then** the active provider, model choice, and any workflow-level overrides follow a documented schema.
+
+**Given** no routing policy has been introduced yet,
+**When** a request is made,
+**Then** selection still follows simple explicit semantics rather than implicit or opaque behavior.
+
+**Given** provider configuration changes,
+**When** tests and startup validation run,
+**Then** the platform confirms that only supported, fully specified provider entries are accepted.
+
+---
+
+### Story 9.5: Operator Validation — Provider Portability
+
+As Iain (operator and maintainer),
+I want a portability validation pass across supported providers,
+So that the platform proves the model boundary is genuinely swappable before later routing work starts.
+
+**Acceptance Criteria:**
+
+**Given** Anthropic plus at least one new provider are configured,
+**When** the validation suite is run,
+**Then** the same representative retrieval-driven prompts complete successfully on each provider.
+
+**Given** provider metadata is reviewed,
+**When** logs and result artifacts are inspected,
+**Then** each run records the provider, model, and timing details cleanly.
+
+**Given** a provider is unavailable,
+**When** the validation path is exercised,
+**Then** failure behavior is explicit and bounded rather than cascading through unrelated components.
+
+---
+
+### Story 9.6: Documentation & Housekeeping
+
+As Iain (operator and platform maintainer),
+I want the structured LLM boundary and provider setup documented,
+So that future BMAD implementation work extends the same abstraction instead of inventing parallel patterns.
+
+**Acceptance Criteria:**
+
+**Given** Epic 9 is complete,
+**When** architecture and setup documents are reviewed,
+**Then** they describe the structured request/response boundary, provider registration, and audit metadata expectations.
+
+**Given** operator docs are updated,
+**When** they are reviewed,
+**Then** they explain how to configure supported providers and interpret provider-specific validation output.
+
+**Given** Epic 9 planning artifacts are cross-checked,
+**When** reviewed together,
+**Then** provider terminology and configuration semantics are consistent across PRD, architecture, epics, and sprint tracking.
+
+## Epic 10: Web Augmentation & External Context
+
+Local retrieval remains primary, but the platform can augment it with live external context once retrieval trust, interactive messaging, and provider portability are in place. This epic keeps web augmentation explicit and bounded rather than making it part of the first Telegram slice.
+**FRs covered:** FR16
+**NFRs:** NFR11
+
+### Story 10.1: Web Search MCP Tool
+
+As a user,
+I want the platform to search the live web when local knowledge is insufficient,
+So that grounded answers can incorporate current external context when needed.
+
+**Acceptance Criteria:**
+
+**Given** a web search API key is configured,
+**When** a connected MCP client invokes `web_search`,
+**Then** the platform returns results in the standard response envelope with structured web citations.
+
+**Given** a query is submitted that local knowledge cannot answer well,
+**When** `web_search` runs,
+**Then** the returned results include titles, URLs, snippets, and a clear `source: "web"` marker.
+
+**Given** the search API is unavailable,
+**When** the tool is called,
+**Then** a structured error response is returned and local retrieval remains available.
+
+---
+
+### Story 10.2: Local + Web Citation Contract
+
+As a user,
+I want mixed local and web evidence to stay distinguishable,
+So that I can tell what came from my knowledge base versus the live internet.
+
+**Acceptance Criteria:**
+
+**Given** local and web results are both available,
+**When** the citation structure is reviewed,
+**Then** local citations retain canonical provenance fields while web citations retain URL-based provenance with no ambiguity between the two.
+
+**Given** synthesis is performed over mixed evidence,
+**When** the response is returned,
+**Then** it distinguishes local citations from web citations clearly enough for follow-up and audit.
+
+**Given** no useful web evidence is found,
+**When** the run completes,
+**Then** the response falls back cleanly to local-only behavior or an explicit insufficient-context outcome.
+
+---
+
+### Story 10.3: Web Search Cache & Failure Handling
+
+As an operator,
+I want web augmentation to be cost-aware and failure-tolerant,
+So that external-context lookup does not create unnecessary spend or brittle runtime behavior.
+
+**Acceptance Criteria:**
+
+**Given** the same query is submitted repeatedly within a configured cache window,
+**When** `web_search` is called,
+**Then** cached results are returned instead of making duplicate paid requests.
+
+**Given** a web provider error or rate limit occurs,
+**When** it is handled,
+**Then** the platform logs a bounded connector failure and returns a structured error envelope.
+
+**Given** logging is reviewed,
+**When** web requests are inspected,
+**Then** query metadata is visible without logging API key material.
+
+---
+
+### Story 10.4: Operator Validation — Web-Augmented Retrieval
+
+As Iain (operator and maintainer),
+I want a documented validation pass for web-augmented retrieval,
+So that current-external-context behavior is verified before proactive briefing flows depend on it.
+
+**Acceptance Criteria:**
+
+**Given** the web search tool is configured,
+**When** representative current-context prompts are tested,
+**Then** results show correct envelope structure and clear distinction between local and web evidence.
+
+**Given** a failure mode is simulated,
+**When** the provider is unavailable,
+**Then** local retrieval remains usable and the failure is surfaced explicitly.
+
+**Given** validation artifacts are reviewed,
+**When** they are checked in the implementation artifact,
+**Then** they show both successful augmentation cases and bounded-failure cases.
+
+---
+
+### Story 10.5: Documentation & Housekeeping
+
+As Iain (operator and platform maintainer),
+I want web augmentation documented as a separate later growth layer,
+So that future work does not treat it as interchangeable with local retrieval or the initial Telegram slice.
+
+**Acceptance Criteria:**
+
+**Given** Epic 10 documentation is reviewed,
+**When** it is updated,
+**Then** it explains configuration, validation, and mixed local/web citation behavior.
+
+**Given** architecture and epic documents are cross-checked,
+**When** reviewed together,
+**Then** web augmentation is described consistently as an opt-in later layer on top of local retrieval.
+
+**Given** user-facing guidance is updated,
 **When** it is reviewed,
-**Then** it accurately describes the complete platform capabilities across both phases — Phase 1 (CLI ingestion, MCP Q&A) and Phase 2 (connected sources, Telegram, scheduled briefs, web search) — with links to the relevant docs for each.
+**Then** it sets expectations about what kinds of answers may use live external context.
 
-**Given** any deviations from `architecture.md` during Epic 7 (e.g. changes to scheduler configuration structure, message classification logic, web search caching behaviour, or OutputRouter telegram channel handling),
-**When** `architecture.md` is reviewed,
-**Then** those sections reflect what was built.
+## Epic 11: Proactive Briefings & Meeting Prep
 
-**Given** all Epic 7 documents are reviewed together,
-**When** cross-checked for consistency,
-**Then** Telegram setup steps, scheduler config keys, web search config keys, and capability descriptions are consistent across `docs/connectors.md`, `docs/user-guide.md`, `docs/setup.md`, and `architecture.md`.
+Proactive scheduling follows validated retrieval, interactive messaging, and web-augmentation layers. The platform can now deliver morning briefs and meeting prep through configured channels without bundling those behaviors into the first reactive Telegram implementation.
+**FRs covered:** FR19, FR20, FR35
+**NFRs:** NFR11, NFR14
+
+### Story 11.1: Scheduler Infrastructure & Morning Brief
+
+As a user,
+I want to receive a proactive morning brief at a configured time each day,
+So that the platform surfaces relevant knowledge before I start work, without me needing to ask.
+
+**Acceptance Criteria:**
+
+**Given** APScheduler is integrated and a brief time plus outbound channel are configured,
+**When** the scheduler triggers,
+**Then** it gathers the necessary context, generates a brief, and delivers it through `OutputRouter`.
+
+**Given** a morning brief is delivered,
+**When** the output is reviewed,
+**Then** it is formatted appropriately for the channel and cites relevant knowledge-base context where available.
+
+**Given** the platform restarts between jobs,
+**When** it comes back up,
+**Then** scheduled jobs resume without manual repair.
+
+---
+
+### Story 11.2: Meeting Prep from Calendar Events
+
+As a user,
+I want to receive contextual prep notes before calendar meetings,
+So that I arrive at meetings with relevant knowledge already surfaced.
+
+**Acceptance Criteria:**
+
+**Given** a meeting-prep interval is configured,
+**When** an event approaches the threshold,
+**Then** the scheduler retrieves relevant meeting context and delivers a concise prep note through the configured output channel.
+
+**Given** no relevant knowledge-base content exists for a meeting,
+**When** the prep job runs,
+**Then** the platform still returns a useful bounded outcome rather than remaining silent.
+
+**Given** multiple meetings fall inside the prep window,
+**When** the scheduler evaluates them,
+**Then** each event is handled independently.
+
+---
+
+### Story 11.3: Delivery Failure Handling & Job Visibility
+
+As an operator,
+I want proactive delivery failures to be visible and recoverable,
+So that one bad delivery does not silently disable scheduled behavior.
+
+**Acceptance Criteria:**
+
+**Given** a scheduled delivery fails,
+**When** the error is handled,
+**Then** it is logged with `component: "scheduler"` and recorded against the corresponding job/task state.
+
+**Given** one scheduled job fails,
+**When** the next scheduled run occurs,
+**Then** later jobs still execute normally rather than stalling the scheduler.
+
+**Given** operator diagnostics are reviewed,
+**When** logs or status output are inspected,
+**Then** they show enough information to distinguish retrieval failure, generation failure, and channel-delivery failure.
+
+---
+
+### Story 11.4: Operator Validation — Proactive Briefings Live
+
+As Iain (operator and first user),
+I want a documented end-to-end validation pass for proactive briefings,
+So that scheduled value delivery is proven after the reactive and trust layers are already stable.
+
+**Acceptance Criteria:**
+
+**Given** the schedule is configured for near-term testing,
+**When** a morning brief run is triggered,
+**Then** the brief arrives in the configured channel with the expected structure and citations.
+
+**Given** a calendar-driven meeting-prep test is run,
+**When** the prep event reaches the configured interval,
+**Then** a concise prep message is delivered successfully.
+
+**Given** a delivery failure is simulated,
+**When** validation is reviewed,
+**Then** the failure is visible, bounded, and does not stop later scheduled runs.
+
+---
+
+### Story 11.5: Documentation & Housekeeping
+
+As Iain (operator and platform maintainer),
+I want the proactive scheduling layer documented clearly,
+So that it remains distinct from the earlier Telegram and web-augmentation slices.
+
+**Acceptance Criteria:**
+
+**Given** proactive-briefing documentation is updated,
+**When** it is reviewed,
+**Then** it explains scheduler configuration, morning brief behavior, meeting prep behavior, and failure handling.
+
+**Given** architecture and epic documents are cross-checked,
+**When** reviewed together,
+**Then** proactive scheduling is described consistently as the growth layer that follows retrieval trust, Telegram, and web augmentation.
+
+**Given** user-facing guidance is reviewed,
+**When** it is updated,
+**Then** it sets expectations about what will be delivered proactively and when.
+
+## Epic 12: Agent-Safe Task Runtime
+
+The platform gains a durable task substrate for asynchronous, resumable, approval-aware work only after the first real user flows are in place. This is a platformization epic, not a free-form autonomous-agent leap.
+**FRs covered:** Vision-track platform foundation; no direct MVP/Growth FR closure
+**NFRs:** NFR10, NFR12, NFR14
+
+### Story 12.1: General Task Records & State Model
+
+As a maintainer,
+I want the current jobs substrate generalized into a task model,
+So that non-ingest async work can be represented durably and consistently.
+
+**Acceptance Criteria:**
+
+**Given** the task runtime design is reviewed,
+**When** the schema is implemented,
+**Then** it introduces a durable task entity with explicit lifecycle states, ownership, timestamps, and idempotent identifiers.
+
+**Given** a non-ingest async workflow is created,
+**When** it is persisted,
+**Then** it uses the same task model rather than inventing a parallel queue concept.
+
+**Given** existing ingest work is reviewed,
+**When** migration boundaries are documented,
+**Then** the relationship between the legacy jobs flow and the generalized task model is explicit.
+
+---
+
+### Story 12.2: Task Events, Artifacts & Audit Trail
+
+As an operator,
+I want long-running tasks to leave behind a readable event and artifact trail,
+So that progress and outcomes can be reconstructed after the fact.
+
+**Acceptance Criteria:**
+
+**Given** a task executes over multiple steps,
+**When** state changes occur,
+**Then** the platform records step-level events and generated artifacts in durable storage.
+
+**Given** an operator reviews a task run,
+**When** they inspect the task history,
+**Then** they can see what happened, when it happened, and what outputs were produced.
+
+**Given** a failure occurs mid-task,
+**When** the audit trail is reviewed,
+**Then** the failure point is identifiable without reconstructing behavior from raw container logs alone.
+
+---
+
+### Story 12.3: Pause/Resume & Approval Gates
+
+As a user and operator,
+I want long-running workflows to pause, resume, and wait for approval explicitly,
+So that the platform can support durable iterative work without becoming opaque or unsafe.
+
+**Acceptance Criteria:**
+
+**Given** a task reaches an approval boundary,
+**When** execution pauses,
+**Then** the platform records a pending approval state instead of continuing implicitly.
+
+**Given** an approved task is resumed,
+**When** execution continues,
+**Then** it resumes from the recorded checkpoint rather than replaying the entire workflow blindly.
+
+**Given** a task is cancelled or times out,
+**When** the runtime handles it,
+**Then** final state is explicit and side effects remain auditable.
+
+---
+
+### Story 12.4: Operator Validation — Task Runtime
+
+As Iain (operator and maintainer),
+I want a validation pass for the generalized task runtime,
+So that resumability and approval-aware behavior are proven before heavier routing or orchestration patterns are added.
+
+**Acceptance Criteria:**
+
+**Given** representative async tasks are exercised,
+**When** validation runs,
+**Then** task creation, pause/resume, cancellation, and completion states all persist correctly.
+
+**Given** a failure or restart occurs mid-task,
+**When** the runtime recovers,
+**Then** task state remains consistent and restart behavior is documented.
+
+**Given** approval-gated flows are tested,
+**When** validation results are reviewed,
+**Then** they show that human intervention boundaries are explicit and durable.
+
+---
+
+### Story 12.5: Documentation & Housekeeping
+
+As Iain (operator and platform maintainer),
+I want the task runtime documented as a narrow durable substrate,
+So that future BMAD workflows do not mistake it for a fully autonomous orchestration engine.
+
+**Acceptance Criteria:**
+
+**Given** Epic 12 documentation is updated,
+**When** it is reviewed,
+**Then** it explains the task model, event/artifact records, and approval/resume semantics.
+
+**Given** architecture and epic documents are cross-checked,
+**When** reviewed together,
+**Then** the task runtime is described consistently as a platform foundation layer that follows the first real user features.
+
+**Given** future implementation guidance is reviewed,
+**When** it is updated,
+**Then** it warns against bypassing the task model with ad hoc long-running loops.
+
+## Epic 13: Internal Model Routing & Local Endpoints
+
+Routing policy and OpenAI-compatible local endpoint support build on the richer provider boundary from Epic 9 and the durable task/platform substrate from Epic 12. The platform owns routing policy internally rather than delegating that responsibility to an external aggregator by default.
+**FRs covered:** Vision-track platform portability; no direct MVP/Growth FR closure
+**NFRs:** NFR5, NFR6, NFR19
+
+### Story 13.1: Provider Registry & Routing Policy Scaffold
+
+As a maintainer,
+I want an internal provider registry and routing policy scaffold,
+So that model selection becomes explicit product behavior instead of a hidden infrastructure detail.
+
+**Acceptance Criteria:**
+
+**Given** multiple providers are available,
+**When** the routing scaffold is implemented,
+**Then** provider registration, capabilities, and policy hooks are represented in a documented internal model.
+
+**Given** no advanced policy has been enabled yet,
+**When** a request is routed,
+**Then** selection remains deterministic and traceable.
+
+**Given** logs or task artifacts are reviewed,
+**When** a model-handled response is inspected,
+**Then** the selected provider and policy path are visible for audit.
+
+---
+
+### Story 13.2: OpenAI-Compatible Local Endpoint Adapter
+
+As an operator,
+I want the platform to support OpenAI-compatible local or self-hosted model endpoints,
+So that local-model experimentation and private inference paths remain open.
+
+**Acceptance Criteria:**
+
+**Given** an OpenAI-compatible endpoint such as Ollama or vLLM is configured,
+**When** the adapter is selected,
+**Then** the platform can execute the shared structured LLM contract against that endpoint.
+
+**Given** local endpoint behavior differs from frontier APIs,
+**When** validation runs,
+**Then** capability or quality limitations are surfaced explicitly rather than hidden.
+
+**Given** configuration is invalid or the endpoint is unavailable,
+**When** the adapter is exercised,
+**Then** failure is bounded and does not break unrelated providers.
+
+---
+
+### Story 13.3: Pinned, Fallback & Workflow-Based Routing
+
+As a maintainer,
+I want a small set of explicit routing modes,
+So that the platform gains practical flexibility without becoming an opaque policy engine too early.
+
+**Acceptance Criteria:**
+
+**Given** routing is configured,
+**When** a request is made,
+**Then** the platform supports at least pinned provider selection, ordered fallback, and workflow-based selection semantics.
+
+**Given** a provider fails under fallback routing,
+**When** another provider is available,
+**Then** the failover path is recorded explicitly and remains auditable.
+
+**Given** workflow-based routing is used,
+**When** task or retrieval artifacts are reviewed,
+**Then** they show why the chosen route was used.
+
+---
+
+### Story 13.4: Operator Validation — Routing & Local Endpoints
+
+As Iain (operator and maintainer),
+I want a validation pass for routing behavior and local endpoint support,
+So that the platform proves routing policy works before more advanced retrieval/orchestration pilots depend on it.
+
+**Acceptance Criteria:**
+
+**Given** pinned, fallback, and workflow-based modes are configured,
+**When** validation runs,
+**Then** each mode shows the expected provider selection behavior.
+
+**Given** a local endpoint is configured,
+**When** representative prompts are executed,
+**Then** results and limitations are captured in the validation artifact.
+
+**Given** provider failure scenarios are exercised,
+**When** results are reviewed,
+**Then** fallback behavior is explicit and bounded.
+
+---
+
+### Story 13.5: Documentation & Housekeeping
+
+As Iain (operator and platform maintainer),
+I want routing and local-endpoint support documented clearly,
+So that future implementation work builds on explicit internal policy rather than relying on undocumented assumptions.
+
+**Acceptance Criteria:**
+
+**Given** Epic 13 documentation is updated,
+**When** it is reviewed,
+**Then** it explains supported routing modes, provider registry expectations, and local-endpoint configuration.
+
+**Given** architecture and epic documents are cross-checked,
+**When** reviewed together,
+**Then** routing is described consistently as an internal platform policy layer added after provider portability is already in place.
+
+**Given** operator guidance is reviewed,
+**When** it is updated,
+**Then** it explains how to validate routing behavior and interpret fallback outcomes.
+
+## Epic 14: Advanced Retrieval Modes & Orchestration Pilots
+
+More complex retrieval and orchestration work is explicitly gated behind benchmarks and prior platform layers. The goal is to explore full-context retrieval, hierarchical summaries, graph retrieval, and orchestration adoption only where they outperform the established baseline for the right query classes.
+**FRs covered:** Vision-track experimentation; no direct MVP/Growth FR closure
+**NFRs:** NFR1, NFR12, NFR19
+
+### Story 14.1: Full-Context Retrieval Mode Pilot
+
+As a maintainer,
+I want to pilot a full-context retrieval mode for bounded tasks,
+So that single-document and tightly scoped questions can preserve more original context where chunking is harmful.
+
+**Acceptance Criteria:**
+
+**Given** bounded-context query classes are identified,
+**When** the pilot runs,
+**Then** the platform can pass larger contiguous context or whole candidate documents to the model under documented limits.
+
+**Given** the benchmark harness is rerun,
+**When** pilot results are compared to the baseline,
+**Then** the pilot is judged on factuality, citation discipline, latency, and cost rather than intuition alone.
+
+**Given** the pilot underperforms,
+**When** results are reviewed,
+**Then** the mode remains experimental rather than becoming the default.
+
+---
+
+### Story 14.2: Hierarchical Summary Retrieval Pilot
+
+As a maintainer,
+I want to pilot hierarchical summary retrieval,
+So that briefing-style and corpus-wide synthesis questions can be evaluated against the baseline chunk-retrieval approach.
+
+**Acceptance Criteria:**
+
+**Given** summary layers are generated,
+**When** they are stored,
+**Then** their relationship to source evidence remains inspectable and grounded.
+
+**Given** briefing-style benchmark queries are run,
+**When** pilot results are compared,
+**Then** the pilot is judged on summary quality, grounding, latency, and maintenance overhead.
+
+**Given** summary drift or grounding concerns appear,
+**When** the pilot is reviewed,
+**Then** those risks are documented explicitly before any broader adoption decision.
+
+---
+
+### Story 14.3: Graph Retrieval Pilot
+
+As a maintainer,
+I want to pilot graph-based retrieval for relationship-heavy questions,
+So that the platform can test whether graph structure earns its complexity on the query classes where it might help most.
+
+**Acceptance Criteria:**
+
+**Given** a bounded slice of the corpus is selected,
+**When** graph extraction and indexing are piloted,
+**Then** entities, relationships, and provenance mappings are limited to a documented experimental scope.
+
+**Given** relationship-heavy benchmark queries are run,
+**When** results are compared to the baseline,
+**Then** gains or losses are measured explicitly rather than assumed.
+
+**Given** the graph pilot does not outperform the simpler baseline where expected,
+**When** the decision is recorded,
+**Then** graph retrieval remains experimental and non-default.
+
+---
+
+### Story 14.4: Orchestration Adoption Decision Record
+
+As an architect and maintainer,
+I want an explicit build-vs-adopt decision record for durable orchestration,
+So that the platform does not drift into a homegrown workflow engine without a deliberate review.
+
+**Acceptance Criteria:**
+
+**Given** the task runtime and later pilots are in place,
+**When** orchestration options are reviewed,
+**Then** the decision record compares extending the native runtime against adopting a durable external engine.
+
+**Given** evaluation criteria are applied,
+**When** the decision is made,
+**Then** it considers workflow complexity, resume semantics, approval gates, outages, replay/idempotency burden, and operational cost.
+
+**Given** the decision is approved,
+**When** future BMAD planning work starts,
+**Then** it references the recorded decision instead of reopening the question implicitly in unrelated stories.
+
+---
+
+### Story 14.5: Documentation & Housekeeping
+
+As Iain (operator and platform maintainer),
+I want all advanced retrieval and orchestration pilot work documented clearly,
+So that experimental layers remain distinguishable from the production baseline.
+
+**Acceptance Criteria:**
+
+**Given** Epic 14 documentation is updated,
+**When** it is reviewed,
+**Then** it describes each pilot, the benchmark gates, and the non-default status of experimental modes.
+
+**Given** architecture and epic documents are cross-checked,
+**When** reviewed together,
+**Then** they show that advanced retrieval and orchestration work occurs only after the earlier approved post-Epic-6 roadmap sequence.
+
+**Given** future planning artifacts are created,
+**When** they are reviewed,
+**Then** they can trace later experimentation back to these documented pilots and decision gates.
