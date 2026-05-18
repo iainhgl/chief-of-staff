@@ -19,6 +19,7 @@ class CitedChunk:
 
 
 CitedResults = list[CitedChunk]
+_MIN_MULTI_SOURCE_LINEAGES = 2
 
 
 @dataclass
@@ -71,3 +72,27 @@ def narrow_to_lineage(results: CitedResults) -> CitedResults:
         return []
     key = _lineage_key(results[0])
     return [chunk for chunk in results if _lineage_key(chunk) == key]
+
+
+def select_synthesis_evidence(
+    candidates: CitedResults,
+    *,
+    require_multi_source: bool = False,
+) -> CitedResults:
+    """Return the subset of candidates eligible to be passed to synthesis.
+
+    This is the explicit evidence-selection boundary: every chunk that enters
+    here becomes both the LLM context and the returned citations.  Chunks that
+    do not survive must never reappear in either place.
+
+    Story 6.13 remains responsible for thresholding and pruning the bounded
+    retrieval set. Story 7.3 makes the final synthesis boundary explicit and,
+    for prompts that explicitly request multi-source synthesis, requires the
+    surviving evidence to span at least two distinct lineages.
+    """
+    evidence = list(candidates)
+    if require_multi_source:
+        lineages = {_lineage_key(chunk) for chunk in evidence}
+        if len(lineages) < _MIN_MULTI_SOURCE_LINEAGES:
+            return []
+    return evidence

@@ -3,6 +3,7 @@ from cos.retrieval.citations import (
     format_citations,
     narrow_to_lineage,
     prune_citations,
+    select_synthesis_evidence,
 )
 
 
@@ -141,6 +142,36 @@ def test_prune_citations_preserves_interleaved_order() -> None:
     assert result[1].source_locator == "loc://b"
     assert result[2].source_locator == "loc://a"
     assert result[2].score == 0.8
+
+
+# ── Evidence-selection tests (Story 7.3) ──────────────────────────────────────
+
+
+def test_select_synthesis_evidence_preserves_candidates_by_default() -> None:
+    chunks = [
+        _make_scored_chunk("loc://a", 0.9, 0),
+        _make_scored_chunk("loc://a", 0.55, 1),
+        _make_scored_chunk("loc://b", 0.50, 0),
+    ]
+    result = select_synthesis_evidence(chunks)
+    assert result == chunks
+
+
+def test_select_synthesis_evidence_requires_two_lineages_for_multi_source_queries() -> None:
+    chunks = [
+        _make_versioned_chunk("loc://a", "ver-001", 0.9, 0),
+        _make_versioned_chunk("loc://a", "ver-001", 0.8, 1),
+    ]
+    assert select_synthesis_evidence(chunks, require_multi_source=True) == []
+
+
+def test_select_synthesis_evidence_keeps_multi_source_set_when_two_lineages_survive() -> None:
+    chunks = [
+        _make_versioned_chunk("loc://a", "ver-001", 0.9, 0),
+        _make_versioned_chunk("loc://b", "ver-002", 0.7, 0),
+    ]
+    result = select_synthesis_evidence(chunks, require_multi_source=True)
+    assert [chunk.source_locator for chunk in result] == ["loc://a", "loc://b"]
 
 
 # ── Lineage narrowing tests (Story 6.14) ──────────────────────────────────────
