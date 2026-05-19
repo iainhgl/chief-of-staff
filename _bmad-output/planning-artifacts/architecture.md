@@ -882,3 +882,99 @@ The following deviations from the architecture spec occurred during Epic 6. Futu
 | 6 | **`cos auth` and `cos sync` sub-command groups added to the CLI** | `cli.py` now has two Typer sub-apps: `auth_app` (commands: `gmail`, `calendar`) and `sync_app` (commands: `gmail`, `calendar`). `cos auth gmail` / `cos auth calendar` must be run on the **host** (not inside the container) because the OAuth consent flow opens a browser on the host. `cos sync gmail` / `cos sync calendar` must be run inside the `cos` container (via `docker compose exec`) because they connect to Postgres using the Docker network hostname `postgres`. |
 | 7 | **`cos migrate` command added for canonical backfill** | `cli.py` exposes `cos migrate`, which calls `backfill_legacy_documents(conn)` in `src/cos/store/db.py`. This command is idempotent and safe to rerun. It creates missing `content_blobs`, `sources`, and `source_versions` rows for pre-Epic-6 path-centric documents, fills `document_versions.content_blob_id`, and links chunks to their current document version. Expected output: `Migration complete: X document(s) backfilled, Y already canonical.` |
 | 8 | **Epic 2 Deviation 4 resolved: `documents.source_path` uniqueness gap addressed by Epic 6 identity model** | Epic 2 Deviation 4 flagged missing `UNIQUE` on `documents.source_path`. The Epic 6 canonical identity model (migration `004_canonical_identity.sql`) adds the `sources` table with a `UNIQUE(source_type, source_locator)` constraint, which enforces per-channel provenance uniqueness. The `documents.source_path` column still exists in the schema as a legacy field for pre-canonical records; it is not the operator-facing identity field in Epic 6. |
+
+## Epic 7 Implementation Notes
+
+Epic 7 added a structured evaluation layer and hardened retrieval trust before Epic 8 growth work begins. Future agents should treat all of the following as implemented baseline — not in-flight work.
+
+### Benchmark Harness and CLI Surface
+
+The `cos benchmark` CLI command (in `src/cos/cli.py`) runs the retrieval evaluation harness:
+
+| Flag | Meaning |
+|---|---|
+| `--config <path>` | Path to a config file. Required when running from the host — `config.yaml` has `database.host: postgres`, which only resolves on the Docker network. Use a host-accessible variant (e.g. `config.host.yaml` with `database.host: localhost`). |
+| `--corpus <path>` | Path to the corpus directory. Default target: `tests/fixtures/retrieval_eval`. |
+| `--output <path>` | Optional path to write a JSON benchmark report. If omitted, no file is written. The committed gold-pass artifact is at `_bmad-output/implementation-artifacts/7-5-benchmark-report.json`. |
+| `--include-fuzz` | Add adversarial/noisy queries from `stress_fuzz/` on top of the gold queries. Fuzz is opt-in diagnostic coverage; a fuzz failure does not gate the release unless the operator explicitly decides to hold on it. |
+
+The benchmark seeds fixture documents, runs all gold queries (and optionally fuzz queries), cleans up fixtures after each run, then prints a human-readable per-class summary to stdout. Exit code 0 when all run queries pass; exit code 1 when any fail.
+
+The authoritative Epic 8 gate is a gold-only run (`--include-fuzz` omitted) on a **clean benchmark database** — one that contains no previously ingested non-fixture documents. Runs against a populated live database are useful diagnostics but are not authoritative gate results because ambient documents participate in retrieval.
+
+The full operator runbook for running the benchmark, interpreting results, and acting on regressions lives in `docs/manual-testing.md` (Test Pack 11 and Pass Criteria: Epic 7).
+
+### Benchmark Report Fields
+
+The JSON report written by `--output` is serialised by `report_to_dict()` in `src/cos/services/retrieval_eval.py`. The current `schema_version` is `"7.4"`. Key report fields:
+
+**Top-level summary:**
+
+| Field | Meaning |
+|---|---|
+| `schema_version` | Report schema version string. |
+| `run_timestamp` | ISO 8601 UTC timestamp of the benchmark run. |
+| `corpus_version` | Hash-derived corpus version — stable across identical corpus files. |
+| `retrieval_settings` | `min_score`, `max_chunks_per_source`, `embedding_provider`, `embedding_model` from the config passed to the run. |
+| `summary.total_queries` | Total queries run in this benchmark. |
+| `summary.passed_queries` | Queries where both recall and citation precision were satisfied. |
+| `summary.overall_pass_rate` | `passed_queries / total_queries`. |
+| `summary.overall_recall` | Fraction of answerable queries where at least one expected lineage source was returned. |
+| `summary.overall_citation_precision` | Average citation precision across all queries where precision is measurable. |
+| `summary.avg_latency_ms` | Average retrieval pipeline latency across all queries (retrieval path only — excludes live LLM synthesis). |
+
+**Per-query fields (in `per_query` list):**
+
+| Field | Meaning |
+|---|---|
+| `query_id` | Stable query identifier from the corpus manifest. |
+| `query_class` | One of: `direct_fact`, `exact_phrase`, `date_timeline`, `single_doc_interpretation`, `cross_doc_synthesis`, `briefing`, `no_answer`. |
+| `pass` | `true` if both recall and citation precision are satisfied. |
+| `latency_ms` | Retrieval pipeline latency for this query in milliseconds. |
+| `expected_lineage` | Source locators the query should have returned. |
+| `actual_lineage` | Source locators the retrieval pipeline actually returned. |
+| `answerability_verdict` | One of: `correct_answer`, `missed_answer`, `correct_no_answer`, `false_answer`. |
+| `failure_stage` | Stage where evidence was lost (only set when `pass=false`). Values: `candidate_selection`, `threshold_filtering`, `pruning`, `top_k_truncation`, `lineage_narrowing`, `evidence_selection`, `context_expansion`, `citation_precision`. |
+| `candidate_counts.keyword` | BM25 search candidates before merging. |
+| `candidate_counts.semantic` | Vector search candidates before merging. |
+| `candidate_counts.merged` | Candidates after RRF merge. |
+| `candidate_counts.post_threshold` | Candidates surviving `min_score` filter. |
+| `candidate_counts.final` | Candidates after top-k truncation. |
+| `candidate_counts.post_lineage` | Anchors after document-first selection (BOUNDED strategy only). |
+| `candidate_counts.expansion_mode` | `"bounded"` for `single_doc_interpretation` queries; `"none"` for all other classes. |
+| `candidate_counts.expanded_context` | Additional chunks retrieved during bounded context expansion (BOUNDED only). |
+| `synthesis_mode` | Always `"not_run"` in the benchmark — synthesis is deterministic retrieval only, no live LLM call. |
+| `trace_id` | UUID generated per query execution. |
+
+### Retrieval-Trust Behaviour Contract
+
+The following behaviours are part of the implemented system contract (not design proposals):
+
+1. **Single-lineage classes** — `direct_fact`, `exact_phrase`, `date_timeline`, and `single_doc_interpretation` queries default to one supporting source lineage. Lineage narrowing (`narrow_to_lineage` in `src/cos/retrieval/citations.py`) selects the best-ranked document after RRF merge as the anchor and discards chunks from other sources.
+
+2. **Multi-source classes** — `cross_doc_synthesis` and `briefing` queries use `select_synthesis_evidence` with `require_multi_source=True`, allowing evidence from multiple approved lineage sources.
+
+3. **Document-first bounded context expansion** — `single_doc_interpretation` queries use the `BOUNDED` strategy (`src/cos/retrieval/strategy.py`). The harness first selects document-first anchors, then calls `expand_bounded_context` (`src/cos/retrieval/context_expansion.py`) to retrieve additional chunks from the same document. This was added in Story 7.4 to recover full document context for multi-chunk documents.
+
+4. **Evidence selection** — After thresholding and pruning, `select_synthesis_evidence` (`src/cos/retrieval/citations.py`) applies a post-search stage that enforces citation precision. Evidence selection runs after lineage narrowing for DEFAULT-strategy queries and after context expansion for BOUNDED-strategy queries.
+
+5. **Insufficient evidence** — When no candidates survive thresholding (`min_score` filter), the retrieval pipeline returns an empty citation set and the answer is `"No relevant content found in the knowledge base."` This is a first-class outcome, not an error.
+
+6. **Score-based thresholding** — The `retrieval.min_score` config key is the primary operator control for the no-answer contract. At the default `0.0`, any result passes regardless of similarity. A value of `0.001–0.02` prunes weak matches while preserving strong ones. See `config.yaml.example` for the RRF score range explanation.
+
+### Corpus Structure
+
+The committed benchmark corpus is at `tests/fixtures/retrieval_eval/`:
+
+```
+retrieval_eval/
+  generated/        Synthetic fixture documents (Markdown). Seeded into Postgres by the harness.
+  generated/manifest.yaml  Fixture metadata: filename, source_locator, source_alias, source_type,
+                            chunk_count (default 1), citation_chunk_index (default 0).
+  gold/             Authoritative release-gate query manifests. All entries must pass on a clean DB.
+  stress_fuzz/      Adversarial/noisy diagnostic queries. Opt-in via --include-fuzz.
+```
+
+Six fixture documents are currently committed. Five are single-chunk; one (`local-performance-policy.md`) uses `chunk_count: 3` and `citation_chunk_index: 1` to test bounded-context retrieval. The `chunk_count` and `citation_chunk_index` fields were added in Story 7.4.
+
+The gold corpus contains eight queries across five query classes. All eight must pass on a clean benchmark database before Epic 8 begins. The fuzz corpus contains five adversarial queries; they are diagnostic only.
