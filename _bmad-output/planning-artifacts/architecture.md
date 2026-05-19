@@ -915,7 +915,7 @@ The JSON report written by `--output` is serialised by `report_to_dict()` in `sr
 | `schema_version` | Report schema version string. |
 | `run_timestamp` | ISO 8601 UTC timestamp of the benchmark run. |
 | `corpus_version` | Hash-derived corpus version — stable across identical corpus files. |
-| `retrieval_settings` | `min_score`, `max_chunks_per_source`, `embedding_provider`, `embedding_model` from the config passed to the run. |
+| `retrieval_settings` | Effective benchmark retrieval settings. `min_score` and `max_chunks_per_source` come from the supplied config; `embedding_provider` and `embedding_model` reflect the benchmark harness override (`benchmark` / `benchmark-static`) used for static fixture embeddings. |
 | `summary.total_queries` | Total queries run in this benchmark. |
 | `summary.passed_queries` | Queries where both recall and citation precision were satisfied. |
 | `summary.overall_pass_rate` | `passed_queries / total_queries`. |
@@ -940,9 +940,9 @@ The JSON report written by `--output` is serialised by `report_to_dict()` in `sr
 | `candidate_counts.merged` | Candidates after RRF merge. |
 | `candidate_counts.post_threshold` | Candidates surviving `min_score` filter. |
 | `candidate_counts.final` | Candidates after top-k truncation. |
-| `candidate_counts.post_lineage` | Anchors after document-first selection (BOUNDED strategy only). |
+| `candidate_counts.post_lineage` | Candidates remaining after lineage selection: winning anchors for BOUNDED queries, or lineage-narrowed chunks for DEFAULT queries. |
 | `candidate_counts.expansion_mode` | `"bounded"` for `single_doc_interpretation` queries; `"none"` for all other classes. |
-| `candidate_counts.expanded_context` | Additional chunks retrieved during bounded context expansion (BOUNDED only). |
+| `candidate_counts.expanded_context` | Total chunks in the bounded synthesis context after expansion (anchors + neighbours, BOUNDED only). |
 | `synthesis_mode` | Always `"not_run"` in the benchmark — synthesis is deterministic retrieval only, no live LLM call. |
 | `trace_id` | UUID generated per query execution. |
 
@@ -950,11 +950,11 @@ The JSON report written by `--output` is serialised by `report_to_dict()` in `sr
 
 The following behaviours are part of the implemented system contract (not design proposals):
 
-1. **Single-lineage classes** — `direct_fact`, `exact_phrase`, `date_timeline`, and `single_doc_interpretation` queries default to one supporting source lineage. Lineage narrowing (`narrow_to_lineage` in `src/cos/retrieval/citations.py`) selects the best-ranked document after RRF merge as the anchor and discards chunks from other sources.
+1. **DEFAULT single-lineage path** — `direct_fact`, `exact_phrase`, `date_timeline`, and `no_answer` queries use the DEFAULT strategy. When retrieval returns candidates, lineage narrowing (`narrow_to_lineage` in `src/cos/retrieval/citations.py`) selects the best-ranked document after RRF merge and discards chunks from other sources.
 
-2. **Multi-source classes** — `cross_doc_synthesis` and `briefing` queries use `select_synthesis_evidence` with `require_multi_source=True`, allowing evidence from multiple approved lineage sources.
+2. **Cross-document vs briefing behaviour** — `cross_doc_synthesis` queries use `select_synthesis_evidence` with `require_multi_source=True`, enforcing evidence from at least two lineage sources. `briefing` queries do not force multi-source evidence; they may return one or more approved lineages depending on what the corpus contains.
 
-3. **Document-first bounded context expansion** — `single_doc_interpretation` queries use the `BOUNDED` strategy (`src/cos/retrieval/strategy.py`). The harness first selects document-first anchors, then calls `expand_bounded_context` (`src/cos/retrieval/context_expansion.py`) to retrieve additional chunks from the same document. This was added in Story 7.4 to recover full document context for multi-chunk documents.
+3. **Document-first bounded context expansion** — `single_doc_interpretation` queries use the `BOUNDED` strategy (`src/cos/retrieval/strategy.py`). Rather than calling `narrow_to_lineage`, the harness first selects document-first anchors with `select_document_first_anchors`, then calls `expand_bounded_context` (`src/cos/retrieval/context_expansion.py`) to retrieve additional chunks from the same document. This was added in Story 7.4 to recover full document context for multi-chunk documents.
 
 4. **Evidence selection** — After thresholding and pruning, `select_synthesis_evidence` (`src/cos/retrieval/citations.py`) applies a post-search stage that enforces citation precision. Evidence selection runs after lineage narrowing for DEFAULT-strategy queries and after context expansion for BOUNDED-strategy queries.
 
@@ -977,4 +977,4 @@ retrieval_eval/
 
 Six fixture documents are currently committed. Five are single-chunk; one (`local-performance-policy.md`) uses `chunk_count: 3` and `citation_chunk_index: 1` to test bounded-context retrieval. The `chunk_count` and `citation_chunk_index` fields were added in Story 7.4.
 
-The gold corpus contains eight queries across five query classes. All eight must pass on a clean benchmark database before Epic 8 begins. The fuzz corpus contains five adversarial queries; they are diagnostic only.
+The gold corpus contains eight queries across all seven benchmark query classes. All eight must pass on a clean benchmark database before Epic 8 begins. The fuzz corpus contains five adversarial queries; they are diagnostic only.

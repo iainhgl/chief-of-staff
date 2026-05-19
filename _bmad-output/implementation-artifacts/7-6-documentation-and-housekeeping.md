@@ -1,6 +1,6 @@
 # Story 7.6: Documentation & Housekeeping
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -240,13 +240,14 @@ The repo already shows several concrete Epic 7 documentation gaps:
 - `tests/fixtures/retrieval_eval/README.md` — corrected fuzz-as-default claim to opt-in, added fixture document schema section documenting `chunk_count` and `citation_chunk_index` fields, renamed Manifest Schema section to Query Manifest Schema
 - `_bmad-output/planning-artifacts/architecture.md` — added `## Epic 7 Implementation Notes` section after Epic 6 notes, documenting benchmark CLI surface, report fields, retrieval-trust behaviour contract, and corpus structure
 - `_bmad-output/planning-artifacts/architecture-diagrams.md` — added `## 7. Epic 7 — Benchmark / Release-Gate Flow` with flowchart diagram and retrieval-trust sequencing diagram; renumbered `OutputRouter` section to `## 8`
-- `_bmad-output/implementation-artifacts/sprint-status.yaml` — updated `last_updated` comment and `7-6` status to `in-progress` → `review`
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` — updated `last_updated` comment and `7-6` status through `review` to `done`
 - `_bmad-output/implementation-artifacts/7-6-documentation-and-housekeeping.md` — story file (this file)
 
 ## Change Log
 
 - 2026-05-19: Story created and sprint status advanced to `ready-for-dev`.
 - 2026-05-19: Story implemented — all five tasks complete; status advanced to `review`.
+- 2026-05-19: Review fixes applied; status advanced to `done`.
 
 ## Dev Agent Record
 
@@ -258,11 +259,19 @@ claude-sonnet-4-6
 
 Pre-existing test failure `test_query_citations_match_pruned_evidence_set` in `tests/services/test_retrieval_eval_service.py` was confirmed to exist on `main` before this story started — not caused by any documentation change.
 
+### Review Findings
+
+- [x] [Review][Patch] Epic 7 notes misstate query-strategy routing for `briefing` and `single_doc_interpretation` [_bmad-output/planning-artifacts/architecture.md:953]
+- [x] [Review][Patch] Epic 7 notes misdescribe benchmark observability fields and corpus taxonomy [_bmad-output/planning-artifacts/architecture.md:918]
+- [x] [Review][Patch] Retrieval-trust sequencing diagram marks Epic 7 as done before sprint tracking does [_bmad-output/planning-artifacts/architecture-diagrams.md:574]
+- [x] [Review][Patch] README benchmark summary still drifts from the actual CLI and release-gate contract [README.md:21]
+
 ### Completion Notes List
 
 - Story context created on 2026-05-19.
 - Sprint status advanced from `backlog` to `ready-for-dev` on 2026-05-19.
 - Implementation complete 2026-05-19.
+- Review fixes applied and story moved to `done` on 2026-05-19.
 
 **Task 1** — `README.md` updated from "Epic 6" to "Epic 7" baseline; `cos benchmark` added as first-class CLI capability; project structure note for `manual-testing.md` corrected from "Epic 6 guide" to "Epic 7 retrieval-trust regression runbook". `docs/setup.md` gained a "Run the Retrieval Benchmark" section pointing operators to the host-side execution requirement and the full runbook. `docs/manual-testing.md` left unchanged — it was already accurate.
 

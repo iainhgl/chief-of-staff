@@ -571,7 +571,7 @@ Epic 7 hardening is the prerequisite for all amplification layers:
 
 ```mermaid
 flowchart LR
-    E7["✅ Epic 7\nRetrieval trust\neval + observability\n(DONE)"]
+    E7["Epic 7\nRetrieval trust\neval + observability"]
     E8["Epic 8\nInteractive Telegram\nmessaging"]
     E9["Epic 9\nStructured LLM boundary\n+ provider portability"]
     E10["Epic 10\nWeb augmentation\n+ external context"]

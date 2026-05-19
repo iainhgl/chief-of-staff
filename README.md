@@ -18,7 +18,7 @@ What is working today:
 - **`cos auth gmail`** / **`cos auth calendar`** — OAuth browser consent flow; run from the **host** so the browser can open; writes token files to `tokens/`
 - **`cos sync gmail`** / **`cos sync calendar`** — poll the connected source for new content and enqueue background ingest jobs; run inside the `cos` container
 - **`cos migrate`** — backfill legacy Phase 1 path-centric documents onto the canonical identity model; safe to rerun; idempotent
-- **`cos benchmark`** — run the retrieval evaluation harness against the committed gold corpus; seeds fixture documents, runs all gold queries, cleans up, then prints a per-class summary and writes a JSON report; run from the **host** with a host-accessible config (`--config config.host.yaml`); gold queries are the authoritative release gate; add `--include-fuzz` for optional adversarial diagnostic coverage; see [docs/manual-testing.md](docs/manual-testing.md) for the full regression runbook
+- **`cos benchmark`** — run the retrieval evaluation harness against the committed gold corpus; seeds fixture documents, runs all gold queries, cleans up, then prints a per-class summary and, when `--output` is supplied, writes a JSON report; run from the **host** with a host-accessible config (`--config config.host.yaml`); gold-only runs on a **clean benchmark database** are the authoritative release gate; add `--include-fuzz` for optional adversarial diagnostic coverage; see [docs/manual-testing.md](docs/manual-testing.md) for the full regression runbook
 - **Background `worker` service** — drains the ingest job queue; connector failures are fault-isolated and do not affect the MCP server or retrieval path
 - **Exact-byte deduplication** — a file, Gmail attachment, Calendar event, and MCP note with identical bytes share one canonical content record; each is preserved as a distinct provenance entry
 - **`retrieve`** — ask questions about ingested documents; returns a synthesised answer grounded in source material with citations in both `data.citations` and top-level `citations` (`source_alias`, `source_locator`, `document_version_id`, `chunk_index`, `score` per citation); handles the no-content case without fabrication
@@ -72,7 +72,7 @@ cos/
 │   └── manual-testing.md     # Epic 7 retrieval-trust regression runbook (also covers Epic 6 UAT packs)
 ├── src/
 │   └── cos/
-│       ├── cli.py            # `cos` CLI entry point (status, restart, logs, ingest, docs, auth, sync, migrate)
+│       ├── cli.py            # `cos` CLI entry point (status, restart, logs, ingest, docs, auth, sync, benchmark, migrate)
 │       ├── config.py         # CosConfig — Pydantic model reads config.yaml at startup
 │       ├── mcp_server/       # FastMCP server — tools and startup sequence
 │       ├── services/         # thin service layer — ingestion, provenance, health, gmail, calendar

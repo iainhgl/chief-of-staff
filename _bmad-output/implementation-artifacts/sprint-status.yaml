@@ -1,5 +1,5 @@
 # generated: 2026-04-17
-# last_updated: 2026-05-19  # story 7.6 review
+# last_updated: 2026-05-19  # story 7.6 done
 # project: CoS
 # project_key: NOKEY
 # tracking_system: file-system
@@ -37,7 +37,7 @@
 # - Epics 1-5 represent the implemented baseline; Epic 6 onward reflects the change-course backlog
 
 generated: 2026-04-17
-last_updated: 2026-05-19  # story 7.6 review
+last_updated: 2026-05-19  # story 7.6 done
 project: CoS
 project_key: NOKEY
 tracking_system: file-system
@@ -143,7 +143,7 @@ development_status:
   7-3-retrieval-evidence-selection-and-citation-precision-hardening: done
   7-4-document-first-retrieval-and-context-expansion: done
   7-5-operator-validation-retrieval-trust-regression-suite: review
-  7-6-documentation-and-housekeeping: review
+  7-6-documentation-and-housekeeping: done
   epic-7-retrospective: optional
 
   # ─────────────────────────────────────────────
