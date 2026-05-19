@@ -1,8 +1,22 @@
 # Manual Testing Guide
 
-Reflects the platform at the end of **Epic 6: Canonical Source Identity & Connected Ingestion**.
+Reflects the platform through **Epic 7: Retrieval Trust, Evaluation & Observability**.
 
 This guide is organized as self-contained test packs. Other than the shared bootstrap for config and platform startup, a tester should be able to open any pack, run its setup, and complete that validation without needing to read a different section first.
+
+---
+
+## Epic 7 Summary
+
+Epic 7 adds a structured evaluation layer and hardens retrieval trust before Epic 8 growth work begins:
+
+- a committed mixed-source evaluation corpus and benchmark harness (`cos benchmark`) with gold and fuzz query layers
+- machine-comparable benchmark reports with failure-stage attribution and per-class latency aggregation
+- evidence selection hardened to enforce citation precision and single-lineage grounding for direct facts
+- document-first routing for `single_doc_interpretation` queries with bounded context expansion
+- `gold-na-001` (pension contribution rate) enforced as a mandatory release gate: the no-answer contract must hold before Epic 8 can start
+
+The primary change to operator validation workflow: before starting Epic 8, run the benchmark harness using the gold corpus as the release gate on a clean benchmark database. Runs against a populated live database are still useful diagnostics, but they are not authoritative gate results. See [Test Pack 11](#test-pack-11-epic-7-retrieval-trust-regression-suite) for the full runbook.
 
 ---
 
@@ -962,7 +976,228 @@ Expected:
 
 ---
 
+---
+
+## Test Pack 11: Epic 7 Retrieval Trust Regression Suite
+
+This pack validates the combined retrieval stack from Stories 7.1–7.4 using the committed evaluation corpus. It must pass before Epic 8 or any later growth work begins.
+
+The benchmark does **not** require connected sources, OAuth tokens, or live LLM synthesis. It needs only the running platform (Postgres accessible) and a copy of the repo on the host.
+
+### Pack-specific setup
+
+The benchmark runs from the **host** against the Docker-backed database. The default `config.yaml` has `database.host: postgres` which only resolves inside the Docker network. Create a host-accessible config variant:
+
+```bash
+cp config.yaml config.host.yaml
+```
+
+Open `config.host.yaml` and change the database host:
+
+```yaml
+database:
+  host: localhost  # was: postgres
+```
+
+`config.host.yaml` is gitignored and must not be committed — it contains your API credentials.
+
+For the authoritative Epic 8 gate, point `config.host.yaml` at a **clean benchmark database**. The simplest path is to run the benchmark before any other UAT/manual ingestion on a fresh stack, or to use a dedicated empty database prepared for benchmark validation. If the configured database already contains previously ingested non-fixture documents, the benchmark still runs, but the result is diagnostic only because ambient documents participate in retrieval.
+
+Confirm the platform is running:
+
+```bash
+docker compose ps
+```
+
+Expected:
+
+- `postgres` is `healthy`
+- `cos` is `healthy`
+
+### Run the gold-corpus benchmark (authoritative gate on a clean benchmark database)
+
+```bash
+uv run cos benchmark \
+  --config config.host.yaml \
+  --corpus tests/fixtures/retrieval_eval \
+  --output _bmad-output/implementation-artifacts/7-5-benchmark-report.json
+```
+
+Expected:
+
+- The benchmark seeds six fixture documents, runs all eight gold queries, then cleans up the fixtures.
+- A human-readable summary prints to stdout, grouped by query class.
+- A JSON report is written to `_bmad-output/implementation-artifacts/7-5-benchmark-report.json`.
+- On a clean benchmark database, this run is the authoritative Epic 8 gate.
+- Exit code 0 when all eight gold queries pass; exit code 1 when any fail.
+
+### Run the fuzz layer (optional diagnostic)
+
+```bash
+uv run cos benchmark \
+  --config config.host.yaml \
+  --corpus tests/fixtures/retrieval_eval \
+  --include-fuzz
+```
+
+The fuzz layer adds five adversarial queries (noisy phrasing, cross-doc noise, near-synonym matching, empty-corpus no-answer). These are diagnostic only; a fuzz failure does not gate the release unless you explicitly decide to hold on them.
+
+### Trust guarantee checks
+
+Inspect the saved JSON report after the gold run completes.
+
+#### Single-lineage direct facts — gold-df-001 and fuzz-df-002
+
+Direct-fact and equivalent queries must resolve to exactly one supporting source. Multi-source answers for a direct-fact query mean lineage narrowing failed.
+
+```bash
+python3 -c "
+import json
+with open('_bmad-output/implementation-artifacts/7-5-benchmark-report.json') as f:
+    r = json.load(f)
+for q in r['per_query']:
+    if q['query_id'] in ('gold-df-001', 'fuzz-df-002'):
+        print(q['query_id'], 'pass=' + str(q['pass']),
+              'actual_lineage=' + str(q['actual_lineage']))
+"
+```
+
+Expected:
+
+- `gold-df-001`: `pass=True`, `actual_lineage` is `['local://local-leave-policy']` only
+- `fuzz-df-002` (fuzz layer only): `pass=True`, `actual_lineage` is `['mcp://note-retention-q4-2024']` only
+
+If either query returns more than one lineage source, or returns the wrong source, check `failure_stage` in the JSON. A `failure_stage` of `lineage_narrowing` means the top-ranked source after RRF was not the expected document.
+
+#### Bounded-context document-first recovery — gold-sdi-002
+
+This query tests Story 7.4's document-first routing and bounded context expansion for a multi-chunk document.
+
+```bash
+python3 -c "
+import json
+with open('_bmad-output/implementation-artifacts/7-5-benchmark-report.json') as f:
+    r = json.load(f)
+for q in r['per_query']:
+    if q['query_id'] == 'gold-sdi-002':
+        print('pass=' + str(q['pass']),
+              'actual_lineage=' + str(q['actual_lineage']))
+        print('failure_stage=' + str(q['failure_stage']))
+        cc = q['candidate_counts']
+        print('expansion_mode=' + str(cc.get('expansion_mode')),
+              'expanded_context=' + str(cc.get('expanded_context')))
+"
+```
+
+Expected: `pass=True`, `actual_lineage` is `['local://local-performance-policy']`, `expansion_mode=bounded`.
+
+Note: The benchmark scores strictly against `citation_chunk_index=1` declared in the corpus manifest for `local-performance-policy.md`. If bounded context expansion returns multiple chunks from the same document and the evidence selection does not narrow to chunk 1, `citation_precision` will drop and the query will fail with `failure_stage=citation_precision`. The source document is still found correctly — only the chunk index matching is strict. This is a known scoring characteristic of multi-chunk fixture documents.
+
+#### Allowed multi-source synthesis — gold-cds-001 and gold-br-001
+
+These queries must return evidence from the expected combination of sources.
+
+```bash
+python3 -c "
+import json
+with open('_bmad-output/implementation-artifacts/7-5-benchmark-report.json') as f:
+    r = json.load(f)
+for q in r['per_query']:
+    if q['query_id'] in ('gold-cds-001', 'gold-br-001'):
+        print(q['query_id'], 'pass=' + str(q['pass']),
+              'actual_lineage=' + str(q['actual_lineage']))
+"
+```
+
+Expected:
+
+- `gold-cds-001`: on a clean benchmark database, `actual_lineage` contains both `local://local-leave-policy` and `gmail://msg-leave-policy-001`, and no additional sources beyond those two
+- `gold-br-001`: `actual_lineage` is a subset of the approved retention sources (`mcp://note-retention-q4-2024`, `calendar://event-q1-review-001`); one or both may appear, but no unapproved source should
+
+If `gold-cds-001` returns additional sources beyond the expected two, the database is not clean enough for an authoritative gate run. The benchmark fixture documents and any live production/UAT content share the same retrieval index. This may reflect ambient data rather than a retrieval logic error, but it still disqualifies the run as the Epic 8 gate; capture it as diagnostic evidence and rerun on a clean benchmark database.
+
+#### No-answer contract — gold-na-001
+
+This is a mandatory release gate. The system must decline to answer when there is no relevant evidence in the corpus.
+
+```bash
+python3 -c "
+import json
+with open('_bmad-output/implementation-artifacts/7-5-benchmark-report.json') as f:
+    r = json.load(f)
+for q in r['per_query']:
+    if q['query_id'] == 'gold-na-001':
+        print('pass=' + str(q['pass']),
+              'verdict=' + q['answerability_verdict'])
+        print('actual_lineage=' + str(q['actual_lineage']))
+"
+```
+
+Expected: `pass=True`, `answerability_verdict=correct_no_answer`, `actual_lineage=[]`.
+
+If `pass=False` with `answerability_verdict=false_answer`, the retrieval system returned a topically-related document (often `local://local-performance-policy`, which has HR-domain overlap with pension-related vocabulary) with a score above the current threshold:
+
+1. Add `retrieval.min_score: 0.005` to `config.host.yaml` (or whichever file you pass to `--config`) — see the retrieval section in `config.yaml.example` for the RRF score range explanation.
+2. Rerun the benchmark.
+
+No restart is required for the benchmark rerun: `cos benchmark` reads the file passed to `--config` directly.
+
+The `min_score` threshold is the primary operator control for the no-answer contract. At the default `min_score: 0.0`, any result passes regardless of similarity. A value in the range `0.001–0.02` prunes weak matches while preserving strong ones.
+
+### Latency review
+
+The PRD target for interactive retrieval is **under 5 seconds** per query.
+
+**Scope of the measurement:** The benchmark measures deterministic retrieval and citation-path latency using static embeddings. It does not include live LLM synthesis latency. The `avg_latency_ms` values in the JSON report represent the retrieval and citation pipeline only — not the full round-trip time an operator sees in the MCP client.
+
+```bash
+python3 -c "
+import json
+with open('_bmad-output/implementation-artifacts/7-5-benchmark-report.json') as f:
+    r = json.load(f)
+target_ms = 5000
+latency_classes = ['direct_fact', 'exact_phrase', 'date_timeline', 'single_doc_interpretation']
+print(f'PRD retrieval target: <{target_ms}ms (retrieval path only, excludes LLM)')
+for c in r['per_class']:
+    if c['query_class'] in latency_classes:
+        status = 'OK' if c['avg_latency_ms'] < target_ms else 'EXCEEDS TARGET'
+        print(f'  [{status}] {c[\"query_class\"]}: {c[\"avg_latency_ms\"]:.0f}ms avg')
+"
+```
+
+If any interactive class exceeds 5000ms, record in the implementation artifact:
+
+1. The query class and observed average latency
+2. The `candidate_counts` from the failing queries (available per query in the JSON)
+3. A likely explanation (database load, index scan size, network round-trip to Docker host)
+4. The decision: accept the gap with documentation before Epic 8 starts, or fix first
+
+### Reading the JSON report
+
+Key fields in `per_query` entries:
+
+| Field | Meaning |
+|-------|---------|
+| `pass` | True if recall and citation precision both satisfied |
+| `answerability_verdict` | `correct_answer`, `missed_answer`, `correct_no_answer`, `false_answer` |
+| `actual_lineage` | Source locators returned by the retrieval pipeline |
+| `expected_lineage` | Source locators the query should have returned |
+| `failure_stage` | Stage where evidence was lost: `candidate_selection`, `threshold_filtering`, `pruning`, `top_k_truncation`, `lineage_narrowing`, `evidence_selection`, `context_expansion`, `citation_precision` |
+| `candidate_counts.keyword` | BM25 search candidates |
+| `candidate_counts.semantic` | Vector search candidates |
+| `candidate_counts.merged` | Candidates after RRF merge |
+| `candidate_counts.post_threshold` | Candidates surviving `min_score` filter |
+| `candidate_counts.final` | Candidates after top-k truncation |
+| `candidate_counts.post_lineage` | Anchors after document-first selection |
+| `candidate_counts.expansion_mode` | `bounded` for `single_doc_interpretation`, `none` for other classes |
+| `candidate_counts.expanded_context` | Additional chunks retrieved during bounded context expansion |
+| `latency_ms` | Retrieval pipeline latency for this query in milliseconds |
+
+---
+
 ## Pass Criteria
+
+### Epic 6 UAT
 
 Epic 6 UAT is a pass when all of the following are true:
 
@@ -999,6 +1234,43 @@ Epic 6 UAT is a pass when all of the following are true:
 - citations include `source_alias` and `source_locator`
 - the cited sources correspond to the seeded local, Gmail, Calendar, or MCP records
 - when `retrieval.min_score` is temporarily raised high enough to filter everything out, `retrieve` returns `No relevant content found in the knowledge base.` with empty citations rather than a weakly grounded answer
+
+### Epic 7 Retrieval Trust Regression
+
+Epic 7 validation is a pass when all of the following are true:
+
+#### 1. Benchmark completes without error
+
+- `uv run cos benchmark --config config.host.yaml --corpus tests/fixtures/retrieval_eval` exits without a Python exception
+- The human-readable summary prints a per-class breakdown to stdout
+- The JSON report is written to the nominated output path
+- The run is executed against a clean benchmark database; if previously ingested non-fixture documents are present, the report is diagnostic only and cannot be used as the Epic 8 gate
+
+#### 2. Gold-corpus pass rate
+
+- All eight gold queries pass (exit code 0) on that clean benchmark database
+- If any gold query fails, the failure is documented in the implementation artifact: query ID, `failure_stage`, `actual_lineage`, and a root-cause note
+
+#### 3. Direct-fact single-lineage contract
+
+- `gold-df-001` passes with `actual_lineage` containing exactly one entry: `local://local-leave-policy`
+- If the fuzz layer is run: `fuzz-df-002` passes with `actual_lineage` containing exactly one entry: `mcp://note-retention-q4-2024`
+
+#### 4. No-answer contract
+
+- `gold-na-001` passes with `answerability_verdict=correct_no_answer` and `actual_lineage=[]`
+- If this fails, `retrieval.min_score` must be set to a positive value (e.g., `0.005`) and the benchmark re-run before Epic 8 begins
+
+#### 5. Latency within target
+
+- All interactive classes (`direct_fact`, `exact_phrase`, `date_timeline`, `single_doc_interpretation`) have `avg_latency_ms < 5000` in the JSON `per_class` breakdown
+- If any class exceeds the target, the observed latency, candidate counts, and likely explanation are recorded in the implementation artifact
+
+#### 6. Evidence captured in artifact
+
+- The benchmark JSON report is saved at a stable path under `_bmad-output/implementation-artifacts/`
+- The story completion notes include the run timestamp, corpus version, pass rate, per-class summary, and any documented exceptions
+- If a populated-database run is captured for diagnostics, the implementation artifact labels it as diagnostic rather than treating it as the Epic 8 gate
 
 ---
 

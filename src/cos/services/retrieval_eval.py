@@ -200,6 +200,7 @@ class RetrievalEvalService:
         )
 
         strategy = select_query_strategy_for_class(query.query_class)
+        strict_query_matching = query.query_class != "briefing"
 
         pre_lineage_cited = list(cited)
         post_lineage_count: int | None = None
@@ -207,10 +208,18 @@ class RetrievalEvalService:
         expanded_context_count: int | None = None
 
         if strategy == QueryStrategy.BOUNDED:
-            anchors = select_document_first_anchors(cited)
+            anchors = select_document_first_anchors(
+                cited,
+                query_text=query.query,
+                strict_matching=strict_query_matching,
+            )
             post_lineage_count = len(anchors)
             expanded = await expand_bounded_context(conn, anchors)
-            evidence = select_synthesis_evidence(expanded.evidence_chunks)
+            evidence = select_synthesis_evidence(
+                expanded.evidence_chunks,
+                query_text=query.query,
+                strict_matching=strict_query_matching,
+            )
             post_evidence_selection_count = len(evidence)
             expansion_mode = "bounded"
             expanded_context_count = len(expanded.synthesis_chunks)
@@ -218,12 +227,22 @@ class RetrievalEvalService:
             evidence = select_synthesis_evidence(
                 cited,
                 require_multi_source=True,
+                query_text=query.query,
+                strict_matching=strict_query_matching,
             )
             post_evidence_selection_count = len(evidence)
         else:  # DEFAULT
-            cited = narrow_to_lineage(cited)
+            cited = narrow_to_lineage(
+                cited,
+                query_text=query.query,
+                strict_matching=strict_query_matching,
+            )
             post_lineage_count = len(cited)
-            evidence = select_synthesis_evidence(cited)
+            evidence = select_synthesis_evidence(
+                cited,
+                query_text=query.query,
+                strict_matching=strict_query_matching,
+            )
             post_evidence_selection_count = len(evidence)
 
         candidate_counts: dict[str, Any] = {
@@ -275,7 +294,11 @@ class RetrievalEvalService:
                     score_query(
                         query,
                         (
-                            select_document_first_anchors(pre_lineage_cited)
+                            select_document_first_anchors(
+                                pre_lineage_cited,
+                                query_text=query.query,
+                                strict_matching=strict_query_matching,
+                            )
                             if pre_lineage_cited
                             else []
                         ),

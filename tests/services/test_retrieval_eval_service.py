@@ -904,8 +904,29 @@ _EVIDENCE_SELECT_PATCH = "cos.services.retrieval_eval.select_synthesis_evidence"
 
 
 def _make_benchmark_chunk(source_locator: str, doc_version_id: str = "") -> CitedChunk:
+    content_by_locator = {
+        "calendar://event-q1-review-001": (
+            "The Q1 business review concluded attrition remains above target."
+        ),
+        "gmail://msg-leave-policy-001": (
+            "Email summary of the leave policy update effective from 2025-01-15."
+        ),
+        "local://leave-policy": (
+            "The leave policy gives employees 25 days of annual leave."
+        ),
+        "local://local-leave-policy": (
+            "The leave policy gives employees 25 days of annual leave."
+        ),
+        "local://local-performance-policy": (
+            "The performance policy defines the Below Expectations protocol."
+        ),
+        "local://local-succession-plan": (
+            "The succession plan uses a 9-box grid methodology and sets the timeline."
+        ),
+        "local://unexpected": "Unrelated policy content.",
+    }
     return CitedChunk(
-        content=f"content from {source_locator}",
+        content=content_by_locator.get(source_locator, f"content from {source_locator}"),
         source_document_id="12345678-1234-1234-1234-123456789012",
         source_alias=source_locator,
         source_locator=source_locator,
