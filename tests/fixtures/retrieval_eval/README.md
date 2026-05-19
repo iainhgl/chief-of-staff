@@ -16,11 +16,33 @@ retrieval_eval/
 - **gold/**: Query manifests in YAML. These are the authoritative benchmark cases.
   Each entry maps directly to the query-class taxonomy defined in the harness.
 - **stress_fuzz/**: Additional YAML manifests with adversarial inputs (noisy phrasing,
-  misleading topic overlap, empty-corpus cases). Included in full benchmark runs.
+  misleading topic overlap, empty-corpus cases). Included only when `--include-fuzz` is
+  passed to `cos benchmark`. The default (gold-only) run is the authoritative release gate;
+  fuzz is opt-in diagnostic coverage.
 
-## Manifest Schema
+## Fixture Document Schema (generated/manifest.yaml)
 
-Each YAML manifest contains a top-level `queries` list. Every item must have:
+The `generated/manifest.yaml` file lists the fixture documents seeded into Postgres for each benchmark run. Every entry must have:
+
+```yaml
+documents:
+  - filename: string               # filename within generated/ (e.g. local-leave-policy.md)
+    source_locator: string         # stable source URI used as the citation lineage key
+    source_alias: string           # human-readable source label (matches source_locator for fixtures)
+    source_type: string            # one of: local, gmail, google_calendar, mcp_note
+    chunk_count: int               # optional; default 1. When >1, the harness splits the document
+                                   # into chunk_count roughly equal chunks for multi-chunk seeding.
+                                   # Use for documents that test bounded-context retrieval.
+    citation_chunk_index: int      # optional; default 0. The chunk index the gold query is expected
+                                   # to cite. The harness scores citation_precision strictly against
+                                   # this index. Only meaningful when chunk_count > 1.
+```
+
+The `chunk_count` and `citation_chunk_index` fields were added in Story 7.4 to support multi-chunk fixture documents for `single_doc_interpretation` query testing. The `local-performance-policy.md` fixture uses `chunk_count: 3` and `citation_chunk_index: 1`; the benchmark scores the `gold-sdi-002` query strictly against chunk index 1.
+
+## Query Manifest Schema
+
+Each YAML manifest in `gold/` or `stress_fuzz/` contains a top-level `queries` list. Every item must have:
 
 ```yaml
 queries:

@@ -2,7 +2,7 @@
 
 A personal AI platform that acts as a Chief of Staff for a specific role — retaining knowledge in a structured store and reasoning over it to answer questions grounded in source material.
 
-## Current Capabilities (Epic 6)
+## Current Capabilities (Epic 7)
 
 What is working today:
 
@@ -18,6 +18,7 @@ What is working today:
 - **`cos auth gmail`** / **`cos auth calendar`** — OAuth browser consent flow; run from the **host** so the browser can open; writes token files to `tokens/`
 - **`cos sync gmail`** / **`cos sync calendar`** — poll the connected source for new content and enqueue background ingest jobs; run inside the `cos` container
 - **`cos migrate`** — backfill legacy Phase 1 path-centric documents onto the canonical identity model; safe to rerun; idempotent
+- **`cos benchmark`** — run the retrieval evaluation harness against the committed gold corpus; seeds fixture documents, runs all gold queries, cleans up, then prints a per-class summary and, when `--output` is supplied, writes a JSON report; run from the **host** with a host-accessible config (`--config config.host.yaml`); gold-only runs on a **clean benchmark database** are the authoritative release gate; add `--include-fuzz` for optional adversarial diagnostic coverage; see [docs/manual-testing.md](docs/manual-testing.md) for the full regression runbook
 - **Background `worker` service** — drains the ingest job queue; connector failures are fault-isolated and do not affect the MCP server or retrieval path
 - **Exact-byte deduplication** — a file, Gmail attachment, Calendar event, and MCP note with identical bytes share one canonical content record; each is preserved as a distinct provenance entry
 - **`retrieve`** — ask questions about ingested documents; returns a synthesised answer grounded in source material with citations in both `data.citations` and top-level `citations` (`source_alias`, `source_locator`, `document_version_id`, `chunk_index`, `score` per citation); handles the no-content case without fabrication
@@ -29,7 +30,7 @@ What is working today:
 - **`cos restart`** — single command that restarts all services and polls until every container is healthy; prints confirmation or names the stuck component; run from the host: `uv run cos restart`
 - **`cos logs`** — single command log export; supports optional component filter and `--since <duration>` for time filtering; run from the host: `uv run cos logs`
 
-Knowledge retrieval and Q&A with citations are working. Role identity is configuration-only — author a YAML file and point `config.yaml` at it; no code changes are required. See [docs/role-packs.md](docs/role-packs.md) for the authoring guide. The platform can be monitored, restarted, and diagnosed using plain-language CLI commands — see [docs/setup.md](docs/setup.md) for the operations reference.
+Knowledge retrieval and Q&A with citations are working. Role identity is configuration-only — author a YAML file and point `config.yaml` at it; no code changes are required. See [docs/role-packs.md](docs/role-packs.md) for the authoring guide. The platform can be monitored, restarted, and diagnosed using plain-language CLI commands — see [docs/setup.md](docs/setup.md) for the operations reference. Retrieval quality is validated via a committed benchmark corpus and the `cos benchmark` command; see [docs/manual-testing.md](docs/manual-testing.md) for the regression runbook.
 
 ## How it Works
 
@@ -68,10 +69,10 @@ cos/
 │   ├── setup.md              # setup, operations, and querying guide
 │   ├── migration.md          # migration/backfill guide for existing Phase 1 stores
 │   ├── role-packs.md         # role pack authoring guide and field reference
-│   └── manual-testing.md     # end-to-end Epic 6 operator UAT guide
+│   └── manual-testing.md     # Epic 7 retrieval-trust regression runbook (also covers Epic 6 UAT packs)
 ├── src/
 │   └── cos/
-│       ├── cli.py            # `cos` CLI entry point (status, restart, logs, ingest, docs, auth, sync, migrate)
+│       ├── cli.py            # `cos` CLI entry point (status, restart, logs, ingest, docs, auth, sync, benchmark, migrate)
 │       ├── config.py         # CosConfig — Pydantic model reads config.yaml at startup
 │       ├── mcp_server/       # FastMCP server — tools and startup sequence
 │       ├── services/         # thin service layer — ingestion, provenance, health, gmail, calendar

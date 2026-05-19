@@ -530,7 +530,64 @@ flowchart LR
 
 ---
 
-## 7. OutputRouter — Egress Control Logic
+## 7. Epic 7 — Benchmark / Release-Gate Flow
+
+Epic 7 is the retrieval-trust gate that must pass before Epic 8 (Telegram) or any later growth work begins. The diagram below shows the operator benchmark execution flow and how the release gate is evaluated.
+
+```mermaid
+flowchart TD
+    OP[Operator runs benchmark\nuv run cos benchmark\n--config config.host.yaml\n--corpus tests/fixtures/retrieval_eval\n--output report.json]
+
+    SEED[Harness seeds 6 fixture\ndocuments into Postgres\nvia static embeddings]
+
+    GOLD[Run 8 gold queries\ndirect_fact · exact_phrase\ndate_timeline · single_doc_interpretation\ncross_doc_synthesis · briefing · no_answer]
+
+    FUZZ{--include-fuzz?}
+    FUZZ_RUN[Run 5 fuzz queries\nnoisy phrasing · cross-doc noise\nnear-synonym · empty-corpus]
+    FUZZ_DIAG[Fuzz failures: diagnostic only\nnot release-gating]
+
+    CLEANUP[Harness cleans up\nfixture documents]
+
+    SCORE[Score each query:\nrecall · citation_precision\nanswerability_verdict\nfailure_stage if failed]
+
+    REPORT[Write JSON report\nschema_version · run_timestamp\ncorpus_version · per_query · per_class\nretrieval_settings]
+
+    CLEAN_DB{Clean benchmark\ndatabase?}
+    GATE_PASS[All 8 gold pass +\nclean DB → Epic 8 gate satisfied]
+    GATE_DIAG[Populated DB run →\ndiagnostic only\nlabel artifact accordingly]
+
+    OP --> SEED --> GOLD
+    GOLD --> FUZZ
+    FUZZ -- yes --> FUZZ_RUN --> FUZZ_DIAG --> CLEANUP
+    FUZZ -- no --> CLEANUP
+    CLEANUP --> SCORE --> REPORT --> CLEAN_DB
+    CLEAN_DB -- yes --> GATE_PASS
+    CLEAN_DB -- no --> GATE_DIAG
+```
+
+### Retrieval-Trust Sequencing
+
+Epic 7 hardening is the prerequisite for all amplification layers:
+
+```mermaid
+flowchart LR
+    E7["Epic 7\nRetrieval trust\neval + observability"]
+    E8["Epic 8\nInteractive Telegram\nmessaging"]
+    E9["Epic 9\nStructured LLM boundary\n+ provider portability"]
+    E10["Epic 10\nWeb augmentation\n+ external context"]
+    E11["Epic 11\nProactive briefings\n+ meeting prep"]
+    E14["Epic 14\nAdvanced retrieval modes\n(benchmark-gated)"]
+
+    E7 -->|"benchmark gate\nmust pass"| E8
+    E8 --> E9 --> E10 --> E11
+    E7 -.->|"benchmark-gated\nafter E9–E11"| E14
+```
+
+Epic 7 must land before Telegram messaging, web augmentation, and proactive scheduling. Advanced retrieval modes (Epic 14) are explicitly benchmark-gated and come after the full growth sequence.
+
+---
+
+## 8. OutputRouter — Egress Control Logic
 
 The OutputRouter is the single enforcement point for NFR7 (fail-closed egress). This diagram shows its decision logic.
 

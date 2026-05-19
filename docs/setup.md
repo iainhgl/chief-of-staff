@@ -563,6 +563,35 @@ All five rows should show `✓` icons. The platform is ready to accept queries a
 
 ---
 
+### Run the Retrieval Benchmark
+
+The `cos benchmark` command validates retrieval quality against the committed gold corpus. It seeds fixture documents, runs all gold queries, cleans up, then prints a per-class summary and writes a JSON report.
+
+Run from the **host** (not inside the container). The default `config.yaml` uses `database.host: postgres`, which only resolves inside the Docker network. Create a host-accessible config variant first:
+
+```bash
+cp config.yaml config.host.yaml
+```
+
+Open `config.host.yaml` and change the database host to `localhost`. `config.host.yaml` is gitignored and must not be committed — it contains your API credentials.
+
+Then run the benchmark:
+
+```bash
+uv run cos benchmark \
+  --config config.host.yaml \
+  --corpus tests/fixtures/retrieval_eval \
+  --output _bmad-output/implementation-artifacts/7-5-benchmark-report.json
+```
+
+For the authoritative release-gate result, run on a **clean benchmark database** — one that contains no previously ingested non-fixture documents. Runs against a populated live database are useful diagnostics but are not authoritative gate results.
+
+For optional adversarial diagnostic coverage, add `--include-fuzz`. Fuzz failures do not gate the release unless you explicitly decide to hold on them.
+
+See [manual-testing.md](manual-testing.md) for the full benchmark-execution and regression-interpretation runbook, including per-query trust guarantee checks, latency review, and pass criteria.
+
+---
+
 ### Sending logs for support
 
 If you need to share diagnostic information, capture the last 10 minutes of logs from all containers:

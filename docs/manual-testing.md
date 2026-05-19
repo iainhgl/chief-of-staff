@@ -2,27 +2,47 @@
 
 Reflects the platform through **Epic 7: Retrieval Trust, Evaluation & Observability**.
 
-This guide is organized as self-contained test packs. Other than the shared bootstrap for config and platform startup, a tester should be able to open any pack, run its setup, and complete that validation without needing to read a different section first.
+This guide now treats **Epic 7 retrieval-trust validation as the default UAT path**. If you only run one check before signing off a retrieval change, run [Test Pack 11](#test-pack-11-epic-7-retrieval-trust-regression-suite) on a clean benchmark database.
+
+The connected-ingestion and operational packs are still active regression packs for the parts of the product that Test Pack 11 does not cover. Use them when your change touches live source onboarding, provenance, queueing, restart behavior, or MCP note flows.
+
+Other than the shared bootstrap for config and platform startup, each pack is meant to stand on its own: you should be able to open the relevant pack, run its setup, and complete that validation without reading the whole file front to back.
 
 ---
 
-## Epic 7 Summary
+## Current Product State
 
-Epic 7 adds a structured evaluation layer and hardens retrieval trust before Epic 8 growth work begins:
+In plain English, the product today can:
+
+- ingest local files, Gmail messages and attachments, Google Calendar events, and MCP-authored notes
+- preserve where every piece of content came from, including version history and cross-source deduplication
+- expose retrieval APIs that later user-facing workflows can use for grounded answers and citations
+- apply score-threshold controls so unsupported questions can fall back to no-answer behavior
+- measure retrieval quality with a committed benchmark corpus and a repeatable CLI gate
+
+Important scope note: [Test Pack 11](#test-pack-11-epic-7-retrieval-trust-regression-suite) proves retrieval evidence selection, lineage control, no-answer handling, and retrieval-path latency on the benchmark corpus. It does **not** on its own prove Google OAuth, background queueing, restart persistence, or live assistant wording.
+
+From a normal operator's perspective, Epic 7 changes the question from "does the product seem to work?" to "can I prove the retrieval layer is trustworthy before I rely on it in more user-facing behavior?"
+
+---
+
+## What Epic 7 Added
+
+Epic 7 adds a structured evaluation layer and hardens retrieval trust:
 
 - a committed mixed-source evaluation corpus and benchmark harness (`cos benchmark`) with gold and fuzz query layers
 - machine-comparable benchmark reports with failure-stage attribution and per-class latency aggregation
 - evidence selection hardened to enforce citation precision and single-lineage grounding for direct facts
 - document-first routing for `single_doc_interpretation` queries with bounded context expansion
-- `gold-na-001` (pension contribution rate) enforced as a mandatory release gate: the no-answer contract must hold before Epic 8 can start
+- `gold-na-001` (pension contribution rate) enforced as a mandatory release-gate check for retrieval-trust sign-off
 
-The primary change to operator validation workflow: before starting Epic 8, run the benchmark harness using the gold corpus as the release gate on a clean benchmark database. Runs against a populated live database are still useful diagnostics, but they are not authoritative gate results. See [Test Pack 11](#test-pack-11-epic-7-retrieval-trust-regression-suite) for the full runbook.
+The primary change to operator validation workflow: before signing off a retrieval change, run the benchmark harness using the gold corpus as the release gate on a clean benchmark database. Runs against a populated live database are still useful diagnostics, but they are not authoritative gate results. See [Test Pack 11](#test-pack-11-epic-7-retrieval-trust-regression-suite) for the full runbook.
 
 ---
 
-## Epic 6 Summary
+## Supporting Product Capabilities Still Worth Smoke Testing
 
-Epic 6 turns the platform from a local-document knowledge base into a connected-ingestion system with a durable provenance model:
+The current product state still includes the Epic 6 connected-ingestion and provenance model. These capabilities remain worth smoke testing when you change ingestion, provenance, operations, or MCP note flows:
 
 - canonical identity is based on content blobs, not raw file paths
 - exact-byte deduplication works across local files, Gmail, Google Calendar, and MCP note ingest
@@ -35,13 +55,56 @@ Epic 6 turns the platform from a local-document knowledge base into a connected-
 
 ---
 
+## How to Use This Guide
+
+Use one of these paths:
+
+1. **Default UAT path for retrieval changes**  
+   Start with [Test Pack 11](#test-pack-11-epic-7-retrieval-trust-regression-suite). This is the primary Epic 7 UAT path and the first check to run whenever retrieval behavior changes.
+
+2. **Connected-source regression after ingestion or provenance changes**  
+   Run the shared bootstrap, then only the supporting packs that match what changed:
+   local ingest, Gmail, Calendar, MCP note ingest, dedupe, versioning, retrieval, or restart.
+
+3. **Full operator confidence pass**  
+   Run Test Pack 11 first, then add the supporting packs that represent the live user journeys you care about in this environment.
+
+---
+
+## Test Pack Index
+
+| Pack | When to run | In plain English, what this is testing |
+|---|---|---|
+| **11** | Every release-gate pass | Can the assistant retrieve the right evidence, stay grounded to the right source, refuse unsupported answers, and stay fast enough? |
+| **1** | After local ingest changes | Can I still drop files into the system and see them show up correctly? |
+| **2** | After Gmail/auth/queue changes | Can I connect Gmail, sync messages, and trust background ingest plus provenance? |
+| **3** | After Calendar/auth/queue changes | Can I connect Calendar, sync events, and see them preserved correctly? |
+| **4** | After MCP first-ingest changes | Can I save a note from Claude into the platform? |
+| **5** | After MCP idempotency changes | If I send the same note twice, does the platform avoid duplicate versions? |
+| **6** | After dedupe or canonical-identity changes | If the same bytes arrive through different channels, does the platform keep one canonical content record but separate provenance rows? |
+| **7** | After similarity-warning changes | Does the platform warn about near-duplicates without blocking normal work? |
+| **8** | After versioning changes | If I update a note, does the platform create a new version and keep the old one? |
+| **9** | After retrieval changes on live connected content | Can a normal user ask grounded questions across mixed sources and get the right citations? |
+| **10** | After restart/token/runtime changes | Can the platform restart cleanly without making me reconnect everything? |
+| **Final spot checks** | After Packs 1-10 when you want a quick final sanity check | Does the database now contain the source mix, provenance rows, and dedupe shape I expect? |
+
+---
+
 ## Shared Prerequisites
+
+Needed for all packs:
 
 - Docker Desktop or Rancher Desktop running
 - `uv` installed
 - working directory is the repo root: `cos/`
 - live Anthropic and Voyage credentials in `config.yaml`
+
+Needed only for connected-source packs:
+
 - a real Google account you can safely use for Gmail and Calendar UAT
+
+Needed only for MCP packs:
+
 - Claude Code or Claude Desktop available for the live MCP tests
 
 Important runtime rule:
@@ -64,7 +127,9 @@ Copy the template if needed:
 cp config.yaml.example config.yaml
 ```
 
-For Epic 6 UAT, make sure these areas are populated:
+If you are running only the Epic 7 benchmark gate, you mainly need a valid bootable config plus a host-side config copy such as `config.host.yaml` for the benchmark command. You do not need Google OAuth or backfilled live data for that path.
+
+If you are running the connected-source and MCP supporting packs, make sure these areas are populated:
 
 ```yaml
 llm:
@@ -105,15 +170,9 @@ Notes:
 
 - if your `database.host` is `postgres` and `tika.url` is `http://tika:9998`, DB-backed CLI commands should be run inside the `cos` container
 - if you want a more forgiving near-duplicate UAT pass, temporarily lower `mcp_note.near_duplicate_threshold` to `0.90`
+- if you are doing a benchmark-only Epic 7 gate, you can skip the Google API and backfill steps below until you actually need connected-source flows
 
-### 2. Enable Google APIs
-
-In the Google Cloud project behind your OAuth desktop client, enable:
-
-- Gmail API
-- Google Calendar API
-
-### 3. Start the platform
+### 2. Start the platform
 
 ```bash
 docker compose up -d
@@ -127,19 +186,7 @@ Expected:
 - `cos` is `healthy`
 - `worker` is `Up`
 
-### 4. Optional: backfill pre-Epic-6 data
-
-If this environment already contains older local-only data, run the canonical backfill once:
-
-```bash
-docker compose exec cos uv run cos migrate
-```
-
-Expected:
-
-- a success message reports how many documents were backfilled vs already canonical
-
-### 5. Verify health
+### 3. Verify health
 
 ```bash
 docker compose logs cos --tail=30
@@ -153,11 +200,31 @@ Expected:
 - `worker` logs show `worker starting`
 - `cos status` reports the platform as healthy
 
+### 4. Enable Google APIs (connected-source packs only)
+
+In the Google Cloud project behind your OAuth desktop client, enable:
+
+- Gmail API
+- Google Calendar API
+
+### 5. Optional: backfill older local-only data for live connected-content packs
+
+If this environment already contains older local-only data, run the canonical backfill once:
+
+```bash
+docker compose exec cos uv run cos migrate
+```
+
+Expected:
+
+- a success message reports how many documents were backfilled vs already canonical
+- do **not** run this before an authoritative Test Pack 11 gate on a clean benchmark database; it adds ambient content to retrieval
+
 ---
 
 ## Test Pack 1: Local File Ingest Still Works
 
-This pack proves the Epic 6 provenance contract did not break local ingest.
+Plain English: if you drop a couple of files into the platform, they should ingest cleanly and show up as local documents with sensible metadata.
 
 ### Pack-specific setup
 
@@ -194,7 +261,7 @@ Expected:
 
 ## Test Pack 2: Gmail OAuth, Sync, Queue Drain, and Provenance
 
-This pack validates Gmail auth, sync, worker processing, and Gmail provenance rows.
+Plain English: can you connect Gmail once, sync labelled mail, and trust the platform to ingest it in the background without losing provenance?
 
 ### Pack-specific setup
 
@@ -331,7 +398,7 @@ Expected: the summary shows body and attachment jobs enqueued again, with `0 art
 
 ## Test Pack 3: Google Calendar OAuth, Sync, and Provenance
 
-This pack validates Calendar auth, sync, and Calendar provenance rows.
+Plain English: can you connect Calendar, ingest events, and see them preserved as real knowledge-base records?
 
 ### Pack-specific setup
 
@@ -404,7 +471,7 @@ Expected:
 
 ## Test Pack 4: MCP `ingest_document` First Ingest
 
-This pack validates the base MCP note-ingest path.
+Plain English: can a normal user save a new note from Claude into the platform?
 
 ### Pack-specific setup
 
@@ -442,7 +509,7 @@ Expected:
 
 ## Test Pack 5: MCP Unchanged Retry / Idempotency
 
-This pack proves identical note ingest with the same stable identity becomes `unchanged`.
+Plain English: if you accidentally send the same note twice, the platform should recognise that and avoid creating duplicate versions.
 
 ### Pack-specific setup
 
@@ -490,7 +557,7 @@ Expected:
 
 ## Test Pack 6: Cross-Source Exact-Byte Dedupe
 
-This pack proves one byte-identical artifact can survive as distinct `file`, `gmail_attachment`, and `mcp_note` provenance rows while collapsing to one canonical content record.
+Plain English: if the same bytes arrive through different channels, the platform should keep separate provenance rows but only one canonical content record.
 
 ### Pack-specific setup
 
@@ -582,7 +649,7 @@ Expected:
 
 ## Test Pack 7: Near-Duplicate Warning
 
-This pack validates warning-only near-duplicate detection.
+Plain English: if you submit a very similar note, the platform should warn you without blocking normal work.
 
 ### Pack-specific setup
 
@@ -644,7 +711,7 @@ Expected:
 
 ## Test Pack 8: Changed Content and Version History
 
-This pack proves updated content for a stable `external_id` creates a new `document_version` while keeping history intact.
+Plain English: if you update an existing note, the platform should create a new version and preserve the older one.
 
 ### Pack-specific setup
 
@@ -704,7 +771,7 @@ Expected:
 
 ## Test Pack 9: Retrieval Across Mixed Sources
 
-This pack validates grounded retrieval and citations across local, Gmail, Calendar, and MCP-ingested content.
+Plain English: can a normal user ask grounded questions across local files, Gmail, Calendar, and MCP notes and get the right citations back?
 
 ### Pack-specific setup
 
@@ -807,7 +874,7 @@ Expected:
 - citations include `source_alias` and `source_locator`
 - the cited aliases and locators correspond to the seeded Gmail, Calendar, MCP, or local records
 
-### Story 6.14 grounding spot checks
+### Single-lineage grounding spot checks (Story 6.14)
 
 In the same MCP client session, ask a direct factual question about the
 leave-policy email:
@@ -831,7 +898,7 @@ Expected:
 - the compare query citations include both the Gmail leave-policy record and the local leave-policy file
 - the compare query does not pull in unrelated seeded records such as the Calendar event or the workforce-planning MCP note
 
-### Story 6.13 threshold fallback spot check
+### No-answer threshold fallback spot check (Story 6.13)
 
 Temporarily raise the retrieval threshold high enough that no result can
 survive filtering.
@@ -869,7 +936,7 @@ the `cos` container again before moving on to the restart pack.
 
 ## Test Pack 10: Restart and Token Persistence
 
-This pack validates token persistence and deterministic post-restart sync behavior.
+Plain English: after a restart, the platform should come back healthy without making you reconnect Gmail or Calendar.
 
 ### Pack-specific setup
 
@@ -937,6 +1004,8 @@ Expected:
 
 ## Final Operator Spot Checks
 
+Plain English: this is the quick sanity check that the database now contains the source mix and dedupe shape you expect after the supporting packs.
+
 Run these from the host or container as shown:
 
 ```bash
@@ -974,15 +1043,43 @@ Expected:
 - `content_blobs` count is less than or equal to the total number of sources
 - `total_sources` is greater than `total_blobs` and `total_documents` if any dedupe occurred across sources
 
----
-
----
-
 ## Test Pack 11: Epic 7 Retrieval Trust Regression Suite
 
-This pack validates the combined retrieval stack from Stories 7.1–7.4 using the committed evaluation corpus. It must pass before Epic 8 or any later growth work begins.
+Plain English: this is the release-gate check for retrieval trust. It answers the question, "if a user asks for a fact, a document-reading question, a comparison, a briefing request, or a no-answer case, does the retrieval layer pull the right evidence and avoid bluffing before any final prose is written?"
+
+Technically, this pack validates the combined retrieval stack from Stories 7.1 through 7.5 using the committed evaluation corpus. It is a retrieval-trust gate, not a full connected-source or live-synthesis end-to-end test.
+
+### What a normal user is really checking
+
+In user terms, this pack is checking what the system would have in hand before it writes the final answer:
+
+- **Direct questions stay grounded to one source.** If one document says `20 days` and another says `25 days`, retrieval should not pull both as the basis for a simple fact answer.
+- **Document-reading questions keep enough same-document context.** If the answer depends on the middle of a longer document, retrieval should pull enough surrounding context from that document to support an accurate answer later.
+- **Compare and briefing prompts broaden only when appropriate.** Retrieval can collect multiple sources for a compare request, but it should not widen scope unnecessarily.
+- **No-answer prompts stay honest.** If the knowledge base does not contain the answer, retrieval should return no good evidence rather than a misleading near match.
+- **Retrieval remains fast enough to support interactive use.**
+
+### What each benchmark class means in user terms
+
+| Query class | In plain English |
+|---|---|
+| `direct_fact` | "Answer one concrete factual question from the right source." |
+| `exact_phrase` | "Find the exact wording I remember." |
+| `date_timeline` | "Pull the right date or time-based fact." |
+| `single_doc_interpretation` | "Understand one document well enough to answer a context-dependent question." |
+| `cross_doc_synthesis` | "Compare or combine multiple sources because I explicitly asked for it." |
+| `briefing` | "Gather the evidence for a short grounded brief, even if only one strong source is available." |
+| `no_answer` | "Tell me there is no evidence instead of making something up." |
 
 The benchmark does **not** require connected sources, OAuth tokens, or live LLM synthesis. It needs only the running platform (Postgres accessible) and a copy of the repo on the host.
+
+At a high level, think of this pack as checking three retrieval promises:
+
+- **"Use the right evidence."**
+- **"Do not blend sources unless I asked you to."**
+- **"Do not make up answers when the evidence is missing."**
+
+It does not, by itself, say anything about Gmail auth, Calendar sync, worker durability, or final assistant phrasing. Use the supporting packs for those.
 
 ### Pack-specific setup
 
@@ -1001,7 +1098,7 @@ database:
 
 `config.host.yaml` is gitignored and must not be committed — it contains your API credentials.
 
-For the authoritative Epic 8 gate, point `config.host.yaml` at a **clean benchmark database**. The simplest path is to run the benchmark before any other UAT/manual ingestion on a fresh stack, or to use a dedicated empty database prepared for benchmark validation. If the configured database already contains previously ingested non-fixture documents, the benchmark still runs, but the result is diagnostic only because ambient documents participate in retrieval.
+For the authoritative retrieval-trust gate, point `config.host.yaml` at a **clean benchmark database**. The simplest path is to run the benchmark before any other UAT/manual ingestion on a fresh stack, or to use a dedicated empty database prepared for benchmark validation. If the configured database already contains previously ingested non-fixture documents, the benchmark still runs, but the result is diagnostic only because ambient documents participate in retrieval.
 
 Confirm the platform is running:
 
@@ -1028,7 +1125,7 @@ Expected:
 - The benchmark seeds six fixture documents, runs all eight gold queries, then cleans up the fixtures.
 - A human-readable summary prints to stdout, grouped by query class.
 - A JSON report is written to `_bmad-output/implementation-artifacts/7-5-benchmark-report.json`.
-- On a clean benchmark database, this run is the authoritative Epic 8 gate.
+- On a clean benchmark database, this run is the authoritative retrieval-trust gate.
 - Exit code 0 when all eight gold queries pass; exit code 1 when any fail.
 
 ### Run the fuzz layer (optional diagnostic)
@@ -1095,7 +1192,7 @@ Note: The benchmark scores strictly against `citation_chunk_index=1` declared in
 
 #### Allowed multi-source synthesis — gold-cds-001 and gold-br-001
 
-These queries must return evidence from the expected combination of sources.
+These queries check the two allowed multi-source behaviours: explicit comparison must use the requested sources, while briefing may use one or more approved sources depending on what is actually relevant.
 
 ```bash
 python3 -c "
@@ -1114,7 +1211,7 @@ Expected:
 - `gold-cds-001`: on a clean benchmark database, `actual_lineage` contains both `local://local-leave-policy` and `gmail://msg-leave-policy-001`, and no additional sources beyond those two
 - `gold-br-001`: `actual_lineage` is a subset of the approved retention sources (`mcp://note-retention-q4-2024`, `calendar://event-q1-review-001`); one or both may appear, but no unapproved source should
 
-If `gold-cds-001` returns additional sources beyond the expected two, the database is not clean enough for an authoritative gate run. The benchmark fixture documents and any live production/UAT content share the same retrieval index. This may reflect ambient data rather than a retrieval logic error, but it still disqualifies the run as the Epic 8 gate; capture it as diagnostic evidence and rerun on a clean benchmark database.
+If `gold-cds-001` returns additional sources beyond the expected two, the database is not clean enough for an authoritative gate run. The benchmark fixture documents and any live production/UAT content share the same retrieval index. This may reflect ambient data rather than a retrieval logic error, but it still disqualifies the run as the authoritative retrieval-trust gate; capture it as diagnostic evidence and rerun on a clean benchmark database.
 
 #### No-answer contract — gold-na-001
 
@@ -1165,14 +1262,22 @@ for c in r['per_class']:
 "
 ```
 
-If any interactive class exceeds 5000ms, record in the implementation artifact:
+If any interactive class exceeds 5000ms, record in your UAT notes or release checklist:
 
 1. The query class and observed average latency
 2. The `candidate_counts` from the failing queries (available per query in the JSON)
 3. A likely explanation (database load, index scan size, network round-trip to Docker host)
-4. The decision: accept the gap with documentation before Epic 8 starts, or fix first
+4. The decision: accept the gap with documentation for this release, or fix first
 
 ### Reading the JSON report
+
+For a non-technical read, start with:
+
+- `summary` for the overall pass rate
+- `per_class` for whether a whole query style regressed
+- `per_query` only when you need to explain a specific failure
+
+For a technical read, use the fields below.
 
 Key fields in `per_query` entries:
 
@@ -1188,68 +1293,32 @@ Key fields in `per_query` entries:
 | `candidate_counts.merged` | Candidates after RRF merge |
 | `candidate_counts.post_threshold` | Candidates surviving `min_score` filter |
 | `candidate_counts.final` | Candidates after top-k truncation |
-| `candidate_counts.post_lineage` | Anchors after document-first selection |
+| `candidate_counts.post_lineage` | Candidates remaining after lineage selection: winning anchors for BOUNDED queries, or lineage-narrowed chunks for DEFAULT queries |
 | `candidate_counts.expansion_mode` | `bounded` for `single_doc_interpretation`, `none` for other classes |
-| `candidate_counts.expanded_context` | Additional chunks retrieved during bounded context expansion |
+| `candidate_counts.expanded_context` | Total chunks in the bounded synthesis context after expansion |
 | `latency_ms` | Retrieval pipeline latency for this query in milliseconds |
 
 ---
 
 ## Pass Criteria
 
-### Epic 6 UAT
-
-Epic 6 UAT is a pass when all of the following are true:
-
-### 1. Connected-source visibility
-
-- local, Gmail, Calendar, and MCP-note records all appear in `cos docs` output
-- all records expose `source_alias` and `source_locator`
-- no `source_path` appears as a primary provenance field for connected sources
-
-### 2. Cross-source exact-byte dedupe
-
-- the cross-source dedupe pack shows the local file, Gmail attachment, and MCP note rows sharing one `sha256`
-- those same rows share one `document_id`
-- the final summary query shows `total_sources > total_blobs` when dedupe has occurred
-
-### 3. Unchanged vs changed content
-
-- the unchanged retry pack returns `data.outcome = unchanged` on the second identical ingest
-- the changed-content pack returns `data.outcome = changed_content` when content changes under the same stable `external_id`
-- version history shows at least 2 versions with distinct `file_hash` values
-
-### 4. Restart and token persistence
-
-- the platform recovers to healthy after restart
-- `tokens/gmail.json` and `tokens/google_calendar.json` persist across restart
-- post-restart Gmail and Calendar syncs complete without browser re-authorisation
-- post-restart jobs drain back to no long-lived backlog
-
-### 5. Retrieval hardening remains correct
-
-- retrieval responses remain grounded after connected-source ingestion
-- direct factual queries stay on a single source lineage when sibling records disagree
-- explicit compare/synthesis queries can still use multi-source evidence
-- citations include `source_alias` and `source_locator`
-- the cited sources correspond to the seeded local, Gmail, Calendar, or MCP records
-- when `retrieval.min_score` is temporarily raised high enough to filter everything out, `retrieve` returns `No relevant content found in the knowledge base.` with empty citations rather than a weakly grounded answer
+Start with Epic 7 for retrieval changes. Add the connected-source criteria whenever you changed ingestion, provenance, queueing, auth, MCP note handling, or restart behaviour.
 
 ### Epic 7 Retrieval Trust Regression
 
-Epic 7 validation is a pass when all of the following are true:
+In plain English, Epic 7 is a pass when the benchmark proves the product can stay grounded, stay honest, and stay fast enough for interactive use.
 
 #### 1. Benchmark completes without error
 
 - `uv run cos benchmark --config config.host.yaml --corpus tests/fixtures/retrieval_eval` exits without a Python exception
 - The human-readable summary prints a per-class breakdown to stdout
 - The JSON report is written to the nominated output path
-- The run is executed against a clean benchmark database; if previously ingested non-fixture documents are present, the report is diagnostic only and cannot be used as the Epic 8 gate
+- The run is executed against a clean benchmark database; if previously ingested non-fixture documents are present, the report is diagnostic only and cannot be used as the authoritative retrieval-trust gate
 
 #### 2. Gold-corpus pass rate
 
 - All eight gold queries pass (exit code 0) on that clean benchmark database
-- If any gold query fails, the failure is documented in the implementation artifact: query ID, `failure_stage`, `actual_lineage`, and a root-cause note
+- If any gold query fails, the failure is documented in the UAT notes: query ID, `failure_stage`, `actual_lineage`, and a root-cause note
 
 #### 3. Direct-fact single-lineage contract
 
@@ -1259,18 +1328,58 @@ Epic 7 validation is a pass when all of the following are true:
 #### 4. No-answer contract
 
 - `gold-na-001` passes with `answerability_verdict=correct_no_answer` and `actual_lineage=[]`
-- If this fails, `retrieval.min_score` must be set to a positive value (e.g., `0.005`) and the benchmark re-run before Epic 8 begins
+- If this fails, `retrieval.min_score` must be set to a positive value (e.g., `0.005`) and the benchmark re-run before sign-off
 
 #### 5. Latency within target
 
 - All interactive classes (`direct_fact`, `exact_phrase`, `date_timeline`, `single_doc_interpretation`) have `avg_latency_ms < 5000` in the JSON `per_class` breakdown
-- If any class exceeds the target, the observed latency, candidate counts, and likely explanation are recorded in the implementation artifact
+- If any class exceeds the target, the observed latency, candidate counts, and likely explanation are recorded in the UAT notes
 
-#### 6. Evidence captured in artifact
+#### 6. Evidence captured in the test record
 
 - The benchmark JSON report is saved at a stable path under `_bmad-output/implementation-artifacts/`
-- The story completion notes include the run timestamp, corpus version, pass rate, per-class summary, and any documented exceptions
-- If a populated-database run is captured for diagnostics, the implementation artifact labels it as diagnostic rather than treating it as the Epic 8 gate
+- The UAT notes include the run timestamp, corpus version, pass rate, per-class summary, and any documented exceptions
+- If a populated-database run is captured for diagnostics, the test record labels it as diagnostic rather than treating it as the authoritative retrieval-trust gate
+
+### Connected-Source and Operations Regression
+
+In plain English, this is the "does the current product still behave like a usable connected knowledge base?" layer.
+
+This layer is a pass when all of the following are true:
+
+#### 1. Connected-source visibility
+
+- local, Gmail, Calendar, and MCP-note records all appear in `cos docs` output
+- all records expose `source_alias` and `source_locator`
+- no `source_path` appears as a primary provenance field for connected sources
+
+#### 2. Cross-source exact-byte dedupe
+
+- the cross-source dedupe pack shows the local file, Gmail attachment, and MCP note rows sharing one `sha256`
+- those same rows share one `document_id`
+- the final summary query shows `total_sources > total_blobs` when dedupe has occurred
+
+#### 3. Unchanged vs changed content
+
+- the unchanged retry pack returns `data.outcome = unchanged` on the second identical ingest
+- the changed-content pack returns `data.outcome = changed_content` when content changes under the same stable `external_id`
+- version history shows at least 2 versions with distinct `file_hash` values
+
+#### 4. Restart and token persistence
+
+- the platform recovers to healthy after restart
+- `tokens/gmail.json` and `tokens/google_calendar.json` persist across restart
+- post-restart Gmail and Calendar syncs complete without browser re-authorisation
+- post-restart jobs drain back to no long-lived backlog
+
+#### 5. Retrieval hardening remains correct
+
+- retrieval responses remain grounded after connected-source ingestion
+- direct factual queries stay on a single source lineage when sibling records disagree
+- explicit compare/synthesis queries can still use multi-source evidence
+- citations include `source_alias` and `source_locator`
+- the cited sources correspond to the seeded local, Gmail, Calendar, or MCP records
+- when `retrieval.min_score` is temporarily raised high enough to filter everything out, `retrieve` returns `No relevant content found in the knowledge base.` with empty citations rather than a weakly grounded answer
 
 ---
 
