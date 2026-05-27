@@ -29,6 +29,11 @@ tokens/
 # Runtime document storage (created by cos ingest)
 data/
 
+# Manual large-document evaluation corpus downloads
+tests/fixtures/real_world_eval/originals/*
+!tests/fixtures/real_world_eval/originals/.gitkeep
+tests/fixtures/real_world_eval/snapshot-manifest.tsv
+
 # Local certificate mounts for corporate TLS/proxy environments
 local/certs/*
 !local/certs/.gitkeep
