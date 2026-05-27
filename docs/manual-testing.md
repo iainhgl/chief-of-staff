@@ -59,6 +59,8 @@ The current product state still includes the Epic 6 connected-ingestion and prov
 
 Use one of these paths:
 
+Before you choose a path, complete the pre-UAT isolation step below so this run uses a fresh local database that is separate from your day-to-day or "real" local data.
+
 1. **Default UAT path for retrieval changes**  
    Start with [Test Pack 11](#test-pack-11-epic-7-retrieval-trust-regression-suite). This is the primary Epic 7 UAT path and the first check to run whenever retrieval behavior changes.
 
@@ -68,6 +70,144 @@ Use one of these paths:
 
 3. **Full operator confidence pass**  
    Run Test Pack 11 first, then add the supporting packs that represent the live user journeys you care about in this environment.
+
+4. **Optional large-document sanity pass**  
+   Use `tests/fixtures/real_world_eval/` after extraction, chunking, or format-handling changes. This corpus is manual-only, snapshot-based, and not part of the release gate or CI.
+
+---
+
+## Pre-UAT: Use a Fresh Isolated Database
+
+For reliable manual testing, especially the authoritative Epic 7 benchmark gate,
+do **not** point UAT at the same database you use for normal local work.
+
+Preferred approach:
+
+- create a dedicated local UAT database name such as `cos_uat` or
+  `cos_benchmark`
+- use that same `dbname` in both `config.yaml` and `config.host.yaml`
+- keep `host: postgres` in `config.yaml` for container-side commands
+- keep `host: localhost` in `config.host.yaml` for host-side commands
+- recreate the UAT database when you want a truly fresh run
+
+Convention used below:
+
+- when this guide shows direct `psql` examples with `-d cos`, substitute your
+  chosen UAT database name instead if you are following this isolated-database
+  workflow
+- `cos` CLI commands such as `cos docs`, `cos benchmark`, and `cos migrate`
+  already use the database configured in `config.yaml` or `config.host.yaml`
+
+Example setup:
+
+1. Copy the configs if needed:
+
+```bash
+cp config.yaml.example config.yaml
+cp config.yaml.example config.host.yaml
+```
+
+2. Edit `config.yaml` for container-side use:
+
+```yaml
+database:
+  host: postgres
+  dbname: cos_uat
+```
+
+3. Edit `config.host.yaml` for host-side use:
+
+```yaml
+database:
+  host: localhost
+  dbname: cos_uat
+```
+
+4. Start just Postgres if it is not already running:
+
+```bash
+docker compose up -d postgres
+```
+
+5. Create or recreate the dedicated UAT database:
+
+```bash
+docker compose exec postgres psql -U postgres -d postgres -c "DROP DATABASE IF EXISTS cos_uat WITH (FORCE);"
+docker compose exec postgres psql -U postgres -d postgres -c "CREATE DATABASE cos_uat;"
+```
+
+6. Start or restart the app services so they point at that database and apply migrations on startup:
+
+```bash
+docker compose up -d
+```
+
+7. Confirm the UAT database is empty before you begin:
+
+```bash
+docker compose exec cos uv run cos docs
+```
+
+Expected:
+
+- the command reports `No documents ingested yet. Run: cos ingest <path>`
+- this run is now isolated from any older local experimentation in the default `cos` database
+
+Important:
+
+- for the authoritative Test Pack 11 gate, use a freshly recreated isolated database
+- for exploratory manual testing, you may keep a dedicated named UAT database between sessions, but the result is then diagnostic rather than authoritative
+
+---
+
+## Post-UAT: Return to Your Normal Local Database
+
+When the manual UAT run is complete, switch both configs back to your normal
+local database so day-to-day work does not keep using the temporary UAT DB.
+
+Typical reset:
+
+1. Edit `config.yaml` back to your normal container-side database:
+
+```yaml
+database:
+  host: postgres
+  dbname: cos
+```
+
+2. Edit `config.host.yaml` back to your normal host-side database:
+
+```yaml
+database:
+  host: localhost
+  dbname: cos
+```
+
+3. Restart the stack so the app services pick up the normal database again:
+
+```bash
+docker compose up -d
+```
+
+4. Sanity-check that you are back on the normal local DB:
+
+```bash
+docker compose exec cos uv run cos docs
+```
+
+Expected:
+
+- you see your normal local document set again, or the normal empty-state message
+- subsequent `cos` CLI and MCP usage now target the standard local database rather than the temporary UAT database
+
+5. Optional cleanup: remove the temporary UAT database if you do not want to keep it for later diagnostic work:
+
+```bash
+docker compose exec postgres psql -U postgres -d postgres -c "DROP DATABASE IF EXISTS cos_uat WITH (FORCE);"
+```
+
+If your normal local database name is not `cos`, substitute your usual value in
+both config files.
 
 ---
 
@@ -87,6 +227,7 @@ Use one of these paths:
 | **9** | After retrieval changes on live connected content | Can a normal user ask grounded questions across mixed sources and get the right citations? |
 | **10** | After restart/token/runtime changes | Can the platform restart cleanly without making me reconnect everything? |
 | **Final spot checks** | After Packs 1-10 when you want a quick final sanity check | Does the database now contain the source mix, provenance rows, and dedupe shape I expect? |
+| **Manual corpus** | After extraction/chunking/format changes when you want higher realism | Can the platform still ingest and retrieve from larger official PDF, DOCX, and HTML documents? |
 
 ---
 
@@ -107,6 +248,12 @@ Needed only for MCP packs:
 
 - Claude Code or Claude Desktop available for the live MCP tests
 
+Needed only for the optional manual large-document corpus:
+
+- a populated local copy of `tests/fixtures/real_world_eval/originals/`
+- run `tests/fixtures/real_world_eval/fetch_snapshot.sh` after you have a local `snapshot-manifest.tsv`
+- verify the files with `tests/fixtures/real_world_eval/verify_originals.sh` before using them for ingest sanity checks
+
 Important runtime rule:
 
 - use `uv run cos auth ...` and `uv run cos restart` on the **host**
@@ -117,17 +264,23 @@ Important runtime rule:
 
 ## Shared Platform Bootstrap
 
-Run this once before any of the test packs below.
+Run this once after the pre-UAT isolation step above.
 
 ### 1. Prepare `config.yaml`
 
-Copy the template if needed:
+Copy the templates if needed:
 
 ```bash
 cp config.yaml.example config.yaml
+cp config.yaml.example config.host.yaml
 ```
 
 If you are running only the Epic 7 benchmark gate, you mainly need a valid bootable config plus a host-side config copy such as `config.host.yaml` for the benchmark command. You do not need Google OAuth or backfilled live data for that path.
+
+If you followed the pre-UAT isolation step, make sure both files use the same dedicated `database.dbname`, with:
+
+- `config.yaml` using `database.host: postgres`
+- `config.host.yaml` using `database.host: localhost`
 
 If you are running the connected-source and MCP supporting packs, make sure these areas are populated:
 
@@ -1083,7 +1236,9 @@ It does not, by itself, say anything about Gmail auth, Calendar sync, worker dur
 
 ### Pack-specific setup
 
-The benchmark runs from the **host** against the Docker-backed database. The default `config.yaml` has `database.host: postgres` which only resolves inside the Docker network. Create a host-accessible config variant:
+The benchmark runs from the **host** against the Docker-backed database. If you already completed the pre-UAT isolation step, you should already have a host-accessible `config.host.yaml` that points at the same dedicated UAT database name as `config.yaml`.
+
+If you do not already have `config.host.yaml`, create a host-accessible config variant:
 
 ```bash
 cp config.yaml config.host.yaml
@@ -1098,7 +1253,7 @@ database:
 
 `config.host.yaml` is gitignored and must not be committed — it contains your API credentials.
 
-For the authoritative retrieval-trust gate, point `config.host.yaml` at a **clean benchmark database**. The simplest path is to run the benchmark before any other UAT/manual ingestion on a fresh stack, or to use a dedicated empty database prepared for benchmark validation. If the configured database already contains previously ingested non-fixture documents, the benchmark still runs, but the result is diagnostic only because ambient documents participate in retrieval.
+For the authoritative retrieval-trust gate, point `config.host.yaml` at a **clean benchmark database**. The preferred path is the pre-UAT isolated-database workflow near the start of this guide: create a dedicated local `dbname`, recreate it, then run the benchmark before any other UAT/manual ingestion. If the configured database already contains previously ingested non-fixture documents, the benchmark still runs, but the result is diagnostic only because ambient documents participate in retrieval.
 
 Confirm the platform is running:
 
@@ -1134,18 +1289,31 @@ Expected:
 uv run cos benchmark \
   --config config.host.yaml \
   --corpus tests/fixtures/retrieval_eval \
-  --include-fuzz
+  --include-fuzz \
+  --output _bmad-output/implementation-artifacts/7-5-benchmark-report-fuzz.json
 ```
 
-The fuzz layer adds five adversarial queries (noisy phrasing, cross-doc noise, near-synonym matching, empty-corpus no-answer). These are diagnostic only; a fuzz failure does not gate the release unless you explicitly decide to hold on them.
+Expected:
+
+- The fuzz layer adds five adversarial queries (noisy phrasing, cross-doc noise, near-synonym matching, empty-corpus no-answer).
+- A human-readable summary prints to stdout.
+- A JSON report is written to `_bmad-output/implementation-artifacts/7-5-benchmark-report-fuzz.json`.
+- These results are diagnostic only; a fuzz failure does not gate the release unless you explicitly decide to hold on it.
 
 ### Trust guarantee checks
 
-Inspect the saved JSON report after the gold run completes.
+Inspect the saved JSON report after the relevant run completes:
+
+- use `_bmad-output/implementation-artifacts/7-5-benchmark-report.json` for gold-only checks
+- use `_bmad-output/implementation-artifacts/7-5-benchmark-report-fuzz.json` for fuzz-specific checks
+
+If you run the fuzz layer without `--output`, the CLI prints the full JSON report to stdout and does **not** update the saved gold report file.
 
 #### Single-lineage direct facts — gold-df-001 and fuzz-df-002
 
 Direct-fact and equivalent queries must resolve to exactly one supporting source. Multi-source answers for a direct-fact query mean lineage narrowing failed.
+
+Gold run:
 
 ```bash
 python3 -c "
@@ -1153,7 +1321,21 @@ import json
 with open('_bmad-output/implementation-artifacts/7-5-benchmark-report.json') as f:
     r = json.load(f)
 for q in r['per_query']:
-    if q['query_id'] in ('gold-df-001', 'fuzz-df-002'):
+    if q['query_id'] == 'gold-df-001':
+        print(q['query_id'], 'pass=' + str(q['pass']),
+              'actual_lineage=' + str(q['actual_lineage']))
+"
+```
+
+Fuzz run:
+
+```bash
+python3 -c "
+import json
+with open('_bmad-output/implementation-artifacts/7-5-benchmark-report-fuzz.json') as f:
+    r = json.load(f)
+for q in r['per_query']:
+    if q['query_id'] == 'fuzz-df-002':
         print(q['query_id'], 'pass=' + str(q['pass']),
               'actual_lineage=' + str(q['actual_lineage']))
 "
