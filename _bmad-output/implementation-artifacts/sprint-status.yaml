@@ -1,5 +1,5 @@
 # generated: 2026-04-17
-# last_updated: 2026-05-19  # story 7.6 done
+# last_updated: 2026-05-28  # epic 7 done
 # project: CoS
 # project_key: NOKEY
 # tracking_system: file-system
@@ -37,7 +37,7 @@
 # - Epics 1-5 represent the implemented baseline; Epic 6 onward reflects the change-course backlog
 
 generated: 2026-04-17
-last_updated: 2026-05-19  # story 7.6 done
+last_updated: 2026-05-28  # epic 7 done
 project: CoS
 project_key: NOKEY
 tracking_system: file-system
@@ -137,12 +137,12 @@ development_status:
   # Epic 7: Retrieval Trust, Evaluation & Observability
   # Retrieval quality is measured and hardened before broader ambient expansion
   # ─────────────────────────────────────────────
-  epic-7: in-progress
+  epic-7: done
   7-1-retrieval-evaluation-corpus-and-benchmark-harness: done
   7-2-retrieval-observability-and-structured-eval-logging: done
   7-3-retrieval-evidence-selection-and-citation-precision-hardening: done
   7-4-document-first-retrieval-and-context-expansion: done
-  7-5-operator-validation-retrieval-trust-regression-suite: review
+  7-5-operator-validation-retrieval-trust-regression-suite: done
   7-6-documentation-and-housekeeping: done
   epic-7-retrospective: optional
 
