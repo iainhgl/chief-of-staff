@@ -60,9 +60,14 @@ role_pack:
 
 # ─────────────────────────────────────────────
 # Output Channels
-# Lists the output channels the platform is permitted to deliver responses through.
-# "local" means MCP tool responses (the only channel available in Epic 1).
-# Additional channels (telegram, email) are added in later epics.
+# Declares the output channels available in this deployment.
+# "local" means MCP tool responses (stdio transport via Claude Code or Claude Desktop).
+# "telegram" is available when the Telegram connector is enabled (Epic 8).
+#
+# Note: this field is retained as a deployment-level declaration. The runtime
+# output router currently uses the active role pack's output_channels field as
+# the effective egress permission source. The built-in chro.yaml includes both
+# "local" and "telegram".
 # ─────────────────────────────────────────────
 channels:
   - local

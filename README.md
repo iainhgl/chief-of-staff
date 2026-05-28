@@ -2,16 +2,16 @@
 
 A personal AI platform that acts as a Chief of Staff for a specific role — retaining knowledge in a structured store and reasoning over it to answer questions grounded in source material.
 
-## Current Capabilities (Epic 7)
+## Current Capabilities (Epic 8)
 
 What is working today:
 
-- **Four-service platform** (postgres/pgvector, Tika, cos, worker) that starts with `docker compose up -d`
+- **Platform services** (postgres/pgvector, Tika, cos, worker, telegram-bot) that start with `docker compose up -d`; `telegram-bot` exits cleanly unless Telegram is enabled and configured
 - **Config validation at startup** — human-readable errors for missing or invalid config values
 - **Database schema applied automatically** — idempotent migrations run on every startup
 - **MCP server** accessible via `docker compose exec` stdio transport (Claude Code and Claude Desktop)
 - **`cos ingest <path>`** — ingest a single file or folder of documents (PDF, .docx, .md, .txt); per-file progress and final summary printed; resolves to one of four deterministic outcomes (`new_content`, `unchanged`, `changed_content`, `new_source_known_content`)
-- **`cos docs`** — list all ingested documents with provenance metadata (source alias, source locator, ingested timestamp, version, chunk count); shows content from all source types (local files, Gmail, Calendar, MCP notes)
+- **`cos docs`** — list all ingested documents with provenance metadata (source alias, source locator, ingested timestamp, version, chunk count); shows content from all source types (local files, Gmail, Calendar, MCP notes, Telegram notes)
 - **`cos docs --versions <id>`** — show version history for a specific document
 - **`cos docs --json`** — machine-readable JSON; each object includes `id`, `source_alias`, `source_locator`, `ingested_at`, `current_version`, `chunk_count`
 - **Originals preserved** — every ingested file is stored byte-for-byte in `/data/originals/` (in-container path); Markdown working copies in `/data/markdown/`
@@ -27,10 +27,11 @@ What is working today:
 - **`get_role_context`** — returns the active role summary from the loaded role pack; `data.role_name` is the role's display name and the response also includes `goals`, `tone`, `knowledge_taxonomy`, and `active_workflows`
 - **`get_status`** — returns a JSON envelope with health of all six components (cos, postgres, tika, MCP server, role pack, database) and a `ready` flag
 - **`cos status`** — plain-language health table for all five components; identifies exactly which component failed and states the recovery action; exit code 1 when any component is unhealthy; run from the host: `docker compose exec cos uv run cos status`
-- **`cos restart`** — single command that restarts all services and polls until every container is healthy; prints confirmation or names the stuck component; run from the host: `uv run cos restart`
+- **`cos restart`** — single command that restarts all Compose services and polls the health-checked core services; prints confirmation or names the stuck component; run from the host: `uv run cos restart`
 - **`cos logs`** — single command log export; supports optional component filter and `--since <duration>` for time filtering; run from the host: `uv run cos logs`
+- **Telegram reactive messaging** — when Telegram is configured, a `telegram-bot` service long-polls the Telegram Bot API; send a question and receive a concise cited answer; send a `Note:` message and it is staged for background indexing; connector outages are isolated and do not affect local MCP retrieval
 
-Knowledge retrieval and Q&A with citations are working. Role identity is configuration-only — author a YAML file and point `config.yaml` at it; no code changes are required. See [docs/role-packs.md](docs/role-packs.md) for the authoring guide. The platform can be monitored, restarted, and diagnosed using plain-language CLI commands — see [docs/setup.md](docs/setup.md) for the operations reference. Retrieval quality is validated via a committed benchmark corpus and the `cos benchmark` command; see [docs/manual-testing.md](docs/manual-testing.md) for the regression runbook.
+Knowledge retrieval and Q&A with citations are working. Role identity is configuration-only — author a YAML file and point `config.yaml` at it; no code changes are required. See [docs/role-packs.md](docs/role-packs.md) for the authoring guide. The platform can be monitored, restarted, and diagnosed using plain-language CLI commands — see [docs/setup.md](docs/setup.md) for the operations reference. Retrieval quality is validated via a committed benchmark corpus and the `cos benchmark` command; see [docs/manual-testing.md](docs/manual-testing.md) for the regression runbook. For Gmail, Google Calendar, and Telegram connector setup, see [docs/connectors.md](docs/connectors.md).
 
 ## How it Works
 
@@ -59,7 +60,7 @@ Python · PostgreSQL · pgvector · MCP (model context protocol) · Docker
 ```
 cos/
 ├── config.yaml.example       # config template — copy to config.yaml and fill in
-├── docker-compose.yml        # postgres, tika, cos, worker services
+├── docker-compose.yml        # postgres, tika, cos, worker, telegram-bot services
 ├── Dockerfile                # cos and worker container image (shared build)
 ├── role_packs/               # role pack YAML files — define who the platform serves
 │   ├── chro.yaml             # CHRO example (default)
@@ -67,9 +68,10 @@ cos/
 ├── tokens/                   # OAuth token files (gitignored) — gmail.json, google_calendar.json
 ├── docs/
 │   ├── setup.md              # setup, operations, and querying guide
+│   ├── connectors.md         # connector activation guide: Gmail, Google Calendar, Telegram
 │   ├── migration.md          # migration/backfill guide for existing Phase 1 stores
 │   ├── role-packs.md         # role pack authoring guide and field reference
-│   └── manual-testing.md     # Epic 7 retrieval-trust regression runbook (also covers Epic 6 UAT packs)
+│   └── manual-testing.md     # retrieval-trust regression runbook and Telegram live validation (Epics 7–8)
 ├── src/
 │   └── cos/
 │       ├── cli.py            # `cos` CLI entry point (status, restart, logs, ingest, docs, auth, sync, benchmark, migrate)
@@ -82,7 +84,7 @@ cos/
 │       ├── rolepack/         # role pack YAML loader
 │       ├── output/           # OutputRouter — sole exit point for all user-facing output
 │       ├── llm/              # LLM provider adapter (provider-agnostic interface)
-│       └── connectors/       # Gmail, Google Calendar OAuth and sync connectors
+│       └── connectors/       # Gmail, Google Calendar OAuth and sync connectors; telegram_bot.py (Epic 8 reactive bot)
 └── tests/
     └── ...                   # pytest test suite
 ```

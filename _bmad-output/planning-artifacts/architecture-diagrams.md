@@ -51,7 +51,7 @@ C4Context
     System_Ext(embedding_api, "Embedding Provider API", "Vector embeddings")
     System_Ext(gmail_api, "Gmail API (Google)", "Read email, ingest attachments. OAuth 2.0.")
     System_Ext(calendar_api, "Google Calendar API", "Read upcoming events for meeting prep and daily brief. OAuth 2.0.")
-    System_Ext(telegram_api, "Telegram Bot API", "Bidirectional: inbound Q&A and note capture, outbound scheduled briefs.")
+    System_Ext(telegram_api, "Telegram Bot API", "Bidirectional: inbound Q&A and note capture (Epic 8); outbound scheduled briefs (Epic 11).")
     System_Ext(web_search, "Web Search API (Brave / Tavily)", "Live internet search when local knowledge is insufficient.")
 
     Rel(iain, cos, "Operates instances", "CLI")
@@ -120,7 +120,7 @@ C4Container
     }
 
     Rel(users, telegram_api, "Sends questions and notes")
-    Rel(cos, telegram_api, "Polls for inbound messages; sends briefs and responses", "HTTPS / Bot API")
+    Rel(cos, telegram_api, "Polls for inbound messages; sends reactive responses (Epic 8); sends scheduled briefs (Epic 11)", "HTTPS / Bot API")
     Rel(cos, gmail_api, "Reads email; ingests attachments", "HTTPS / OAuth 2.0")
     Rel(cos, calendar_api, "Reads upcoming events for meeting prep", "HTTPS / OAuth 2.0")
     Rel(cos, web_search, "Calls when local retrieval is insufficient", "HTTPS")
@@ -382,18 +382,18 @@ sequenceDiagram
     User->>TelegramAPI: sends message
     TB->>TelegramAPI: GET /getUpdates (polling)
     TelegramAPI-->>TB: message update
-    TB->>TB: classify: note or question?
+    TB->>TB: classify: note, question, or unsupported?
 
-    alt Note capture (prefixed "Note:" or short declarative statement)
-        TB->>JOBS: enqueue ingest job (source_locator=telegram://..., source_alias=message timestamp)
-        JOBS->>IS: ingest_note(text, metadata={source:"telegram", timestamp:...})
+    alt Note capture (prefixed "Note:")
+        TB->>JOBS: stage note + enqueue ingest job (source_locator=telegram://..., source_alias=message timestamp)
+        TB->>OR: send(channel="telegram", content="Note saved.")
+        OR->>TG: send("Note saved.")
+        TG->>TelegramAPI: POST /sendMessage
+        TelegramAPI-->>User: "Note saved."
+        Note over JOBS,IS: Worker indexes the note asynchronously after acknowledgement
+        JOBS->>IS: ingest staged note (metadata={source:"telegram", timestamp:...})
         IS->>DB: canonical ingest decision + writes
         IS-->>JOBS: IngestionResult
-        JOBS-->>TB: completed
-        TB->>OR: send(channel="telegram", content="Note saved")
-        OR->>TG: send("Note saved")
-        TG->>TelegramAPI: POST /sendMessage
-        TelegramAPI-->>User: "Note saved"
     else Question
         TB->>RS: query(text, role_pack)
         RS->>DB: hybrid search
@@ -594,7 +594,7 @@ The OutputRouter is the single enforcement point for NFR7 (fail-closed egress). 
 ```mermaid
 flowchart TD
     REQ[Output request:\nchannel + content]
-    VAL{Channel in\nconfig.output_channels?}
+    VAL{Channel in active\nrole_pack.output_channels?}
     SUPP[Suppress output\nLog structured error:\n component=output]
     ROUTE{Select channel\nhandler}
     LOCAL[output/channels/local.py\nReturn in MCP response]
