@@ -8,6 +8,7 @@ import httpx
 from cos.config import CosConfig, TelegramConnectorConfig
 
 logger = logging.getLogger(__name__)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 def _log(level: str, message: str, **extra: object) -> None:
@@ -29,6 +30,21 @@ def _api_url(cfg: TelegramConnectorConfig, method: str) -> str:
     return f"{cfg.api_base_url}/bot{token}/{method}"
 
 
+def _redact_token(cfg: TelegramConnectorConfig, value: object) -> str:
+    return str(value).replace(cfg.bot_token.get_secret_value(), "<redacted>")
+
+
+def _telegram_response_description(resp: httpx.Response) -> str | None:
+    try:
+        data = resp.json()
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    description = data.get("description")
+    return str(description) if description else None
+
+
 async def _poll_once(
     cfg: TelegramConnectorConfig,
     client: httpx.AsyncClient,
@@ -45,11 +61,15 @@ async def _poll_once(
         timeout=cfg.poll_timeout + 10.0,
     )
     if not resp.is_success:
-        raise RuntimeError(f"getUpdates returned HTTP {resp.status_code}")
+        desc = _telegram_response_description(resp)
+        message = f"getUpdates returned HTTP {resp.status_code}"
+        if desc:
+            message = f"{message}: {_redact_token(cfg, desc)}"
+        raise RuntimeError(message)
     data = resp.json()
     if not data.get("ok"):
         desc = data.get("description", "unknown error")
-        raise RuntimeError(f"Telegram API error: {desc}")
+        raise RuntimeError(f"Telegram API error: {_redact_token(cfg, desc)}")
     updates: list[dict] = data.get("result", [])  # type: ignore[type-arg]
     new_offset = offset
     for update in updates:
@@ -98,13 +118,13 @@ async def run_polling(cfg: TelegramConnectorConfig) -> None:
                     _log(
                         "error",
                         "webhook conflict detected — polling cannot proceed",
-                        error=msg,
+                        error=_redact_token(cfg, msg),
                     )
                 else:
                     _log(
                         "warning",
                         "polling error — retrying after backoff",
-                        error=msg,
+                        error=_redact_token(cfg, msg),
                         backoff=backoff,
                     )
                 await asyncio.sleep(backoff)

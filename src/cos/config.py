@@ -3,7 +3,7 @@ from typing import Literal
 from urllib.parse import quote
 
 import yaml  # type: ignore[import-untyped]
-from pydantic import BaseModel, Field, SecretStr, ValidationError
+from pydantic import BaseModel, Field, SecretStr, ValidationError, field_validator
 
 LogComponent = Literal[
     "ingestion",
@@ -102,8 +102,24 @@ class TelegramConnectorConfig(BaseModel):
     chat_id: str
     api_base_url: str = "https://api.telegram.org"
     poll_timeout: int = Field(default=30, ge=1, le=120)
-    backoff_initial: float = Field(default=1.0, ge=0.0)
+    backoff_initial: float = Field(default=1.0, gt=0.0)
     backoff_max: float = Field(default=60.0, ge=0.1)
+
+    @field_validator("bot_token")
+    @classmethod
+    def _validate_bot_token(cls, value: SecretStr) -> SecretStr:
+        token = value.get_secret_value().strip()
+        if not token:
+            raise ValueError("bot_token must not be empty")
+        return SecretStr(token)
+
+    @field_validator("chat_id")
+    @classmethod
+    def _validate_chat_id(cls, value: str) -> str:
+        chat_id = value.strip()
+        if not chat_id:
+            raise ValueError("chat_id must not be empty")
+        return chat_id
 
 
 class McpNoteIngestConfig(BaseModel):

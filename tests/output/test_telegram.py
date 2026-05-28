@@ -67,12 +67,10 @@ async def test_telegram_send_does_not_include_token_in_our_logs(
     cfg = _make_tg_config(bot_token="super-secret-bot-token")
     channel = TelegramChannel(config=cfg, client=client)
 
-    with caplog.at_level(logging.DEBUG, logger="cos"):
+    with caplog.at_level(logging.INFO):
         await channel.send("test")
 
-    # Only check our own application logs — httpx logs its own URL internally
-    our_records = [r for r in caplog.records if r.name.startswith("cos")]
-    for record in our_records:
+    for record in caplog.records:
         assert "super-secret-bot-token" not in record.message
 
 
@@ -127,3 +125,18 @@ async def test_telegram_send_logs_component_output_on_failure(
     parsed = json.loads(error_logs[0].message)
     assert parsed["component"] == "output"
     assert parsed["channel"] == "telegram"
+
+
+@pytest.mark.asyncio
+async def test_telegram_send_logs_api_ok_false_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    transport = _FailureTransport(status_code=200)
+    client = httpx.AsyncClient(transport=transport)
+    cfg = _make_tg_config()
+    channel = TelegramChannel(config=cfg, client=client)
+
+    with caplog.at_level(logging.ERROR):
+        await channel.send("api failure")
+
+    assert any("Telegram sendMessage API error" in r.message for r in caplog.records)

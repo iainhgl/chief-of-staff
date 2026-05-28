@@ -104,6 +104,20 @@ async def test_poll_once_raises_on_non_success_http_status() -> None:
 
 
 @pytest.mark.asyncio
+async def test_poll_once_preserves_webhook_conflict_description() -> None:
+    transport = _MockTransport([
+        httpx.Response(
+            409,
+            json={"ok": False, "description": "Conflict: webhook active"},
+        ),
+    ])
+    cfg = _make_tg_config()
+    async with httpx.AsyncClient(transport=transport) as client:
+        with pytest.raises(RuntimeError, match="Conflict: webhook active"):
+            await _poll_once(cfg, client, 0)
+
+
+@pytest.mark.asyncio
 async def test_poll_once_raises_on_telegram_api_error() -> None:
     transport = _MockTransport([
         httpx.Response(
@@ -114,6 +128,22 @@ async def test_poll_once_raises_on_telegram_api_error() -> None:
     async with httpx.AsyncClient(transport=transport) as client:
         with pytest.raises(RuntimeError, match="Telegram API error"):
             await _poll_once(cfg, client, 0)
+
+
+@pytest.mark.asyncio
+async def test_poll_once_does_not_log_token_via_httpx(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    transport = _MockTransport([
+        httpx.Response(200, json=_updates_response([])),
+    ])
+    cfg = _make_tg_config(bot_token="super-secret-bot-token")
+    async with httpx.AsyncClient(transport=transport) as client:
+        with caplog.at_level(logging.INFO):
+            await _poll_once(cfg, client, 0)
+
+    for record in caplog.records:
+        assert "super-secret-bot-token" not in record.message
 
 
 def test_handle_update_ignores_unconfigured_chat(

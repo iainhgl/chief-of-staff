@@ -1,6 +1,6 @@
 # Story 8.1: Telegram Bot Setup & Output Channel
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -63,6 +63,14 @@ so that Telegram is a live, verified channel before Q&A and note capture are bui
   - [x] Update router/output-service tests for async `send`.
   - [x] Run focused tests for config, output, Telegram connector, MCP server startup, plus `uv run ruff` and `uv run mypy`.
 
+### Review Findings
+
+- [x] [Review][Patch] Token-bearing Telegram API URLs leak via httpx INFO logs [src/cos/connectors/telegram_bot.py:27]
+- [x] [Review][Patch] Webhook-conflict HTTP responses are downgraded to generic retry warnings [src/cos/connectors/telegram_bot.py:47]
+- [x] [Review][Patch] `backoff_initial=0.0` can create a tight retry loop [src/cos/config.py:105]
+- [x] [Review][Patch] `sendMessage` ignores Telegram `ok: false` semantic failures [src/cos/output/channels/telegram.py:40]
+- [x] [Review][Patch] Empty Telegram token/chat ID values pass startup validation [src/cos/config.py:100]
+
 ## Dev Notes
 
 ### What This Story Is
@@ -82,22 +90,22 @@ The story's source acceptance criteria name `connectors.telegram.bot_token`. The
 
 ### Architecture Guardrails
 
-1. **OutputRouter remains the sole egress boundary.**  
+1. **OutputRouter remains the sole egress boundary.**
    Any user-facing output must pass through `OutputRouter`; the Telegram bot and future Q&A path must not call `output/channels/telegram.py` directly. Validation failure suppresses output and logs rather than raising through the caller. [Source: [architecture.md](/Users/iain.livingstone/Development/CoS/cos/_bmad-output/planning-artifacts/architecture.md), [architecture-diagrams.md](/Users/iain.livingstone/Development/CoS/cos/_bmad-output/planning-artifacts/architecture-diagrams.md)]
 
-2. **Make the router async now that a network channel exists.**  
+2. **Make the router async now that a network channel exists.**
    Epic 3 notes explicitly allowed the synchronous router only while local stdout was the sole handler; a future network handler requires an async send path. Story 8.1 is that moment. Update tests and call sites deliberately instead of hiding network I/O behind synchronous calls. [Source: [architecture.md](/Users/iain.livingstone/Development/CoS/cos/_bmad-output/planning-artifacts/architecture.md), [router.py](/Users/iain.livingstone/Development/CoS/cos/src/cos/output/router.py), [services/output.py](/Users/iain.livingstone/Development/CoS/cos/src/cos/services/output.py)]
 
-3. **Keep connector failure isolated from MCP retrieval.**  
+3. **Keep connector failure isolated from MCP retrieval.**
    NFR11 requires connector failures to surface as degraded/error signals while the core retrieval and Q&A path remains available. Run Telegram polling in a separate entry point/process and catch/retry Telegram API failures inside that process. Do not block or crash the MCP server because Telegram is unavailable. [Source: [prd.md](/Users/iain.livingstone/Development/CoS/cos/_bmad-output/planning-artifacts/prd.md), [architecture.md](/Users/iain.livingstone/Development/CoS/cos/_bmad-output/planning-artifacts/architecture.md)]
 
-4. **Do not broaden into Stories 8.2 or 8.3.**  
+4. **Do not broaden into Stories 8.2 or 8.3.**
    This story may parse inbound update envelopes and log received text for live verification. It must not implement question classification, `RetrievalService.query(...)`, note staging, ingest jobs, or "Note saved." acknowledgements; those are the next two stories. [Source: [epics.md](/Users/iain.livingstone/Development/CoS/cos/_bmad-output/planning-artifacts/epics.md), [architecture-diagrams.md](/Users/iain.livingstone/Development/CoS/cos/_bmad-output/planning-artifacts/architecture-diagrams.md)]
 
-5. **Do not leak credentials or sensitive content.**  
+5. **Do not leak credentials or sensitive content.**
    `bot_token` must be a `SecretStr`; logs must not include token values, token-bearing URLs, or full Telegram message contents. Message content may be short and personal; prefer logging lengths, update IDs, chat IDs, and event labels. [Source: [prd.md](/Users/iain.livingstone/Development/CoS/cos/_bmad-output/planning-artifacts/prd.md), [config.py](/Users/iain.livingstone/Development/CoS/cos/src/cos/config.py)]
 
-6. **Messaging is a lower-trust channel.**  
+6. **Messaging is a lower-trust channel.**
    Telegram is suitable for short notes, quick questions, and concise replies. Even though Q&A is future work, Story 8.1 should avoid adding formatting defaults or examples that imply long-form analytical output should be pushed through Telegram. [Source: [prd.md](/Users/iain.livingstone/Development/CoS/cos/_bmad-output/planning-artifacts/prd.md)]
 
 ### Telegram Bot API Details

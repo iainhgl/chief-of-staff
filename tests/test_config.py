@@ -467,3 +467,24 @@ def test_telegram_config_rejects_poll_timeout_above_maximum(tmp_path):
 
     with pytest.raises(Exception):
         TelegramConnectorConfig(bot_token="tok", chat_id="1", poll_timeout=121)
+
+
+def test_telegram_config_rejects_zero_backoff_initial(tmp_path):
+    from cos.config import TelegramConnectorConfig
+
+    with pytest.raises(Exception):
+        TelegramConnectorConfig(bot_token="tok", chat_id="1", backoff_initial=0.0)
+
+
+def test_telegram_config_rejects_blank_bot_token(tmp_path):
+    from cos.config import TelegramConnectorConfig
+
+    with pytest.raises(Exception):
+        TelegramConnectorConfig(bot_token="   ", chat_id="1")
+
+
+def test_telegram_config_rejects_blank_chat_id(tmp_path):
+    from cos.config import TelegramConnectorConfig
+
+    with pytest.raises(Exception):
+        TelegramConnectorConfig(bot_token="tok", chat_id="   ")
