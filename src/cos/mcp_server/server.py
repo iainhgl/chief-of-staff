@@ -12,7 +12,8 @@ from pydantic import ValidationError
 
 from cos.config import CosConfig, LogComponent
 from cos.llm.factory import make_llm_adapter
-from cos.output.router import OutputRouter
+from cos.output.channels.telegram import TelegramChannel
+from cos.output.router import AsyncHandler, OutputRouter
 from cos.rolepack.loader import load as load_role_pack
 from cos.services.output import OutputService
 from cos.services.retrieval import RetrievalService
@@ -114,11 +115,21 @@ async def _startup_sequence(config: CosConfig) -> None:
     _emit("rolepack", "INFO", "Role pack loaded", role_name=_loaded_role_pack.role_name)
     _pool = await create_pool(config.database.libpq_dsn)
     _emit(component, "INFO", "connection pool: open")
+    extra_handlers: dict[str, AsyncHandler] = {}
+    if config.telegram is not None:
+        tg_channel = TelegramChannel(config=config.telegram)
+        extra_handlers["telegram"] = tg_channel.send
     _output_router = OutputRouter(
-        configured_channels=_loaded_role_pack.output_channels
+        configured_channels=_loaded_role_pack.output_channels,
+        extra_handlers=extra_handlers,
     )
     _output_service = OutputService(router=_output_router)
-    _emit(component, "INFO", "output router: initialised", channels=config.channels)
+    _emit(
+        component,
+        "INFO",
+        "output router: initialised",
+        channels=_loaded_role_pack.output_channels,
+    )
     adapter = make_llm_adapter(config)
     _retrieval_service = RetrievalService(
         config=config,

@@ -16,6 +16,7 @@ def _make_config(channels: list[str]) -> SimpleNamespace:
         tika=SimpleNamespace(url="http://tika:9998"),
         role_pack=SimpleNamespace(path="role_packs/chro.yaml"),
         channels=channels,
+        telegram=None,
         llm=SimpleNamespace(
             model="claude-3-haiku-20240307",
             api_key=SimpleNamespace(get_secret_value=lambda: "test-key"),
@@ -94,7 +95,7 @@ async def test_startup_sequence_initialises_output_router(
 
     router = server.get_output_router()
     assert router is not None
-    router.send("local", "probe")
+    await router.send("local", "probe")
     assert "probe" in capsys.readouterr().out
     assert any(message == "output router: initialised" for _, _, message, _ in emitted)
     assert server.get_output_service() is not None
@@ -124,7 +125,7 @@ async def test_startup_sequence_uses_role_pack_output_channels(
     router = server.get_output_router()
     assert router is not None
     with caplog.at_level(logging.ERROR):
-        router.send("local", "should be suppressed")
+        await router.send("local", "should be suppressed")
     assert any("unknown output channel" in r.message for r in caplog.records)
 
 
@@ -238,3 +239,31 @@ async def test_startup_sequence_role_pack_validation_error_raises_system_exit(
         await server._startup_sequence(_make_config(["local"]))
 
     assert "Role pack validation error" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_startup_sequence_output_router_log_uses_role_pack_channels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    emitted = _patch_server(monkeypatch)
+    role_pack_with_telegram = RolePackConfig(
+        role_name="Test",
+        goals=["goal"],
+        tone="direct",
+        knowledge_taxonomy=["cat"],
+        stakeholder_map={"CEO": "partner"},
+        retrieval_priorities=["cat"],
+        active_workflows=["wf"],
+        output_channels=["local", "telegram"],
+    )
+    monkeypatch.setattr(server, "load_role_pack", lambda _path: role_pack_with_telegram)
+
+    await server._startup_sequence(_make_config(["local"]))
+
+    router_init_logs = [
+        extra
+        for _, _, message, extra in emitted
+        if message == "output router: initialised"
+    ]
+    assert len(router_init_logs) == 1
+    assert router_init_logs[0].get("channels") == ["local", "telegram"]

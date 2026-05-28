@@ -386,3 +386,105 @@ def test_retrieval_config_loads_from_yaml(tmp_path):
 
     assert config.retrieval.min_score == pytest.approx(0.01)
     assert config.retrieval.max_chunks_per_source == 3
+
+
+# ── Telegram connector config tests (Story 8.1) ───────────────────────────
+
+_TELEGRAM_BLOCK = """\
+telegram:
+  bot_token: tg-bot-secret-token
+  chat_id: "123456789"
+"""
+
+
+def test_telegram_config_is_optional(tmp_path):
+    cfg_file = _write_config(tmp_path, VALID_CONFIG_YAML)
+    config = CosConfig.load(cfg_file)
+    assert config.telegram is None
+
+
+def test_telegram_config_loads_when_present(tmp_path):
+    cfg_file = _write_config(tmp_path, VALID_CONFIG_YAML + _TELEGRAM_BLOCK)
+    config = CosConfig.load(cfg_file)
+    assert config.telegram is not None
+    assert config.telegram.chat_id == "123456789"
+
+
+def test_telegram_config_bot_token_accessible(tmp_path):
+    cfg_file = _write_config(tmp_path, VALID_CONFIG_YAML + _TELEGRAM_BLOCK)
+    config = CosConfig.load(cfg_file)
+    assert config.telegram is not None
+    assert config.telegram.bot_token.get_secret_value() == "tg-bot-secret-token"
+
+
+def test_telegram_config_bot_token_masked_in_repr(tmp_path):
+    cfg_file = _write_config(tmp_path, VALID_CONFIG_YAML + _TELEGRAM_BLOCK)
+    config = CosConfig.load(cfg_file)
+    assert config.telegram is not None
+    assert "tg-bot-secret-token" not in repr(config)
+    assert "tg-bot-secret-token" not in str(config)
+    assert "tg-bot-secret-token" not in repr(config.telegram)
+    assert "tg-bot-secret-token" not in str(config.telegram)
+
+
+def test_telegram_config_defaults(tmp_path):
+    cfg_file = _write_config(tmp_path, VALID_CONFIG_YAML + _TELEGRAM_BLOCK)
+    config = CosConfig.load(cfg_file)
+    assert config.telegram is not None
+    assert config.telegram.api_base_url == "https://api.telegram.org"
+    assert config.telegram.poll_timeout == 30
+    assert config.telegram.backoff_initial == pytest.approx(1.0)
+    assert config.telegram.backoff_max == pytest.approx(60.0)
+
+
+def test_telegram_config_requires_bot_token(tmp_path):
+    yaml_missing_token = VALID_CONFIG_YAML + (
+        "\ntelegram:\n  chat_id: \"123456789\"\n"
+    )
+    cfg_file = _write_config(tmp_path, yaml_missing_token)
+    with pytest.raises(SystemExit):
+        CosConfig.load(cfg_file)
+
+
+def test_telegram_config_requires_chat_id(tmp_path):
+    yaml_missing_chat = VALID_CONFIG_YAML + (
+        "\ntelegram:\n  bot_token: tg-secret\n"
+    )
+    cfg_file = _write_config(tmp_path, yaml_missing_chat)
+    with pytest.raises(SystemExit):
+        CosConfig.load(cfg_file)
+
+
+def test_telegram_config_rejects_poll_timeout_below_minimum(tmp_path):
+    from cos.config import TelegramConnectorConfig
+
+    with pytest.raises(Exception):
+        TelegramConnectorConfig(bot_token="tok", chat_id="1", poll_timeout=0)
+
+
+def test_telegram_config_rejects_poll_timeout_above_maximum(tmp_path):
+    from cos.config import TelegramConnectorConfig
+
+    with pytest.raises(Exception):
+        TelegramConnectorConfig(bot_token="tok", chat_id="1", poll_timeout=121)
+
+
+def test_telegram_config_rejects_zero_backoff_initial(tmp_path):
+    from cos.config import TelegramConnectorConfig
+
+    with pytest.raises(Exception):
+        TelegramConnectorConfig(bot_token="tok", chat_id="1", backoff_initial=0.0)
+
+
+def test_telegram_config_rejects_blank_bot_token(tmp_path):
+    from cos.config import TelegramConnectorConfig
+
+    with pytest.raises(Exception):
+        TelegramConnectorConfig(bot_token="   ", chat_id="1")
+
+
+def test_telegram_config_rejects_blank_chat_id(tmp_path):
+    from cos.config import TelegramConnectorConfig
+
+    with pytest.raises(Exception):
+        TelegramConnectorConfig(bot_token="tok", chat_id="   ")

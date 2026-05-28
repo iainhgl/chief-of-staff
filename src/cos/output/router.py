@@ -1,22 +1,37 @@
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
-from typing import Callable
 
 from cos.output.channels import local as local_channel
 
 logger = logging.getLogger(__name__)
 
-_CHANNEL_HANDLERS: dict[str, Callable[[str], None]] = {
-    "local": local_channel.send,
+AsyncHandler = Callable[[str], Awaitable[None]]
+
+
+async def _local_send(content: str) -> None:
+    local_channel.send(content)
+
+
+_BUILTIN_HANDLERS: dict[str, AsyncHandler] = {
+    "local": _local_send,
 }
 
 
 class OutputRouter:
-    def __init__(self, configured_channels: list[str]) -> None:
+    def __init__(
+        self,
+        configured_channels: list[str],
+        extra_handlers: dict[str, AsyncHandler] | None = None,
+    ) -> None:
         self._channels = set(configured_channels)
+        self._handlers: dict[str, AsyncHandler] = {
+            **_BUILTIN_HANDLERS,
+            **(extra_handlers or {}),
+        }
 
-    def send(self, channel: str, content: str) -> None:
+    async def send(self, channel: str, content: str) -> None:
         if channel not in self._channels:
             logger.error(
                 json.dumps({
@@ -28,9 +43,8 @@ class OutputRouter:
                 })
             )
             return
-        handler = _CHANNEL_HANDLERS.get(channel)
+        handler = self._handlers.get(channel)
         if handler is None:
-            # Channel is configured but handler not yet implemented (Phase 2+)
             logger.error(
                 json.dumps({
                     "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -42,7 +56,7 @@ class OutputRouter:
             )
             return
         try:
-            handler(content)
+            await handler(content)
         except Exception as exc:
             logger.error(
                 json.dumps({

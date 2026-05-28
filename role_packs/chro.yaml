@@ -42,3 +42,4 @@ active_workflows:
 
 output_channels:
   - local
+  - telegram
