@@ -79,7 +79,7 @@ docker compose up -d --build --force-recreate cos
 docker compose up -d
 ```
 
-All four services (postgres, tika, cos, worker) will start. The postgres, tika, and cos containers reach a healthy state within 60 seconds; the worker container starts alongside them and begins draining any queued ingest jobs.
+The core services (postgres, tika, cos, worker) will start. The postgres, tika, and cos containers reach a healthy state within 60 seconds; the worker container starts alongside them and begins draining any queued ingest jobs. A `telegram-bot` service is also defined and starts when `"telegram"` is listed in `connectors` in `config.yaml`; it does not start usefully when Telegram is not configured. See [connectors.md](connectors.md) for Telegram setup.
 
 ## Configure the MCP Server
 
@@ -287,6 +287,7 @@ After sync, `cos docs --json` shows ingested connector content alongside local f
 | Gmail attachment | `report.pdf` | `gmail://message/msg-010/attachment/att-id-001` |
 | Calendar event | `Q3_Planning_Review_primary_evt123.md` | `google-calendar://calendar/primary/event/evt123` |
 | MCP note | `Board-Prep-Q3.md` | `mcp_note://claude-code/board-prep-q3-2026` |
+| Telegram note | `telegram-note-2026-05-28T120000Z-abc123.md` | `telegram://chat/123456789/message/42` |
 
 ## Ingest Documents
 
@@ -509,7 +510,14 @@ uv run cos logs --since 10m    # last 10 minutes from all containers
 uv run cos logs cos --since 5m # cos service, last 5 minutes
 ```
 
-Valid component names: `postgres`, `tika`, `cos`. The `--since` value is passed directly to `docker compose logs` and follows Docker's duration format (e.g. `10m`, `1h`, `30s`); invalid values produce a Docker error message.
+Valid component names for `cos logs`: `postgres`, `tika`, `cos`. The `--since` value is passed directly to `docker compose logs` and follows Docker's duration format (e.g. `10m`, `1h`, `30s`); invalid values produce a Docker error message.
+
+For the `worker` and `telegram-bot` services, use `docker compose logs` directly:
+
+```bash
+docker compose logs worker --tail=50
+docker compose logs telegram-bot --tail=50
+```
 
 Log output is a mix of Docker timestamps and structured JSON lines from the cos service. No API keys or credential values appear in any log line.
 

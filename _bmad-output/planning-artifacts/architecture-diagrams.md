@@ -51,7 +51,7 @@ C4Context
     System_Ext(embedding_api, "Embedding Provider API", "Vector embeddings")
     System_Ext(gmail_api, "Gmail API (Google)", "Read email, ingest attachments. OAuth 2.0.")
     System_Ext(calendar_api, "Google Calendar API", "Read upcoming events for meeting prep and daily brief. OAuth 2.0.")
-    System_Ext(telegram_api, "Telegram Bot API", "Bidirectional: inbound Q&A and note capture, outbound scheduled briefs.")
+    System_Ext(telegram_api, "Telegram Bot API", "Bidirectional: inbound Q&A and note capture (Epic 8); outbound scheduled briefs (Epic 11).")
     System_Ext(web_search, "Web Search API (Brave / Tavily)", "Live internet search when local knowledge is insufficient.")
 
     Rel(iain, cos, "Operates instances", "CLI")
@@ -120,7 +120,7 @@ C4Container
     }
 
     Rel(users, telegram_api, "Sends questions and notes")
-    Rel(cos, telegram_api, "Polls for inbound messages; sends briefs and responses", "HTTPS / Bot API")
+    Rel(cos, telegram_api, "Polls for inbound messages; sends reactive responses (Epic 8); sends scheduled briefs (Epic 11)", "HTTPS / Bot API")
     Rel(cos, gmail_api, "Reads email; ingests attachments", "HTTPS / OAuth 2.0")
     Rel(cos, calendar_api, "Reads upcoming events for meeting prep", "HTTPS / OAuth 2.0")
     Rel(cos, web_search, "Calls when local retrieval is insufficient", "HTTPS")

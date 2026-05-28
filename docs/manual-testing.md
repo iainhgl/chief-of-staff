@@ -270,7 +270,7 @@ Needed only for MCP packs:
 Needed only for the Telegram live pack (Test Pack 12):
 
 - a working Telegram bot token in `config.yaml` under `telegram.bot_token`
-- a configured `telegram.chat_id` for the account/group the bot should respond to; if you need to discover it, send a message to the bot and call Telegram `getUpdates` directly as shown in `config.yaml.example` before relying on the platform bot
+- a configured `telegram.chat_id` for the account/group the bot should respond to; if you need to discover it, follow the setup steps in [connectors.md — Telegram Connector](connectors.md#telegram-connector) before relying on the platform bot
 - `"telegram"` listed in `connectors` in `config.yaml`
 - `telegram` listed in the active role pack's `output_channels` (already present in `role_packs/chro.yaml`)
 - the `telegram-bot` service running via Docker Compose (`docker compose up -d`)
