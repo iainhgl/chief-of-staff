@@ -1,5 +1,9 @@
 # Deferred Work
 
+## Deferred from: code review of 8-4-operator-validation-interactive-telegram-live.md (2026-05-28)
+
+- Live Telegram/MCP validation evidence remains uncaptured: Q&A latency and citation evidence, Telegram note retrieval evidence, degraded Telegram log signal, MCP retrieval while Telegram is degraded, and restore/cleanup confirmation. Deferred to backlog because Telegram live validation is not a current product priority.
+
 ## Deferred from: code review of 6-7-jobs-queue-and-background-ingestion-worker.md (2026-05-06)
 
 - `gen_random_uuid()` remains an implicit migration dependency in `002_jobs.sql`; this story follows a pre-existing repo-wide pattern rather than introducing a new extension-management strategy
