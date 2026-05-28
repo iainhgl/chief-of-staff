@@ -1,14 +1,19 @@
 import asyncio
+import hashlib
 import json
 import logging
 import re
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Literal
+from uuid import uuid4
 
 import httpx
 
 from cos.config import CosConfig, TelegramConnectorConfig
 from cos.retrieval.citations import CitedChunk, CitedResponse
+from cos.services.jobs import submit_ingest_job
+from cos.store.db import has_pending_job_for_locator, has_processed_artifact
 
 logger = logging.getLogger(__name__)
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -20,9 +25,15 @@ _NO_CONTENT_ANSWER = "No relevant content found in the knowledge base."
 _NO_CONTENT_REPLY = "No relevant content was found for your question."
 _RECOVERY_REPLY = "I could not answer that just now. Check `cos logs` for diagnostics."
 _EMPTY_ANSWER_REPLY = "I could not produce an answer from the retrieved content."
+_NOTE_SAVE_REPLY = "Note saved."
+_NOTE_SAVE_FAILURE_REPLY = (
+    "I could not save that note just now. Check `cos logs` for diagnostics."
+)
+_EMPTY_NOTE_GUIDANCE = (
+    "No content found after `note:`. Try: `note: your thought here`"
+)
 
 # Question heuristics for the inbound message classifier.
-# Note capture (note: prefix, declarative statements) is out of scope — Story 8.3.
 _QUESTION_WORDS = frozenset({"what", "why", "how", "when", "where", "who", "which"})
 _QUESTION_PHRASES = (
     "tell me",
@@ -36,11 +47,12 @@ _QUESTION_PHRASES = (
     "draft",
 )
 _ASK_COMMAND_RE = re.compile(r"^/ask(?:@[a-zA-Z0-9_]+)?(?:\s+|$)")
+_NOTE_PREFIX_RE = re.compile(r"^note\s*:", re.IGNORECASE)
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]+")
 
 _UNSUPPORTED_REPLY = (
-    "Send a question to get a cited answer from the knowledge base. "
-    "Note capture is not yet enabled."
+    "Send a question to get a cited answer from the knowledge base, "
+    "or use `note:` followed by your text to save a note."
 )
 
 
@@ -90,21 +102,25 @@ def _starts_with_phrase(text: str, phrase: str) -> bool:
     return text == phrase or text.startswith(f"{phrase} ")
 
 
-def _classify_inbound_text(text: str) -> Literal["question", "unsupported"]:
-    """Classify inbound Telegram text as 'question' or 'unsupported'.
+def _classify_inbound_text(text: str) -> Literal["question", "note", "unsupported"]:
+    """Classify inbound Telegram text as 'question', 'note', or 'unsupported'.
 
-    Question heuristics (checked in order):
-    - Ends with '?'
-    - Starts with '/ask' slash command
-    - First word is a question word (what, why, how, when, where, who, which)
-    - Starts with a KB-request phrase (tell me, show me, find, look up, ...)
+    Classification order:
+    1. note: prefix (case-insensitive) — always wins over Q&A heuristics
+    2. Ends with '?'
+    3. Starts with '/ask' slash command
+    4. First word is a question word (what, why, how, when, where, who, which)
+    5. Starts with a KB-request phrase (tell me, show me, find, look up, ...)
 
-    Note capture (note: prefix, declarative sentences) is out of scope — Story 8.3.
+    Everything else is unsupported.
     """
     stripped = text.strip()
     if not stripped:
         return "unsupported"
     lower = stripped.lower()
+
+    if _NOTE_PREFIX_RE.match(stripped):
+        return "note"
 
     if stripped.endswith("?"):
         return "question"
@@ -126,6 +142,15 @@ def _classify_inbound_text(text: str) -> Literal["question", "unsupported"]:
 def _normalise_question_text(text: str) -> str:
     stripped = text.strip()
     match = _ASK_COMMAND_RE.match(stripped)
+    if match is not None:
+        return stripped[match.end() :].strip()
+    return stripped
+
+
+def _normalise_note_text(text: str) -> str:
+    """Strip the 'note:' prefix and surrounding whitespace, return the note body."""
+    stripped = text.strip()
+    match = _NOTE_PREFIX_RE.match(stripped)
     if match is not None:
         return stripped[match.end() :].strip()
     return stripped
@@ -192,6 +217,118 @@ def _format_telegram_qa_reply(response: CitedResponse) -> str:
     return _assemble_telegram_reply(response.answer, response.citations)
 
 
+def _compute_fingerprint(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
+
+
+def _build_note_locator(
+    chat_id: str,
+    message_id: object,
+    update_id: object,
+) -> str:
+    """Return a stable Telegram source locator for a note message."""
+    mid_str = str(message_id) if message_id is not None else ""
+    if mid_str.isdigit() and int(mid_str) > 0:
+        return f"telegram://chat/{chat_id}/message/{message_id}"
+    return f"telegram://chat/{chat_id}/update/{update_id}"
+
+
+def _build_note_alias(capture_dt: datetime, id_ref: object) -> str:
+    """Return a human-readable alias like telegram-note-2026-05-28T101530Z-4321.md."""
+    ts = capture_dt.strftime("%Y-%m-%dT%H%M%SZ")
+    safe_id = re.sub(r"[^0-9a-zA-Z]", "", str(id_ref or "0"))[:12] or "0"
+    return f"telegram-note-{ts}-{safe_id}.md"
+
+
+def _format_sender(from_info: dict) -> str:  # type: ignore[type-arg]
+    first = str(from_info.get("first_name", "")).strip()
+    last = str(from_info.get("last_name", "")).strip()
+    username = str(from_info.get("username", "")).strip()
+    user_id = from_info.get("id")
+
+    name = " ".join(p for p in [first, last] if p)
+    handle = f"@{username}" if username else ""
+    id_part = f"id {user_id}" if user_id is not None else ""
+    detail_parts = [p for p in [handle, id_part] if p]
+    detail = f"({', '.join(detail_parts)})" if detail_parts else ""
+    return " ".join(p for p in [name, detail] if p)
+
+
+def _extract_capture_dt(msg: dict) -> datetime:  # type: ignore[type-arg]
+    msg_date = msg.get("date")
+    if msg_date and isinstance(msg_date, int):
+        try:
+            return datetime.fromtimestamp(msg_date, tz=timezone.utc)
+        except (ValueError, OSError):
+            pass
+    return datetime.now(timezone.utc)
+
+
+def _format_note_md(note_body: str, msg: dict) -> str:  # type: ignore[type-arg]
+    """Build the staged Markdown content for a Telegram note."""
+    lines = ["# Telegram Note", ""]
+    lines.append(f"Captured: {_extract_capture_dt(msg).isoformat()}")
+
+    from_info = msg.get("from")
+    if from_info and isinstance(from_info, dict):
+        sender = _format_sender(from_info)
+        if sender:
+            lines.append(f"Sender: {sender}")
+
+    chat = msg.get("chat") or {}
+    if isinstance(chat, dict) and chat.get("id") is not None:
+        lines.append(f"Chat ID: {chat['id']}")
+
+    message_id = msg.get("message_id")
+    if message_id is not None:
+        lines.append(f"Message ID: {message_id}")
+
+    lines.extend(["", "---", "", note_body])
+    return "\n".join(lines)
+
+
+def _build_note_metadata(
+    msg: dict,  # type: ignore[type-arg]
+    update_id: object,
+    fingerprint: str,
+    capture_dt: datetime,
+) -> dict[str, object]:
+    """Build the ingest job metadata dict for a Telegram note."""
+    chat = msg.get("chat") or {}
+    chat_id = chat.get("id") if isinstance(chat, dict) else None
+    from_info = msg.get("from") or {}
+
+    metadata: dict[str, object] = {
+        "connector": "telegram",
+        "chat_id": chat_id,
+        "message_id": msg.get("message_id"),
+        "update_id": update_id,
+        "message_date": capture_dt.isoformat(),
+        "received_at": datetime.now(timezone.utc).isoformat(),
+        "content_fingerprint": fingerprint,
+    }
+    if isinstance(from_info, dict):
+        if from_info.get("id") is not None:
+            metadata["sender_id"] = from_info["id"]
+        if from_info.get("first_name"):
+            metadata["sender_first_name"] = str(from_info["first_name"])
+        if from_info.get("last_name"):
+            metadata["sender_last_name"] = str(from_info["last_name"])
+        if from_info.get("username"):
+            metadata["sender_username"] = str(from_info["username"])
+    return {k: v for k, v in metadata.items() if v is not None}
+
+
+def _stage_telegram_note(staging_dir: Path, note_md: str, source_alias: str) -> Path:
+    """Write the note Markdown to a uniquely-named staged file and return its path."""
+    staging_dir.mkdir(parents=True, exist_ok=True)
+    stem = source_alias[: -len(".md")] if source_alias.endswith(".md") else source_alias
+    token = uuid4().hex[:8]
+    staged_path = staging_dir / f"{stem}_{token}.md"
+    staged_path.write_text(note_md, encoding="utf-8")
+    return staged_path
+
+
 async def _poll_once(
     cfg: TelegramConnectorConfig,
     client: httpx.AsyncClient,
@@ -233,6 +370,7 @@ async def _handle_update(
     retrieval_service: Any = None,
     output_service: Any = None,
     role_pack: Any = None,
+    pool: Any = None,
 ) -> None:
     update_id = update.get("update_id") if isinstance(update, dict) else None
     message_id: object | None = None
@@ -318,6 +456,107 @@ async def _handle_update(
                 _log("info", "no-content outcome", **_log_ids(update_id, message_id))
             reply = _format_telegram_qa_reply(response)
             await output_service.send("telegram", reply)
+
+        elif classification == "note":
+            note_body = _normalise_note_text(text)
+            if not note_body:
+                _log(
+                    "info",
+                    "empty note received — sending guidance",
+                    **_log_ids(update_id, message_id),
+                    text_length=len(text),
+                    note_length=0,
+                )
+                await output_service.send("telegram", _EMPTY_NOTE_GUIDANCE)
+                return
+
+            note_length = len(note_body)
+            _log(
+                "info",
+                "note accepted",
+                **_log_ids(update_id, message_id),
+                note_length=note_length,
+            )
+            staged_path: Path | None = None
+            try:
+                capture_dt = _extract_capture_dt(msg)
+                note_md = _format_note_md(note_body, msg)
+                fingerprint = _compute_fingerprint(note_md.encode("utf-8"))
+                source_locator = _build_note_locator(cfg.chat_id, message_id, update_id)
+                source_alias = _build_note_alias(capture_dt, message_id or update_id)
+
+                if pool is None:
+                    raise RuntimeError("no database pool — note capture unavailable")
+
+                async with pool.connection() as conn:
+                    if await has_processed_artifact(
+                        conn, "telegram_note", source_locator, fingerprint
+                    ):
+                        _log(
+                            "info",
+                            "note already processed — acking as saved",
+                            **_log_ids(update_id, message_id),
+                            note_length=note_length,
+                        )
+                    elif await has_pending_job_for_locator(
+                        conn, source_locator, fingerprint
+                    ):
+                        _log(
+                            "info",
+                            "note already queued — acking as saved",
+                            **_log_ids(update_id, message_id),
+                            note_length=note_length,
+                        )
+                    else:
+                        staged_path = _stage_telegram_note(
+                            cfg.staging_dir, note_md, source_alias
+                        )
+                        metadata = _build_note_metadata(
+                            msg, update_id, fingerprint, capture_dt
+                        )
+                        await submit_ingest_job(
+                            conn,
+                            staged_path=str(staged_path),
+                            source_type="telegram_note",
+                            source_locator=source_locator,
+                            source_alias=source_alias,
+                            metadata=metadata,
+                        )
+                        _log(
+                            "info",
+                            "note enqueued",
+                            **_log_ids(update_id, message_id),
+                            note_length=note_length,
+                        )
+
+                staged_path = None
+            except Exception as exc:
+                if staged_path is not None:
+                    staged_path.unlink(missing_ok=True)
+                _log(
+                    "error",
+                    "note save failed",
+                    **_log_ids(update_id, message_id),
+                    note_length=note_length,
+                    error=str(exc)[:200],
+                )
+                try:
+                    await output_service.send("telegram", _NOTE_SAVE_FAILURE_REPLY)
+                except Exception:
+                    pass
+                return
+
+            try:
+                await output_service.send("telegram", _NOTE_SAVE_REPLY)
+            except Exception as exc:
+                _log(
+                    "error",
+                    "note save acknowledgement failed",
+                    **_log_ids(update_id, message_id),
+                    note_length=note_length,
+                    error=str(exc)[:200],
+                )
+
         else:
             _log(
                 "info",
@@ -357,6 +596,7 @@ async def run_polling(
     retrieval_service: Any = None,
     output_service: Any = None,
     role_pack: Any = None,
+    pool: Any = None,
 ) -> None:
     _log("info", "Telegram polling started", chat_id=cfg.chat_id)
     offset = 0
@@ -374,6 +614,7 @@ async def run_polling(
                         retrieval_service=retrieval_service,
                         output_service=output_service,
                         role_pack=role_pack,
+                        pool=pool,
                     )
             except Exception as exc:
                 msg = str(exc)
@@ -395,7 +636,7 @@ async def run_polling(
 
 
 async def _run_telegram_bot(config: CosConfig) -> None:
-    """Build Q&A service dependencies and start the polling loop."""
+    """Build Q&A and note-capture service dependencies and start the polling loop."""
     import yaml  # type: ignore[import-untyped]
     from pydantic import ValidationError
 
@@ -435,13 +676,18 @@ async def _run_telegram_bot(config: CosConfig) -> None:
         llm_adapter=llm_adapter,
     )
 
-    _log("info", "Q&A services initialised", role_name=role_pack.role_name)
+    _log(
+        "info",
+        "Q&A and note-capture services initialised",
+        role_name=role_pack.role_name,
+    )
 
     await run_polling(
         cfg,
         retrieval_service=retrieval_service,
         output_service=output_service,
         role_pack=role_pack,
+        pool=pool,
     )
 
 

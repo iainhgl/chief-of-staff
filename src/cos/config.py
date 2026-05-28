@@ -104,6 +104,7 @@ class TelegramConnectorConfig(BaseModel):
     poll_timeout: int = Field(default=30, ge=1, le=120)
     backoff_initial: float = Field(default=1.0, gt=0.0)
     backoff_max: float = Field(default=60.0, ge=0.1)
+    staging_dir: Path = Path("/data/connector-staging/telegram")
 
     @field_validator("bot_token")
     @classmethod

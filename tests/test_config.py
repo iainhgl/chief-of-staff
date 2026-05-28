@@ -488,3 +488,34 @@ def test_telegram_config_rejects_blank_chat_id(tmp_path):
 
     with pytest.raises(Exception):
         TelegramConnectorConfig(bot_token="tok", chat_id="   ")
+
+
+# ── Telegram staging_dir config tests (Story 8.3) ─────────────────────────
+
+def test_telegram_config_staging_dir_default(tmp_path):
+    from cos.config import TelegramConnectorConfig
+
+    cfg = TelegramConnectorConfig(bot_token="tok", chat_id="123")
+    assert cfg.staging_dir == Path("/data/connector-staging/telegram")
+
+
+def test_telegram_config_staging_dir_override(tmp_path):
+    from cos.config import TelegramConnectorConfig
+
+    cfg = TelegramConnectorConfig(
+        bot_token="tok", chat_id="123", staging_dir="/custom/staging"
+    )
+    assert cfg.staging_dir == Path("/custom/staging")
+
+
+def test_telegram_config_staging_dir_loads_from_yaml(tmp_path):
+    yaml_with_staging = VALID_CONFIG_YAML + (
+        "\ntelegram:\n"
+        "  bot_token: tg-secret\n"
+        "  chat_id: \"111222333\"\n"
+        "  staging_dir: /data/connector-staging/telegram\n"
+    )
+    cfg_file = _write_config(tmp_path, yaml_with_staging)
+    config = CosConfig.load(cfg_file)
+    assert config.telegram is not None
+    assert config.telegram.staging_dir == Path("/data/connector-staging/telegram")
