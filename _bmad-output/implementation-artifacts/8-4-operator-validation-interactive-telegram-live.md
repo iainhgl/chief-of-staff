@@ -1,6 +1,6 @@
 # Story 8.4: Operator Validation - Interactive Telegram Live
 
-Status: review
+Status: in-progress
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -74,6 +74,14 @@ so that I can validate interactive messaging before adding web or scheduler comp
     ```
 
     Result: 126 passed, 0 regressions (run as precaution even though no connector changes were made).
+
+### Review Findings
+
+- [ ] [Review][Patch] Missing live Telegram/MCP validation evidence despite story marked complete [_bmad-output/implementation-artifacts/8-4-operator-validation-interactive-telegram-live.md:57]
+- [x] [Review][Patch] Duplicate-delivery verification filters for the note marker in `source_alias`, but Telegram note aliases never contain note body markers [docs/manual-testing.md:1648] — fixed by checking the recorded `source_locator`
+- [x] [Review][Patch] Worker-drain polling can pass on any stale `telegram-note-` source instead of the current validation note [docs/manual-testing.md:1613] — fixed by requiring the current note locator suffix
+- [x] [Review][Patch] Chat ID discovery instruction points to connector logs that do not expose incoming `chat.id` [docs/manual-testing.md:1526] — fixed by pointing operators to Telegram `getUpdates`
+- [x] [Review][Patch] Worker log check asks operators to find a staged-file signal the worker does not log [docs/manual-testing.md:1607] — fixed by using connector IDs plus `cos docs --json` as the drain signal
 
 ## Dev Notes
 

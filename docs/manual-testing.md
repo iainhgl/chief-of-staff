@@ -270,7 +270,7 @@ Needed only for MCP packs:
 Needed only for the Telegram live pack (Test Pack 12):
 
 - a working Telegram bot token in `config.yaml` under `telegram.bot_token`
-- a configured `telegram.chat_id` for the account/group the bot should respond to
+- a configured `telegram.chat_id` for the account/group the bot should respond to; if you need to discover it, send a message to the bot and call Telegram `getUpdates` directly as shown in `config.yaml.example` before relying on the platform bot
 - `"telegram"` listed in `connectors` in `config.yaml`
 - `telegram` listed in the active role pack's `output_channels` (already present in `role_packs/chro.yaml`)
 - the `telegram-bot` service running via Docker Compose (`docker compose up -d`)
@@ -381,7 +381,7 @@ Expected:
 - `cos` logs end with the normal startup sequence including migrations and MCP startup
 - `worker` logs show `worker starting`
 - `cos status` reports the platform as healthy
-- if Telegram is configured: `docker compose logs telegram-bot --tail=20` ends with a structured log line containing `"message": "Telegram polling started"`
+- if Telegram is configured: `docker compose logs telegram-bot --tail=50` contains a structured log line with `"message": "Telegram polling started"` and no repeated startup errors after that line
 
 ### 4. Enable Google APIs (connected-source packs only)
 
@@ -1523,11 +1523,11 @@ This pack validates the reactive Telegram slice from Stories 8.1, 8.2, and 8.3 u
 Before running this pack, confirm all of the following:
 
 - `telegram.bot_token` is set to a valid bot token in `config.yaml`
-- `telegram.chat_id` is set to the numeric chat ID for your test conversation (send `/start` to the bot and inspect `docker compose logs telegram-bot --tail=20` to find the update's `chat.id`)
+- `telegram.chat_id` is set to the numeric chat ID for your test conversation. To discover it, send `/start` or any short message to the bot, then run `curl "https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates"` from the host and copy the returned `message.chat.id`; the platform connector intentionally does not log incoming chat IDs.
 - `"telegram"` is listed in `connectors` in `config.yaml`
 - `telegram` is in the active role pack's `output_channels` (already present in `role_packs/chro.yaml`)
 - all Docker Compose services are running: `docker compose ps` shows `postgres`, `tika`, `cos`, `worker`, and `telegram-bot` all `Up` or `healthy`
-- `docker compose logs telegram-bot --tail=20` ends with a log line containing `"message": "Telegram polling started"`
+- `docker compose logs telegram-bot --tail=50` contains a log line with `"message": "Telegram polling started"` and no repeated startup errors after that line
 - a working MCP client is available for the local retrieval verification step
 
 If `telegram-bot` is not running or is in a restart loop, check `docker compose logs telegram-bot --tail=50` for startup errors before continuing.
@@ -1563,7 +1563,7 @@ What does the Epic 8 Telegram live validation policy say?
 
 Record the time you sent the message.
 
-**Pass signal:** the bot replies with a concise answer containing a `Sources:` block that names the seeded `source_alias` (e.g. `epic-8-telegram-live-question.md` or similar). A fluent answer with no `Sources:` block is not a pass.
+**Pass signal:** the bot replies with a concise answer containing a `Sources:` block that names the exact seeded `source_alias` you recorded above. A fluent answer with no `Sources:` block is not a pass.
 
 **Fail boundary:** the bot timeout is 60 seconds (`_RETRIEVAL_TIMEOUT_SECONDS`). Any reply received within 60 seconds passes the time boundary. A timeout returns the recovery reply `"I could not answer that just now. Check 'cos logs' for diagnostics."` and is a time-boundary failure.
 
@@ -1598,26 +1598,33 @@ Record the acknowledgement:
 [EVIDENCE] Acknowledgement text was exactly "Note saved.": YES / NO
 ```
 
-Wait for the worker to index the note before testing retrieval. The worker processes jobs in the background. Check worker progress:
+Wait for the worker to index the note before testing retrieval. First, capture the note locator suffix from the bot logs. The connector logs `message_id` and `update_id`, but not full note text:
 
 ```bash
-docker compose logs worker --tail=30
+docker compose logs telegram-bot --tail=120 | grep '"message": "note enqueued"'
 ```
 
-Look for a log line referencing the staged telegram note file (the log will show the staged path, not the full note text). Alternatively, poll until the note appears in `list_documents`:
+Set `NOTE_LOCATOR_SUFFIX` from that log line. Use `/message/<message_id>` when `message_id` is present; if the bot had to fall back to update identity, use `/update/<update_id>`:
 
 ```bash
-docker compose exec cos uv run cos docs --json | python3 -c "
-import json, sys
+NOTE_LOCATOR_SUFFIX='/message/REPLACE_WITH_MESSAGE_ID'
+```
+
+Then poll `cos docs --json` until the current note appears. This check is intentionally tied to the current note's locator suffix so older `telegram-note-...` sources cannot satisfy the wait:
+
+```bash
+docker compose exec -T cos uv run cos docs --json | NOTE_LOCATOR_SUFFIX="$NOTE_LOCATOR_SUFFIX" python3 -c '
+import json, os, sys
+suffix = os.environ["NOTE_LOCATOR_SUFFIX"]
 docs = json.load(sys.stdin)
-tg = [d for d in docs if d.get('source_alias','').startswith('telegram-note-')]
-print(f'{len(tg)} telegram note(s) found')
-for d in tg:
-    print(f\"  alias={d['source_alias']}  locator={d.get('source_locator','')}\")
-"
+matches = [d for d in docs if d.get("source_locator", "").endswith(suffix)]
+print(f"{len(matches)} telegram note(s) found for locator suffix {suffix}")
+for d in matches:
+    print("  alias={}  locator={}".format(d["source_alias"], d.get("source_locator", "")))
+'
 ```
 
-Wait until the above command shows at least one `telegram-note-` source before continuing.
+Wait until the above command shows exactly one `telegram-note-...md` source for the current note before continuing. Worker logs may show `job succeeded`, but the durable pass signal is the document record with the expected locator suffix.
 
 Once the worker has drained, verify the note is retrievable via a Telegram follow-up question:
 
@@ -1632,6 +1639,7 @@ Evidence to record:
 ```text
 [EVIDENCE] telegram-note source_alias:  ________________________________
 [EVIDENCE] telegram-note source_locator (redact chat ID if sensitive):  telegram://chat/***/{message_id}
+[EVIDENCE] Note locator suffix used for worker drain:  /message/________
 [EVIDENCE] Worker processed the note before retrieval: YES / NO
 [EVIDENCE] Follow-up retrieval reply cited the note: YES / NO
 [EVIDENCE] Note capture pass: YES / NO
@@ -1642,15 +1650,19 @@ Evidence to record:
 If you received the original `"Note saved."` twice (e.g. a Telegram retry delivered the update a second time), verify no duplicate canonical state was created:
 
 ```bash
-docker compose exec cos uv run cos docs --json | python3 -c "
-import json, sys
+NOTE_SOURCE_LOCATOR='telegram://chat/REAL_CHAT_ID/message/REPLACE_WITH_MESSAGE_ID'
+docker compose exec -T cos uv run cos docs --json | NOTE_SOURCE_LOCATOR="$NOTE_SOURCE_LOCATOR" python3 -c '
+import json, os, sys
+locator = os.environ["NOTE_SOURCE_LOCATOR"]
 docs = json.load(sys.stdin)
-tg = [d for d in docs if 'epic-8-telegram-live-note-a' in d.get('source_alias','')]
-print(f'{len(tg)} note source(s) for this marker')
-"
+matches = [d for d in docs if d.get("source_locator") == locator]
+print(f"{len(matches)} note source(s) for the recorded locator")
+for d in matches:
+    print("  alias={}  locator={}".format(d["source_alias"], d.get("source_locator", "")))
+'
 ```
 
-Expected: exactly one record regardless of whether the bot sent `"Note saved."` twice.
+Expected: exactly one record for the recorded `source_locator` regardless of whether the bot sent `"Note saved."` twice. Use the real unredacted locator when running the local command; redact the chat ID only in committed evidence.
 
 ### Step 3 — Safe Telegram API outage simulation (AC #3)
 
@@ -1658,7 +1670,7 @@ This step uses a reversible `config.yaml` override. Do not revoke the bot token,
 
 **Simulate the outage:**
 
-1. Open `config.yaml` and temporarily change the Telegram API base to a non-listening local endpoint:
+1. Open `config.yaml` and temporarily change only the existing `telegram.api_base_url` value to a non-listening local endpoint. Keep the rest of the `telegram:` block, including `bot_token` and `chat_id`, unchanged:
 
    ```yaml
    telegram:
@@ -1706,7 +1718,7 @@ Evidence to record:
 
 **Restore Telegram:**
 
-1. Revert `config.yaml` to the real Telegram API base:
+1. Revert only the `telegram.api_base_url` value in `config.yaml` to the real Telegram API base:
 
    ```yaml
    telegram:
