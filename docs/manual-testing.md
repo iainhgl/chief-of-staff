@@ -1,8 +1,8 @@
 # Manual Testing Guide
 
-Reflects the platform through **Epic 7: Retrieval Trust, Evaluation & Observability**.
+Reflects the platform through **Epic 8: Interactive Telegram Messaging**.
 
-This guide now treats **Epic 7 retrieval-trust validation as the default UAT path**. If you only run one check before signing off a retrieval change, run [Test Pack 11](#test-pack-11-epic-7-retrieval-trust-regression-suite) on a clean benchmark database.
+This guide now treats **Epic 7 retrieval-trust validation as the default UAT path** for retrieval changes, and adds **Test Pack 12** as the validation path for the reactive Telegram slice. If you only run one check before signing off a retrieval change, run [Test Pack 11](#test-pack-11-epic-7-retrieval-trust-regression-suite) on a clean benchmark database. If you are validating Telegram messaging, run [Test Pack 12](#test-pack-12-epic-8-interactive-telegram-live).
 
 The connected-ingestion and operational packs are still active regression packs for the parts of the product that Test Pack 11 does not cover. Use them when your change touches live source onboarding, provenance, queueing, restart behavior, or MCP note flows.
 
@@ -14,11 +14,12 @@ Other than the shared bootstrap for config and platform startup, each pack is me
 
 In plain English, the product today can:
 
-- ingest local files, Gmail messages and attachments, Google Calendar events, and MCP-authored notes
+- ingest local files, Gmail messages and attachments, Google Calendar events, MCP-authored notes, and Telegram notes
 - preserve where every piece of content came from, including version history and cross-source deduplication
 - expose retrieval APIs that later user-facing workflows can use for grounded answers and citations
 - apply score-threshold controls so unsupported questions can fall back to no-answer behavior
 - measure retrieval quality with a committed benchmark corpus and a repeatable CLI gate
+- answer questions and capture notes interactively via a Telegram bot, with cited answers and background worker processing
 
 Important scope note: [Test Pack 11](#test-pack-11-epic-7-retrieval-trust-regression-suite) proves retrieval evidence selection, lineage control, no-answer handling, and retrieval-path latency on the benchmark corpus. It does **not** on its own prove Google OAuth, background queueing, restart persistence, or live assistant wording.
 
@@ -37,6 +38,20 @@ Epic 7 adds a structured evaluation layer and hardens retrieval trust:
 - `gold-na-001` (pension contribution rate) enforced as a mandatory release-gate check for retrieval-trust sign-off
 
 The primary change to operator validation workflow: before signing off a retrieval change, run the benchmark harness using the gold corpus as the release gate on a clean benchmark database. Runs against a populated live database are still useful diagnostics, but they are not authoritative gate results. See [Test Pack 11](#test-pack-11-epic-7-retrieval-trust-regression-suite) for the full runbook.
+
+---
+
+## What Epic 8 Added
+
+Epic 8 adds reactive Telegram messaging:
+
+- a `telegram-bot` Docker Compose service that long-polls the Telegram Bot API for inbound messages from the configured chat
+- inbound question routing: text that looks like a question triggers `RetrievalService.query(...)` and sends a concise cited reply through `OutputService` via `TelegramChannel`
+- inbound `Note:` capture: note text is normalised, staged to disk, and submitted as a `telegram_note` ingest job so the worker indexes it into the canonical knowledge base
+- deduplication at enqueue time: a note that has already been processed or is already queued returns `"Note saved."` without creating duplicate canonical state
+- explicit outage logging: when `getUpdates` returns a non-success HTTP response or Telegram API error, the polling loop logs the error and retries with exponential backoff, keeping the rest of the platform healthy
+
+The primary change to operator validation workflow for Epic 8: run Test Pack 12 before relying on Telegram for interactive Q&A or note capture in any environment.
 
 ---
 
@@ -64,14 +79,17 @@ Before you choose a path, complete the pre-UAT isolation step below so this run 
 1. **Default UAT path for retrieval changes**  
    Start with [Test Pack 11](#test-pack-11-epic-7-retrieval-trust-regression-suite). This is the primary Epic 7 UAT path and the first check to run whenever retrieval behavior changes.
 
-2. **Connected-source regression after ingestion or provenance changes**  
+2. **Reactive Telegram validation**  
+   Run [Test Pack 12](#test-pack-12-epic-8-interactive-telegram-live) when you have changed the Telegram bot, output routing, or note-capture flow, or when you want to confirm end-to-end Telegram messaging works in a live environment.
+
+3. **Connected-source regression after ingestion or provenance changes**  
    Run the shared bootstrap, then only the supporting packs that match what changed:
    local ingest, Gmail, Calendar, MCP note ingest, dedupe, versioning, retrieval, or restart.
 
-3. **Full operator confidence pass**  
-   Run Test Pack 11 first, then add the supporting packs that represent the live user journeys you care about in this environment.
+4. **Full operator confidence pass**  
+   Run Test Pack 11 first, then Test Pack 12 for Telegram, then add the supporting packs that represent the live user journeys you care about in this environment.
 
-4. **Optional large-document sanity pass**  
+5. **Optional large-document sanity pass**  
    Use `tests/fixtures/real_world_eval/` after extraction, chunking, or format-handling changes. This corpus is manual-only, snapshot-based, and not part of the release gate or CI.
 
 ---
@@ -216,6 +234,7 @@ both config files.
 | Pack | When to run | In plain English, what this is testing |
 |---|---|---|
 | **11** | Every release-gate pass | Can the assistant retrieve the right evidence, stay grounded to the right source, refuse unsupported answers, and stay fast enough? |
+| **12** | After Telegram bot, output routing, or note-capture changes | Can the reactive Telegram slice — inbound Q&A, note capture, worker processing, cited retrieval, and Telegram failure isolation — work together end-to-end? |
 | **1** | After local ingest changes | Can I still drop files into the system and see them show up correctly? |
 | **2** | After Gmail/auth/queue changes | Can I connect Gmail, sync messages, and trust background ingest plus provenance? |
 | **3** | After Calendar/auth/queue changes | Can I connect Calendar, sync events, and see them preserved correctly? |
@@ -247,6 +266,15 @@ Needed only for connected-source packs:
 Needed only for MCP packs:
 
 - Claude Code or Claude Desktop available for the live MCP tests
+
+Needed only for the Telegram live pack (Test Pack 12):
+
+- a working Telegram bot token in `config.yaml` under `telegram.bot_token`
+- a configured `telegram.chat_id` for the account/group the bot should respond to
+- `"telegram"` listed in `connectors` in `config.yaml`
+- `telegram` listed in the active role pack's `output_channels` (already present in `role_packs/chro.yaml`)
+- the `telegram-bot` service running via Docker Compose (`docker compose up -d`)
+- a working MCP client for the local retrieval verification step in AC #3
 
 Needed only for the optional manual large-document corpus:
 
@@ -338,6 +366,7 @@ Expected:
 - `tika` is `healthy`
 - `cos` is `healthy`
 - `worker` is `Up`
+- `telegram-bot` is `Up` (if `"telegram"` is in `connectors` in `config.yaml`)
 
 ### 3. Verify health
 
@@ -352,6 +381,7 @@ Expected:
 - `cos` logs end with the normal startup sequence including migrations and MCP startup
 - `worker` logs show `worker starting`
 - `cos status` reports the platform as healthy
+- if Telegram is configured: `docker compose logs telegram-bot --tail=20` ends with a structured log line containing `"message": "Telegram polling started"`
 
 ### 4. Enable Google APIs (connected-source packs only)
 
@@ -1482,9 +1512,261 @@ Key fields in `per_query` entries:
 
 ---
 
+## Test Pack 12: Epic 8 Interactive Telegram Live
+
+Plain English: can you send a question and a note via Telegram and get the right cited answer back, have the note become a first-class knowledge-base source, and confirm that a Telegram API outage does not take down local MCP retrieval?
+
+This pack validates the reactive Telegram slice from Stories 8.1, 8.2, and 8.3 using a real Telegram client and a real Docker Compose deployment. It is intentionally a live manual runbook, not an automated test.
+
+### Pack-specific prerequisites
+
+Before running this pack, confirm all of the following:
+
+- `telegram.bot_token` is set to a valid bot token in `config.yaml`
+- `telegram.chat_id` is set to the numeric chat ID for your test conversation (send `/start` to the bot and inspect `docker compose logs telegram-bot --tail=20` to find the update's `chat.id`)
+- `"telegram"` is listed in `connectors` in `config.yaml`
+- `telegram` is in the active role pack's `output_channels` (already present in `role_packs/chro.yaml`)
+- all Docker Compose services are running: `docker compose ps` shows `postgres`, `tika`, `cos`, `worker`, and `telegram-bot` all `Up` or `healthy`
+- `docker compose logs telegram-bot --tail=20` ends with a log line containing `"message": "Telegram polling started"`
+- a working MCP client is available for the local retrieval verification step
+
+If `telegram-bot` is not running or is in a restart loop, check `docker compose logs telegram-bot --tail=50` for startup errors before continuing.
+
+### Pack-specific setup: seed the Q&A validation document
+
+Run these commands from the repo root on the **host**:
+
+```bash
+mkdir -p data/uat-docs/telegram
+printf '%s\n' 'Epic 8 Telegram live validation policy. Marker: epic-8-telegram-live-question-a. The Telegram live validation policy says reactive Telegram Q&A must return cited answers.' > data/uat-docs/telegram/epic-8-telegram-live-question.md
+docker compose exec cos uv run cos ingest /data/uat-docs/telegram/epic-8-telegram-live-question.md
+```
+
+Expected:
+
+- the ingest command prints a completion summary with no errors
+- `docker compose exec cos uv run cos docs` lists `epic-8-telegram-live-question.md` as a `file` source
+
+Record the `source_alias` returned by `cos docs`:
+
+```text
+[EVIDENCE] Seeded Q&A source_alias: ________________________________
+```
+
+### Step 1 — Live Telegram Q&A smoke path (AC #1)
+
+Send the following message to the bot from your Telegram client:
+
+```text
+What does the Epic 8 Telegram live validation policy say?
+```
+
+Record the time you sent the message.
+
+**Pass signal:** the bot replies with a concise answer containing a `Sources:` block that names the seeded `source_alias` (e.g. `epic-8-telegram-live-question.md` or similar). A fluent answer with no `Sources:` block is not a pass.
+
+**Fail boundary:** the bot timeout is 60 seconds (`_RETRIEVAL_TIMEOUT_SECONDS`). Any reply received within 60 seconds passes the time boundary. A timeout returns the recovery reply `"I could not answer that just now. Check 'cos logs' for diagnostics."` and is a time-boundary failure.
+
+Evidence to record:
+
+```text
+[EVIDENCE] Q&A run timestamp (UTC):  ________________________________
+[EVIDENCE] Observed end-to-end latency (send → reply):  ______ s
+[EVIDENCE] Reply received: YES / NO
+[EVIDENCE] Sources: block present: YES / NO
+[EVIDENCE] Cited source_alias in reply:  ________________________________
+[EVIDENCE] Q&A pass: YES / NO
+[EVIDENCE] Notes (e.g. slow but within timeout): ________________________________
+```
+
+Note on latency: this measurement includes live Telegram API round-trip and LLM synthesis. It is not the same as the deterministic retrieval latency measured by the Epic 7 benchmark. Record the observed latency honestly; treat responses that feel too slow (even if within 60 seconds) as worth noting for future tuning.
+
+### Step 2 — Live Telegram note capture through worker and retrieval path (AC #2)
+
+Send the following message to the bot:
+
+```text
+Note: Epic 8 Telegram live validation note. Marker: epic-8-telegram-live-note-a. This note says live Telegram note capture works and becomes retrievable.
+```
+
+**Immediate pass signal:** the bot replies with exactly `"Note saved."` This means the note was durably staged and queued (or deduplicated as already queued/processed).
+
+Record the acknowledgement:
+
+```text
+[EVIDENCE] Note acknowledgement received: ________________________________
+[EVIDENCE] Acknowledgement text was exactly "Note saved.": YES / NO
+```
+
+Wait for the worker to index the note before testing retrieval. The worker processes jobs in the background. Check worker progress:
+
+```bash
+docker compose logs worker --tail=30
+```
+
+Look for a log line referencing the staged telegram note file (the log will show the staged path, not the full note text). Alternatively, poll until the note appears in `list_documents`:
+
+```bash
+docker compose exec cos uv run cos docs --json | python3 -c "
+import json, sys
+docs = json.load(sys.stdin)
+tg = [d for d in docs if d.get('source_alias','').startswith('telegram-note-')]
+print(f'{len(tg)} telegram note(s) found')
+for d in tg:
+    print(f\"  alias={d['source_alias']}  locator={d.get('source_locator','')}\")
+"
+```
+
+Wait until the above command shows at least one `telegram-note-` source before continuing.
+
+Once the worker has drained, verify the note is retrievable via a Telegram follow-up question:
+
+```text
+What does the Epic 8 Telegram live validation note say?
+```
+
+**Pass signal:** the bot replies with an answer referencing the note content and a `Sources:` block citing a `telegram-note-...md` alias.
+
+Evidence to record:
+
+```text
+[EVIDENCE] telegram-note source_alias:  ________________________________
+[EVIDENCE] telegram-note source_locator (redact chat ID if sensitive):  telegram://chat/***/{message_id}
+[EVIDENCE] Worker processed the note before retrieval: YES / NO
+[EVIDENCE] Follow-up retrieval reply cited the note: YES / NO
+[EVIDENCE] Note capture pass: YES / NO
+```
+
+#### Duplicate delivery check
+
+If you received the original `"Note saved."` twice (e.g. a Telegram retry delivered the update a second time), verify no duplicate canonical state was created:
+
+```bash
+docker compose exec cos uv run cos docs --json | python3 -c "
+import json, sys
+docs = json.load(sys.stdin)
+tg = [d for d in docs if 'epic-8-telegram-live-note-a' in d.get('source_alias','')]
+print(f'{len(tg)} note source(s) for this marker')
+"
+```
+
+Expected: exactly one record regardless of whether the bot sent `"Note saved."` twice.
+
+### Step 3 — Safe Telegram API outage simulation (AC #3)
+
+This step uses a reversible `config.yaml` override. Do not revoke the bot token, change BotFather settings, or enable webhooks.
+
+**Simulate the outage:**
+
+1. Open `config.yaml` and temporarily change the Telegram API base to a non-listening local endpoint:
+
+   ```yaml
+   telegram:
+     api_base_url: http://127.0.0.1:9
+   ```
+
+2. Restart only the `telegram-bot` service so the bad endpoint takes effect:
+
+   ```bash
+   docker compose up -d --force-recreate telegram-bot
+   ```
+
+3. Within 60 seconds, inspect the bot logs:
+
+   ```bash
+   docker compose logs telegram-bot --tail=80
+   ```
+
+**Degraded pass signal:** look for a structured log line with `"message": "polling error — retrying after backoff"` and an `error` field describing the connection failure (e.g. `"ConnectError"` or similar). This confirms the connector is in a degraded-and-retrying state.
+
+Evidence to record:
+
+```text
+[EVIDENCE] Degraded log line seen within 60s: YES / NO
+[EVIDENCE] Log message text (redact any tokens):  ________________________________
+```
+
+**Verify local MCP retrieval still works while Telegram is degraded:**
+
+In the MCP client, run a retrieval query against the seeded Q&A document:
+
+```text
+Use retrieve to answer: what does the Epic 8 Telegram live validation policy say?
+```
+
+**Pass signal:** the MCP retrieval returns a cited answer from the seeded `epic-8-telegram-live-question.md` source. The `cos` MCP server and local retrieval path must remain fully functional while `telegram-bot` is degraded.
+
+Evidence to record:
+
+```text
+[EVIDENCE] MCP retrieve succeeded while Telegram degraded: YES / NO
+[EVIDENCE] Cited source_alias in MCP result:  ________________________________
+[EVIDENCE] Failure isolation pass: YES / NO
+```
+
+**Restore Telegram:**
+
+1. Revert `config.yaml` to the real Telegram API base:
+
+   ```yaml
+   telegram:
+     api_base_url: https://api.telegram.org
+   ```
+
+2. Restart `telegram-bot`:
+
+   ```bash
+   docker compose up -d --force-recreate telegram-bot
+   ```
+
+3. Within 30 seconds, confirm polling resumes:
+
+   ```bash
+   docker compose logs telegram-bot --tail=20
+   ```
+
+   Expected: a log line containing `"message": "Telegram polling started"` followed eventually by lines without error messages.
+
+Evidence to record:
+
+```text
+[EVIDENCE] Telegram bot resumed polling after restore: YES / NO
+[EVIDENCE] Cleanup complete (api_base_url restored): YES / NO
+```
+
+### Step 4 — Verify platform config is consistent (documentation-only check)
+
+Since this story makes no changes to Docker Compose topology, confirm the config renders cleanly:
+
+```bash
+docker compose config > /dev/null && echo "OK"
+```
+
+Expected: prints `OK` with no errors.
+
+### Evidence Summary
+
+Record the following before marking this story complete:
+
+| Item | Value |
+|------|-------|
+| Run timestamp (UTC) | |
+| Seeded Q&A `source_alias` | |
+| Telegram Q&A observed latency | |
+| Q&A cited `source_alias` in reply | |
+| Note acknowledgement text | |
+| Note `source_alias` | |
+| Note `source_locator` (redact chat ID) | |
+| Degraded log signal (excerpt) | |
+| MCP retrieval result while degraded | |
+| Bot resumed polling after restore | |
+| Cleanup status | |
+
+---
+
 ## Pass Criteria
 
-Start with Epic 7 for retrieval changes. Add the connected-source criteria whenever you changed ingestion, provenance, queueing, auth, MCP note handling, or restart behaviour.
+Start with Epic 7 for retrieval changes. Run the Telegram pass criteria when you have changed the bot, output routing, or note-capture flow. Add the connected-source criteria whenever you changed ingestion, provenance, queueing, auth, MCP note handling, or restart behaviour.
 
 ### Epic 7 Retrieval Trust Regression
 
@@ -1522,6 +1804,38 @@ In plain English, Epic 7 is a pass when the benchmark proves the product can sta
 - The benchmark JSON report is saved at a stable path under `_bmad-output/implementation-artifacts/`
 - The UAT notes include the run timestamp, corpus version, pass rate, per-class summary, and any documented exceptions
 - If a populated-database run is captured for diagnostics, the test record labels it as diagnostic rather than treating it as the authoritative retrieval-trust gate
+
+### Epic 8 Reactive Telegram
+
+In plain English, Epic 8 is a pass when all three reactive Telegram behaviors work end-to-end: a question gets a cited answer, a note becomes a first-class knowledge-base source, and a Telegram API failure does not degrade local MCP retrieval.
+
+#### 1. Live Telegram Q&A (AC #1)
+
+- a question sent from the Telegram client is answered within 60 seconds
+- the reply contains a `Sources:` block citing the seeded `source_alias`
+- a fluent answer with no `Sources:` block is not a pass
+- the observed end-to-end latency is recorded honestly; a timeout returns the recovery reply and is a failure
+
+#### 2. Live Telegram note capture (AC #2)
+
+- the immediate acknowledgement is exactly `"Note saved."`
+- after the worker drains, the note appears in `cos docs` as a `telegram_note` source with a `telegram-note-...md` alias and a `telegram://chat/.../message/...` locator
+- a follow-up retrieval query (via Telegram or MCP) cites the note's `source_alias`
+- if a duplicate delivery occurred, exactly one canonical source record exists for the same locator and fingerprint
+
+#### 3. Telegram failure isolation (AC #3)
+
+- after pointing `telegram.api_base_url` at a non-listening local endpoint and restarting `telegram-bot`, the bot logs `"polling error — retrying after backoff"` with an error field within 60 seconds
+- local MCP `retrieve` against the seeded Q&A document returns a cited answer while the bot is degraded
+- after restoring the real `api_base_url`, the bot logs `"Telegram polling started"` and resumes normal polling
+- the `config.yaml` `api_base_url` is confirmed restored before the story is marked complete
+
+#### 4. Evidence captured
+
+- all evidence fields in the Test Pack 12 Evidence Summary table are filled in
+- no bot tokens, full chat IDs, or private note text appear in the committed evidence
+
+---
 
 ### Connected-Source and Operations Regression
 
@@ -1573,3 +1887,9 @@ If this was a one-off UAT run against a personal Google account:
 - delete the Calendar test events
 - remove `tokens/gmail.json` and `tokens/google_calendar.json` if you do not want to keep the local auth state
 - clear `data/` and restart containers if you want a clean local knowledge base afterwards
+
+If you ran Test Pack 12 (Telegram live):
+
+- confirm `telegram.api_base_url` in `config.yaml` is restored to `https://api.telegram.org` (the outage simulation step should have already done this)
+- remove `data/uat-docs/telegram/epic-8-telegram-live-question.md` from the host if you do not want it to remain in the knowledge base
+- the seeded `telegram-note-...` source will remain in the knowledge base after the worker indexes it; remove it via SQL or recreate the UAT database if you want a fully clean state after the run
