@@ -286,3 +286,150 @@ async def test_process_next_ingest_job_requeues_malformed_payload(
     assert row[0] == "queued"
     assert "missing payload fields" in row[1]
     assert row[2] == 1
+
+
+# ─────────────────────────────────────────────
+# Story 8.3 tests — telegram_note job lifecycle
+# ─────────────────────────────────────────────
+
+async def test_submit_telegram_note_job_creates_queued_job(
+    migrated_db: None,
+    db_conn: psycopg.AsyncConnection[Any],
+) -> None:
+    job = await submit_ingest_job(
+        db_conn,
+        staged_path="/data/connector-staging/telegram/telegram-note-2026-05-28T101530Z-4321_abc.md",
+        source_type="telegram_note",
+        source_locator="telegram://chat/111222333/message/4321",
+        source_alias="telegram-note-2026-05-28T101530Z-4321.md",
+        metadata={
+            "connector": "telegram",
+            "chat_id": 111222333,
+            "message_id": 4321,
+            "content_fingerprint": "abc123",
+        },
+    )
+
+    assert job.status == "queued"
+    assert job.payload["source_type"] == "telegram_note"
+    assert job.payload["source_locator"] == "telegram://chat/111222333/message/4321"
+    assert job.payload["metadata"]["connector"] == "telegram"
+
+
+async def test_process_telegram_note_job_succeeds(
+    migrated_db: None,
+    tmp_path: Path,
+    mock_embed: None,
+) -> None:
+    """Worker processes telegram_note source_type without schema changes."""
+    staged = tmp_path / "telegram-note-2026-05-28T101530Z-4321.md"
+    staged.write_text(
+        "# Telegram Note\n\nCaptured: 2026-05-28T10:15:30+00:00\n"
+        "Chat ID: 111222333\n\n---\n\nThis is a test note.",
+        encoding="utf-8",
+    )
+    config = make_test_config(tmp_path)
+
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        await submit_ingest_job(
+            conn,
+            staged_path=str(staged),
+            source_type="telegram_note",
+            source_locator="telegram://chat/111222333/message/4321",
+            source_alias=staged.name,
+            metadata={"connector": "telegram", "content_fingerprint": "abc123"},
+        )
+
+    processed = await process_next_ingest_job(TEST_DSN, config)
+    assert processed is True
+
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        result = await conn.execute("SELECT status FROM jobs")
+        row = await result.fetchone()
+
+    assert row is not None
+    assert row[0] == "succeeded"
+
+
+async def test_telegram_note_job_produces_retrievable_document(
+    migrated_db: None,
+    tmp_path: Path,
+    mock_embed: None,
+) -> None:
+    """Telegram note appears in list_documents with canonical provenance."""
+    from cos.store.db import list_documents
+
+    staged = tmp_path / "telegram-note-2026-05-28T101530Z-4321.md"
+    staged.write_text(
+        "# Telegram Note\n\nCaptured: 2026-05-28T10:15:30+00:00\n\n"
+        "---\n\nSome searchable note content.",
+        encoding="utf-8",
+    )
+    config = make_test_config(tmp_path)
+
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        await submit_ingest_job(
+            conn,
+            staged_path=str(staged),
+            source_type="telegram_note",
+            source_locator="telegram://chat/111222333/message/4321",
+            source_alias=staged.name,
+        )
+
+    await process_next_ingest_job(TEST_DSN, config)
+
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        docs = await list_documents(conn)
+
+    assert len(docs) == 1
+    assert staged.name in docs[0].source_alias
+    assert "telegram://chat" in docs[0].source_locator
+
+
+async def test_telegram_note_dedup_same_locator_different_fingerprint(
+    migrated_db: None,
+    tmp_path: Path,
+    mock_embed: None,
+) -> None:
+    """Exact-byte duplicates from same Telegram source share one canonical document."""
+    content = "# Telegram Note\n\n---\n\nSame content from same source."
+    staged_a = tmp_path / "note-a.md"
+    staged_b = tmp_path / "note-b.md"
+    staged_a.write_text(content, encoding="utf-8")
+    staged_b.write_text(content, encoding="utf-8")
+    config = make_test_config(tmp_path)
+
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        await submit_ingest_job(
+            conn,
+            staged_path=str(staged_a),
+            source_type="telegram_note",
+            source_locator="telegram://chat/111222333/message/9001",
+            source_alias="note-a.md",
+        )
+
+    await process_next_ingest_job(TEST_DSN, config)
+
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        await submit_ingest_job(
+            conn,
+            staged_path=str(staged_b),
+            source_type="telegram_note",
+            source_locator="telegram://chat/111222333/message/9002",
+            source_alias="note-b.md",
+        )
+
+    await process_next_ingest_job(TEST_DSN, config)
+
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        doc_count = await conn.execute("SELECT COUNT(*) FROM documents")
+        blob_count = await conn.execute("SELECT COUNT(*) FROM content_blobs")
+        source_count = await conn.execute("SELECT COUNT(*) FROM sources")
+
+        doc_row = await doc_count.fetchone()
+        blob_row = await blob_count.fetchone()
+        source_row = await source_count.fetchone()
+
+    assert doc_row == (1,)
+    assert blob_row == (1,)
+    assert source_row == (2,)

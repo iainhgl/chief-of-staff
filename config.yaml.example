@@ -208,6 +208,9 @@ chunking:
 # poll_timeout: long-poll timeout in seconds for getUpdates (1–120, default 30).
 # backoff_initial: initial retry delay in seconds after a transient error (default 1.0).
 # backoff_max: maximum retry delay in seconds (default 60.0).
+# staging_dir: shared volume path where Telegram note files are staged before enqueueing.
+#   Must be on the shared Docker volume so the background worker can read it.
+#   Default: /data/connector-staging/telegram
 #
 # To activate: uncomment the block below, fill in your values, and add "telegram" to connectors.
 # ─────────────────────────────────────────────
@@ -218,6 +221,7 @@ chunking:
 #   poll_timeout: 30
 #   backoff_initial: 1.0
 #   backoff_max: 60.0
+#   staging_dir: /data/connector-staging/telegram
 
 # ─────────────────────────────────────────────
 # MCP Note Ingest (optional — controls ingest_document tool behaviour)
