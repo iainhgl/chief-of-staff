@@ -1320,6 +1320,43 @@ async def test_handle_update_note_enqueue_failure_sends_failure_reply(
     output.send.assert_called_once()
     _, content = output.send.call_args[0]
     assert "cos logs" in content.lower()
+    assert list((tmp_path / "telegram").glob("*.md")) == []
+
+
+@pytest.mark.asyncio
+async def test_handle_update_note_ack_failure_does_not_report_unsaved(
+    caplog: pytest.LogCaptureFixture,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _make_tg_config(chat_id="111222333")
+    monkeypatch.setattr(cfg, "staging_dir", tmp_path / "telegram")
+    update = {
+        "update_id": 156,
+        "message": {
+            "message_id": 1105,
+            "chat": {"id": 111222333},
+            "text": "note: saved but ack failed",
+        },
+    }
+    output = AsyncMock()
+    output.send = AsyncMock(side_effect=RuntimeError("telegram unavailable"))
+    pool, _ = _make_note_pool()
+    mock_submit = AsyncMock()
+
+    with (
+        caplog.at_level(logging.ERROR),
+        patch(f"{_TGB}.has_processed_artifact", AsyncMock(return_value=False)),
+        patch(f"{_TGB}.has_pending_job_for_locator", AsyncMock(return_value=False)),
+        patch(f"{_TGB}.submit_ingest_job", mock_submit),
+    ):
+        await _handle_update(update, cfg, output_service=output, pool=pool)
+
+    mock_submit.assert_called_once()
+    output.send.assert_called_once_with("telegram", "Note saved.")
+    messages = " ".join(r.message for r in caplog.records)
+    assert "note save acknowledgement failed" in messages
+    assert "note save failed" not in messages
 
 
 @pytest.mark.asyncio
@@ -1400,6 +1437,11 @@ async def test_handle_update_note_logs_structured_events(
     messages = " ".join(r.message for r in caplog.records)
     assert "note accepted" in messages
     assert "note enqueued" in messages
+    events = [json.loads(r.message) for r in caplog.records]
+    accepted = next(e for e in events if e["message"] == "note accepted")
+    enqueued = next(e for e in events if e["message"] == "note enqueued")
+    assert accepted["note_length"] == len("log test")
+    assert enqueued["note_length"] == len("log test")
 
 
 @pytest.mark.asyncio

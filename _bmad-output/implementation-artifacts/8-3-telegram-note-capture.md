@@ -1,6 +1,6 @@
 # Story 8.3: Telegram Note Capture
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -73,6 +73,13 @@ so that in-the-moment capture becomes part of the searchable knowledge base.
     uv run mypy
     docker compose config
     ```
+
+### Review Findings
+
+- [x] [Review][Patch] Missing retrieval/search proof for Telegram note body [tests/services/test_jobs_service.py:354]
+- [x] [Review][Patch] Note-save error handling conflates enqueue success with acknowledgement failure [src/cos/connectors/telegram_bot.py:517]
+- [x] [Review][Patch] Failed enqueue leaves orphaned staged note files [src/cos/connectors/telegram_bot.py:511]
+- [x] [Review][Patch] Required note event logs omit note/text lengths [src/cos/connectors/telegram_bot.py:463]
 
 ## Dev Notes
 
@@ -258,3 +265,4 @@ None — implementation ran cleanly; only ruff E501 line-length violations requi
 
 - 2026-05-28: Story context created and marked ready-for-dev.
 - 2026-05-28: Implementation complete; status set to review.
+- 2026-05-28: Code review patches applied; status set to done.

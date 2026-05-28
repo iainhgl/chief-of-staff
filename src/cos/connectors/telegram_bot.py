@@ -464,16 +464,20 @@ async def _handle_update(
                     "info",
                     "empty note received — sending guidance",
                     **_log_ids(update_id, message_id),
+                    text_length=len(text),
+                    note_length=0,
                 )
                 await output_service.send("telegram", _EMPTY_NOTE_GUIDANCE)
                 return
 
+            note_length = len(note_body)
             _log(
                 "info",
                 "note accepted",
                 **_log_ids(update_id, message_id),
-                note_length=len(note_body),
+                note_length=note_length,
             )
+            staged_path: Path | None = None
             try:
                 capture_dt = _extract_capture_dt(msg)
                 note_md = _format_note_md(note_body, msg)
@@ -492,50 +496,66 @@ async def _handle_update(
                             "info",
                             "note already processed — acking as saved",
                             **_log_ids(update_id, message_id),
+                            note_length=note_length,
                         )
-                        await output_service.send("telegram", _NOTE_SAVE_REPLY)
-                        return
-
-                    already_pending = await has_pending_job_for_locator(
+                    elif await has_pending_job_for_locator(
                         conn, source_locator, fingerprint
-                    )
-                    if already_pending:
+                    ):
                         _log(
                             "info",
                             "note already queued — acking as saved",
                             **_log_ids(update_id, message_id),
+                            note_length=note_length,
                         )
-                        await output_service.send("telegram", _NOTE_SAVE_REPLY)
-                        return
+                    else:
+                        staged_path = _stage_telegram_note(
+                            cfg.staging_dir, note_md, source_alias
+                        )
+                        metadata = _build_note_metadata(
+                            msg, update_id, fingerprint, capture_dt
+                        )
+                        await submit_ingest_job(
+                            conn,
+                            staged_path=str(staged_path),
+                            source_type="telegram_note",
+                            source_locator=source_locator,
+                            source_alias=source_alias,
+                            metadata=metadata,
+                        )
+                        _log(
+                            "info",
+                            "note enqueued",
+                            **_log_ids(update_id, message_id),
+                            note_length=note_length,
+                        )
 
-                    staged_path = _stage_telegram_note(
-                        cfg.staging_dir, note_md, source_alias
-                    )
-                    metadata = _build_note_metadata(
-                        msg, update_id, fingerprint, capture_dt
-                    )
-                    await submit_ingest_job(
-                        conn,
-                        staged_path=str(staged_path),
-                        source_type="telegram_note",
-                        source_locator=source_locator,
-                        source_alias=source_alias,
-                        metadata=metadata,
-                    )
-
-                _log("info", "note enqueued", **_log_ids(update_id, message_id))
-                await output_service.send("telegram", _NOTE_SAVE_REPLY)
+                staged_path = None
             except Exception as exc:
+                if staged_path is not None:
+                    staged_path.unlink(missing_ok=True)
                 _log(
                     "error",
                     "note save failed",
                     **_log_ids(update_id, message_id),
+                    note_length=note_length,
                     error=str(exc)[:200],
                 )
                 try:
                     await output_service.send("telegram", _NOTE_SAVE_FAILURE_REPLY)
                 except Exception:
                     pass
+                return
+
+            try:
+                await output_service.send("telegram", _NOTE_SAVE_REPLY)
+            except Exception as exc:
+                _log(
+                    "error",
+                    "note save acknowledgement failed",
+                    **_log_ids(update_id, message_id),
+                    note_length=note_length,
+                    error=str(exc)[:200],
+                )
 
         else:
             _log(

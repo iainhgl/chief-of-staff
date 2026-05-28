@@ -8,8 +8,10 @@ import psycopg
 import pytest
 from conftest import TEST_DSN, make_test_config
 
+from cos.ingestion.embedder import EmbeddingResult
 from cos.ingestion.identity import IngestOutcome
 from cos.ingestion.pipeline import PipelineResult
+from cos.retrieval.search import hybrid_search
 from cos.services.jobs import process_next_ingest_job, submit_ingest_job
 
 
@@ -355,10 +357,28 @@ async def test_telegram_note_job_produces_retrievable_document(
     migrated_db: None,
     tmp_path: Path,
     mock_embed: None,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Telegram note appears in list_documents with canonical provenance."""
     from cos.store.db import list_documents
 
+    async def _fake_search_embed(
+        chunks: list[str],
+        provider: str,
+        model: str,
+        api_key: str,
+        transport=None,
+    ) -> list[EmbeddingResult]:
+        del chunks, api_key, transport
+        return [
+            EmbeddingResult(
+                vector=[float(index) / 100 for index in range(1024)],
+                model=model,
+                provider=provider,
+            )
+        ]
+
+    monkeypatch.setattr("cos.retrieval.search.embed", _fake_search_embed)
     staged = tmp_path / "telegram-note-2026-05-28T101530Z-4321.md"
     staged.write_text(
         "# Telegram Note\n\nCaptured: 2026-05-28T10:15:30+00:00\n\n"
@@ -384,6 +404,15 @@ async def test_telegram_note_job_produces_retrievable_document(
     assert len(docs) == 1
     assert staged.name in docs[0].source_alias
     assert "telegram://chat" in docs[0].source_locator
+
+    async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+        results = await hybrid_search("searchable note content", conn, config)
+
+    assert any(
+        "Some searchable note content." in result.content
+        and result.source_locator == "telegram://chat/111222333/message/4321"
+        for result in results
+    )
 
 
 async def test_telegram_note_dedup_same_locator_different_fingerprint(
