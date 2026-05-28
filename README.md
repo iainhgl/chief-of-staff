@@ -6,7 +6,7 @@ A personal AI platform that acts as a Chief of Staff for a specific role — ret
 
 What is working today:
 
-- **Platform services** (postgres/pgvector, Tika, cos, worker) that start with `docker compose up -d`; a `telegram-bot` service is also defined and starts automatically when Telegram is configured
+- **Platform services** (postgres/pgvector, Tika, cos, worker, telegram-bot) that start with `docker compose up -d`; `telegram-bot` exits cleanly unless Telegram is enabled and configured
 - **Config validation at startup** — human-readable errors for missing or invalid config values
 - **Database schema applied automatically** — idempotent migrations run on every startup
 - **MCP server** accessible via `docker compose exec` stdio transport (Claude Code and Claude Desktop)
@@ -27,7 +27,7 @@ What is working today:
 - **`get_role_context`** — returns the active role summary from the loaded role pack; `data.role_name` is the role's display name and the response also includes `goals`, `tone`, `knowledge_taxonomy`, and `active_workflows`
 - **`get_status`** — returns a JSON envelope with health of all six components (cos, postgres, tika, MCP server, role pack, database) and a `ready` flag
 - **`cos status`** — plain-language health table for all five components; identifies exactly which component failed and states the recovery action; exit code 1 when any component is unhealthy; run from the host: `docker compose exec cos uv run cos status`
-- **`cos restart`** — single command that restarts all services and polls until every container is healthy; prints confirmation or names the stuck component; run from the host: `uv run cos restart`
+- **`cos restart`** — single command that restarts all Compose services and polls the health-checked core services; prints confirmation or names the stuck component; run from the host: `uv run cos restart`
 - **`cos logs`** — single command log export; supports optional component filter and `--since <duration>` for time filtering; run from the host: `uv run cos logs`
 - **Telegram reactive messaging** — when Telegram is configured, a `telegram-bot` service long-polls the Telegram Bot API; send a question and receive a concise cited answer; send a `Note:` message and it is staged for background indexing; connector outages are isolated and do not affect local MCP retrieval
 
@@ -60,7 +60,7 @@ Python · PostgreSQL · pgvector · MCP (model context protocol) · Docker
 ```
 cos/
 ├── config.yaml.example       # config template — copy to config.yaml and fill in
-├── docker-compose.yml        # postgres, tika, cos, worker services
+├── docker-compose.yml        # postgres, tika, cos, worker, telegram-bot services
 ├── Dockerfile                # cos and worker container image (shared build)
 ├── role_packs/               # role pack YAML files — define who the platform serves
 │   ├── chro.yaml             # CHRO example (default)
@@ -84,7 +84,7 @@ cos/
 │       ├── rolepack/         # role pack YAML loader
 │       ├── output/           # OutputRouter — sole exit point for all user-facing output
 │       ├── llm/              # LLM provider adapter (provider-agnostic interface)
-│       ├── connectors/       # Gmail, Google Calendar OAuth and sync connectors; telegram_bot.py (Epic 8 reactive bot)
+│       └── connectors/       # Gmail, Google Calendar OAuth and sync connectors; telegram_bot.py (Epic 8 reactive bot)
 └── tests/
     └── ...                   # pytest test suite
 ```

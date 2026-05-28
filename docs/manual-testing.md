@@ -48,7 +48,8 @@ Epic 8 adds reactive Telegram messaging:
 - a `telegram-bot` Docker Compose service that long-polls the Telegram Bot API for inbound messages from the configured chat
 - inbound question routing: text that looks like a question triggers `RetrievalService.query(...)` and sends a concise cited reply through `OutputService` via `TelegramChannel`
 - inbound `Note:` capture: note text is normalised, staged to disk, and submitted as a `telegram_note` ingest job so the worker indexes it into the canonical knowledge base
-- deduplication at enqueue time: a note that has already been processed or is already queued returns `"Note saved."` without creating duplicate canonical state
+- unsupported-message handling: unsupported text receives usage guidance, empty `Note:` messages receive note-format guidance, and non-text messages are ignored; none become knowledge-base documents
+- idempotency at enqueue time: duplicate deliveries of the same Telegram message return `"Note saved."` without creating duplicate canonical state
 - explicit outage logging: when `getUpdates` returns a non-success HTTP response or Telegram API error, the polling loop logs the error and retries with exponential backoff, keeping the rest of the platform healthy
 
 The primary change to operator validation workflow for Epic 8: run Test Pack 12 before relying on Telegram for interactive Q&A or note capture in any environment.
@@ -366,7 +367,7 @@ Expected:
 - `tika` is `healthy`
 - `cos` is `healthy`
 - `worker` is `Up`
-- `telegram-bot` is `Up` (if `"telegram"` is in `connectors` in `config.yaml`)
+- `telegram-bot` is `Up` and polling if `"telegram"` is in `connectors` and a valid `telegram:` block is present in `config.yaml`; for local-only deployments, it may exit cleanly
 
 ### 3. Verify health
 
@@ -1523,7 +1524,7 @@ This pack validates the reactive Telegram slice from Stories 8.1, 8.2, and 8.3 u
 Before running this pack, confirm all of the following:
 
 - `telegram.bot_token` is set to a valid bot token in `config.yaml`
-- `telegram.chat_id` is set to the numeric chat ID for your test conversation. To discover it, send `/start` or any short message to the bot, then run `curl "https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates"` from the host and copy the returned `message.chat.id`; the platform connector intentionally does not log incoming chat IDs.
+- `telegram.chat_id` is set to the numeric chat ID for your test conversation. To discover it, follow [connectors.md — Telegram Connector](connectors.md#telegram-connector); the platform connector intentionally does not log incoming chat IDs.
 - `"telegram"` is listed in `connectors` in `config.yaml`
 - `telegram` is in the active role pack's `output_channels` (already present in `role_packs/chro.yaml`)
 - all Docker Compose services are running: `docker compose ps` shows `postgres`, `tika`, `cos`, `worker`, and `telegram-bot` all `Up` or `healthy`
@@ -1581,7 +1582,35 @@ Evidence to record:
 
 Note on latency: this measurement includes live Telegram API round-trip and LLM synthesis. It is not the same as the deterministic retrieval latency measured by the Epic 7 benchmark. Record the observed latency honestly; treat responses that feel too slow (even if within 60 seconds) as worth noting for future tuning.
 
-### Step 2 — Live Telegram note capture through worker and retrieval path (AC #2)
+### Step 2 — Unsupported Telegram text stays out of the knowledge base (AC #1, #2)
+
+Send a bare greeting from your Telegram client:
+
+```text
+Hello
+```
+
+**Pass signal:** the bot replies with short usage guidance that tells you to send a question or use `note:`. This message must not create a knowledge-base document.
+
+Then send an empty note:
+
+```text
+Note:
+```
+
+**Pass signal:** the bot replies with note-format guidance and still does not create a knowledge-base document.
+
+After both unsupported messages, confirm there is no new Telegram note source for those messages in `cos docs` and no `"note enqueued"` log line for either message.
+
+Evidence to record:
+
+```text
+[EVIDENCE] Bare greeting received guidance: YES / NO
+[EVIDENCE] Empty note received note-format guidance: YES / NO
+[EVIDENCE] Unsupported messages avoided knowledge-base ingestion: YES / NO
+```
+
+### Step 3 — Live Telegram note capture through worker and retrieval path (AC #2)
 
 Send the following message to the bot:
 
@@ -1638,8 +1667,8 @@ Evidence to record:
 
 ```text
 [EVIDENCE] telegram-note source_alias:  ________________________________
-[EVIDENCE] telegram-note source_locator (redact chat ID if sensitive):  telegram://chat/***/{message_id}
-[EVIDENCE] Note locator suffix used for worker drain:  /message/________
+[EVIDENCE] telegram-note source_locator (redact chat ID if sensitive):  telegram://chat/***/message-or-update/________
+[EVIDENCE] Note locator suffix used for worker drain:  /message/________ or /update/________
 [EVIDENCE] Worker processed the note before retrieval: YES / NO
 [EVIDENCE] Follow-up retrieval reply cited the note: YES / NO
 [EVIDENCE] Note capture pass: YES / NO
@@ -1664,7 +1693,7 @@ for d in matches:
 
 Expected: exactly one record for the recorded `source_locator` regardless of whether the bot sent `"Note saved."` twice. Use the real unredacted locator when running the local command; redact the chat ID only in committed evidence.
 
-### Step 3 — Safe Telegram API outage simulation (AC #3)
+### Step 4 — Safe Telegram API outage simulation (AC #3)
 
 This step uses a reversible `config.yaml` override. Do not revoke the bot token, change BotFather settings, or enable webhooks.
 
@@ -1746,7 +1775,7 @@ Evidence to record:
 [EVIDENCE] Cleanup complete (api_base_url restored): YES / NO
 ```
 
-### Step 4 — Verify platform config is consistent (documentation-only check)
+### Step 5 — Verify platform config is consistent (documentation-only check)
 
 Since this story makes no changes to Docker Compose topology, confirm the config renders cleanly:
 
@@ -1766,6 +1795,8 @@ Record the following before marking this story complete:
 | Seeded Q&A `source_alias` | |
 | Telegram Q&A observed latency | |
 | Q&A cited `source_alias` in reply | |
+| Unsupported text guidance observed | |
+| Empty note guidance observed | |
 | Note acknowledgement text | |
 | Note `source_alias` | |
 | Note `source_locator` (redact chat ID) | |
@@ -1830,8 +1861,10 @@ In plain English, Epic 8 is a pass when all three reactive Telegram behaviors wo
 
 #### 2. Live Telegram note capture (AC #2)
 
+- unsupported text receives usage guidance and does not create a knowledge-base document
+- empty `Note:` messages receive note-format guidance and do not create a knowledge-base document
 - the immediate acknowledgement is exactly `"Note saved."`
-- after the worker drains, the note appears in `cos docs` as a `telegram_note` source with a `telegram-note-...md` alias and a `telegram://chat/.../message/...` locator
+- after the worker drains, the note appears in `cos docs` as a `telegram_note` source with a `telegram-note-...md` alias and a `telegram://chat/.../message/...` or `telegram://chat/.../update/...` locator
 - a follow-up retrieval query (via Telegram or MCP) cites the note's `source_alias`
 - if a duplicate delivery occurred, exactly one canonical source record exists for the same locator and fingerprint
 

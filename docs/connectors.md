@@ -9,9 +9,9 @@ Connectors extend the platform with external data sources (Gmail, Google Calenda
 Connectors are controlled in two places in `config.yaml`:
 
 1. **`connectors:` list** — names the connectors that should be active. A connector not listed here is completely disabled regardless of any other config.
-2. **Top-level settings block** — each connector has its own block (e.g. `gmail:`, `google_calendar:`, `telegram:`) that controls its specific settings. Omitting the block leaves all defaults in place.
+2. **Top-level settings block** — each connector has its own block (e.g. `gmail:`, `google_calendar:`, `telegram:`) that controls its specific settings. Gmail and Google Calendar can use default connector settings when their blocks are omitted; Telegram requires an explicit `telegram:` block because `bot_token` and `chat_id` have no safe defaults.
 
-For connectors that deliver responses (Telegram), the **role pack's `output_channels`** list is the actual egress permission source used by the output router. The connector must appear in `connectors:` and the channel name must appear in the role pack's `output_channels` for outbound replies to work.
+For connectors that deliver responses (Telegram), the **role pack's `output_channels`** list is the actual egress permission source used by the output router. The connector must appear in `connectors:`, and the channel name must appear in the role pack's `output_channels` for outbound replies to work.
 
 ---
 
@@ -114,7 +114,7 @@ docker compose up -d --force-recreate telegram-bot
 docker compose logs telegram-bot --tail=50
 ```
 
-A successful start shows the bot polling for updates. Send a message to the bot in Telegram — it should respond within a few seconds.
+A successful start shows the bot polling for updates. Send a question such as `/ask What content is in my knowledge base?` to the bot in Telegram. It should respond within a few seconds, either with a cited answer or a plain no-content message.
 
 ---
 
@@ -173,20 +173,20 @@ docker compose logs worker --tail=50
 
 Worker log lines show each job being picked up and completed. After the worker catches up, the note will be retrievable and visible in `cos docs`.
 
-Notes are deduplicated at enqueue time. If you send the same content twice, the second `"Note saved."` is returned without creating a duplicate knowledge-base record.
+Duplicate deliveries of the same Telegram message are idempotent. If the same message update is delivered again with the same locator and fingerprint, the bot returns `"Note saved."` without creating a duplicate ingest job or canonical record. If you send the same text again as a new Telegram message, it may become a separate note.
 
 ---
 
 ## Unsupported Message Behavior
 
-The following are silently ignored and do not become knowledge-base documents:
+The following do not become knowledge-base documents:
 
-- Bare greetings (`Hi`, `Hello`, `hey`)
-- Unknown bot commands (`/help`, `/status`, `/anything`)
-- Non-text messages (images, voice notes, stickers, files)
-- Empty `Note:` messages (the prefix with no content)
+- Bare greetings (`Hi`, `Hello`, `hey`) receive short usage guidance
+- Unknown bot commands (`/help`, `/status`, `/anything`) receive short usage guidance
+- Empty `Note:` messages (the prefix with no content) receive note-format guidance
+- Non-text messages (images, voice notes, stickers, files) are ignored
 
-The bot sends no reply for unsupported message types to keep the conversation clean.
+Unsupported text is answered with guidance so the user can recover. Non-text messages are ignored to keep the conversation clean.
 
 ---
 

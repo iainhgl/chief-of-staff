@@ -1,6 +1,6 @@
 # Story 8.5: Documentation and Housekeeping
 
-Status: ready-for-dev
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -59,6 +59,22 @@ so that users and future agents do not assume web augmentation or proactive brie
   - [x] Run `docker compose config` — validated clean (exit 0, no output).
   - [x] Documentation-only changes made — no automated Telegram, retrieval, or ingestion tests required.
   - [x] Updated this story's Dev Agent Record and File List.
+
+### Review Findings
+
+- [x] [Review][Patch] Story status conflicts with sprint review state [_bmad-output/implementation-artifacts/8-5-documentation-and-housekeeping.md:3]
+- [x] [Review][Patch] `config.yaml.example` claims `channels:` is part of routing enforcement [config.yaml.example:67]
+- [x] [Review][Patch] OutputRouter diagram still references `config.output_channels` [_bmad-output/planning-artifacts/architecture-diagrams.md:597]
+- [x] [Review][Patch] Unsupported Telegram text and empty notes are documented as silent/no-reply paths [docs/connectors.md:182]
+- [x] [Review][Patch] Epic 8 architecture notes repeat the unsupported-message no-reply claim [_bmad-output/planning-artifacts/architecture.md:989]
+- [x] [Review][Patch] Inbound Telegram diagram shows non-`Note:` declarative capture and synchronous worker completion before acknowledgement [_bmad-output/planning-artifacts/architecture-diagrams.md:387]
+- [x] [Review][Patch] Telegram note deduplication docs overpromise same-text suppression [docs/connectors.md:176]
+- [x] [Review][Patch] Connector activation model says omitted settings blocks always use defaults, but Telegram requires credentials [docs/connectors.md:12]
+- [x] [Review][Patch] Telegram service startup wording implies conditional Compose startup instead of unconditional service with clean disabled exit [docs/setup.md:82]
+- [x] [Review][Patch] Restart docs overstate `cos restart` coverage for worker and telegram-bot [docs/setup.md:485]
+- [x] [Review][Patch] README project tree still describes Compose as four services and has a broken `connectors/` tree glyph [README.md:63]
+- [x] [Review][Patch] Epic 8 architecture heading accidentally captures the Epic 7 gold-corpus paragraph [_bmad-output/planning-artifacts/architecture.md:980]
+- [x] [Review][Patch] Setup guide provenance field descriptions still omit Telegram notes [docs/setup.md:359]
 
 ## Dev Notes
 
@@ -202,6 +218,7 @@ Follow the same pattern: narrow docs changes, honest evidence, and no feature ex
 ## Change Log
 
 - 2026-05-28: Story created and sprint status advanced to `ready-for-dev`.
+- 2026-05-28: Documentation completed, review findings patched, and story advanced to `done`.
 
 ## Dev Agent Record
 
@@ -221,11 +238,12 @@ None — documentation-only story. No test failures or debug output.
 - `README.md` updated from Epic 7 to Epic 8; telegram-bot service noted; Telegram capability added; `docs/connectors.md` added to docs tree; `connectors/` description updated to mention `telegram_bot.py`; `cos docs` source type list extended to include Telegram notes.
 - `docs/setup.md`: startup service count updated; Telegram note row added to provenance table; `worker` and `telegram-bot` log commands added to operations section.
 - `config.yaml.example`: `channels:` comment updated to reflect Telegram availability (Epic 8) and clarify role-pack `output_channels` as the actual egress permission source.
-- `docs/manual-testing.md`: line 273 updated to reference `docs/connectors.md` instead of `config.yaml.example` for Telegram setup.
+- `docs/manual-testing.md`: Telegram setup references now point to `docs/connectors.md`; Test Pack 12 and Epic 8 pass criteria now cover unsupported-text guidance, empty-note guidance, Telegram note idempotency, message/update locator fallback, and the clean disabled-exit behavior for local-only `telegram-bot`.
 - `_bmad-output/planning-artifacts/architecture-diagrams.md`: two ambiguous Telegram lines in the Growth Roadmap End-State diagrams patched to attribute "outbound scheduled briefs" to Epic 11.
 - `_bmad-output/planning-artifacts/architecture.md`: Epic 8 Implementation Notes section added documenting telegram-bot service, connector config model, OutputRouter channel source, reactive-only scope, note provenance, deduplication, and failure isolation.
+- Review patch pass aligned unsupported-message behavior, Telegram note idempotency wording, OutputRouter channel-source docs, Compose service startup wording, restart healthcheck scope, provenance field descriptions, README tree structure, and the inbound Telegram sequence diagram.
 - Stale-language sweep confirmed clean on user-facing docs. Planning artifact matches in prd.md, epics.md, sprint-change-proposal, validation-report, and implementation-readiness-report are all Growth FRs or historical records — left intact per scope guardrail.
-- `docker compose config` returned exit 0 (no Compose wording changed).
+- `docker compose config` returned exit 0 before review and again after review patches.
 - No code changes. No test execution required.
 
 ### File List

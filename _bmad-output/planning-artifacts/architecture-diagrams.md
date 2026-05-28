@@ -382,18 +382,18 @@ sequenceDiagram
     User->>TelegramAPI: sends message
     TB->>TelegramAPI: GET /getUpdates (polling)
     TelegramAPI-->>TB: message update
-    TB->>TB: classify: note or question?
+    TB->>TB: classify: note, question, or unsupported?
 
-    alt Note capture (prefixed "Note:" or short declarative statement)
-        TB->>JOBS: enqueue ingest job (source_locator=telegram://..., source_alias=message timestamp)
-        JOBS->>IS: ingest_note(text, metadata={source:"telegram", timestamp:...})
+    alt Note capture (prefixed "Note:")
+        TB->>JOBS: stage note + enqueue ingest job (source_locator=telegram://..., source_alias=message timestamp)
+        TB->>OR: send(channel="telegram", content="Note saved.")
+        OR->>TG: send("Note saved.")
+        TG->>TelegramAPI: POST /sendMessage
+        TelegramAPI-->>User: "Note saved."
+        Note over JOBS,IS: Worker indexes the note asynchronously after acknowledgement
+        JOBS->>IS: ingest staged note (metadata={source:"telegram", timestamp:...})
         IS->>DB: canonical ingest decision + writes
         IS-->>JOBS: IngestionResult
-        JOBS-->>TB: completed
-        TB->>OR: send(channel="telegram", content="Note saved")
-        OR->>TG: send("Note saved")
-        TG->>TelegramAPI: POST /sendMessage
-        TelegramAPI-->>User: "Note saved"
     else Question
         TB->>RS: query(text, role_pack)
         RS->>DB: hybrid search
@@ -594,7 +594,7 @@ The OutputRouter is the single enforcement point for NFR7 (fail-closed egress). 
 ```mermaid
 flowchart TD
     REQ[Output request:\nchannel + content]
-    VAL{Channel in\nconfig.output_channels?}
+    VAL{Channel in active\nrole_pack.output_channels?}
     SUPP[Suppress output\nLog structured error:\n component=output]
     ROUTE{Select channel\nhandler}
     LOCAL[output/channels/local.py\nReturn in MCP response]

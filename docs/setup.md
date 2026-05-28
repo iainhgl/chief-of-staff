@@ -79,7 +79,7 @@ docker compose up -d --build --force-recreate cos
 docker compose up -d
 ```
 
-The core services (postgres, tika, cos, worker) will start. The postgres, tika, and cos containers reach a healthy state within 60 seconds; the worker container starts alongside them and begins draining any queued ingest jobs. A `telegram-bot` service is also defined and starts when `"telegram"` is listed in `connectors` in `config.yaml`; it does not start usefully when Telegram is not configured. See [connectors.md](connectors.md) for Telegram setup.
+The core services (postgres, tika, cos, worker) will start. The postgres, tika, and cos containers reach a healthy state within 60 seconds; the worker container starts alongside them and begins draining any queued ingest jobs. Docker Compose also defines `telegram-bot`; that process exits cleanly unless `"telegram"` is listed in `connectors` and a valid `telegram:` block is present in `config.yaml`. An exited `telegram-bot` container is expected for local-only deployments. See [connectors.md](connectors.md) for Telegram setup.
 
 ## Configure the MCP Server
 
@@ -356,7 +356,7 @@ Prints a table with one row per document:
 | Column | Description |
 |--------|-------------|
 | `ID` | UUID for the document — use this with `--versions` |
-| `SOURCE ALIAS` | Human-readable source label: filename for local files, slugged subject for Gmail bodies, attachment filename for Gmail attachments, slugged event title plus calendar and event ID for Calendar, and usually the note title slug for MCP notes |
+| `SOURCE ALIAS` | Human-readable source label: filename for local files, slugged subject for Gmail bodies, attachment filename for Gmail attachments, slugged event title plus calendar and event ID for Calendar, usually the note title slug for MCP notes, and `telegram-note-...` for Telegram notes |
 | `INGESTED AT` | ISO 8601 timestamp of the most recent ingest |
 | `VER` | Current version number (1 on first ingest; increments on re-ingest) |
 | `CHUNKS` | Number of text chunks indexed for this document |
@@ -383,7 +383,7 @@ Returns a JSON array. Each object has: `id`, `source_alias`, `source_locator`, `
 |-------|-------------|
 | `id` | Document UUID |
 | `source_alias` | Human-readable source label |
-| `source_locator` | Unique source URI — for local files, this is the in-container path; for Gmail and Calendar, it is a connector-specific URI; for MCP notes, it begins with `mcp_note://` |
+| `source_locator` | Unique source URI — for local files, this is the in-container path; for Gmail, Calendar, and Telegram, it is a connector-specific URI; for MCP notes, it begins with `mcp_note://` |
 | `ingested_at` | ISO 8601 timestamp |
 | `current_version` | Current document version number |
 | `chunk_count` | Number of indexed text chunks |
@@ -482,7 +482,7 @@ Run from the `cos/` directory on the **host** (not inside the container):
 uv run cos restart
 ```
 
-The command restarts all services and polls until every container is healthy. Expected output:
+The command restarts all Docker Compose services and polls the health-checked core services (`postgres`, `tika`, `cos`) until they are healthy. Expected output:
 
 ```text
 Restarting platform...
@@ -490,6 +490,8 @@ Platform restarted. All components healthy.
 ```
 
 **Timing note:** `cos restart` calls `docker compose restart`, then polls for up to 30 seconds. Total wall time to the confirmation message is typically 35–45 seconds on a standard machine.
+
+The success message refers to the health-checked core services. The `worker` and `telegram-bot` services do not expose Compose healthchecks, so use `docker compose ps` and the direct log commands below when you need to confirm those long-running processes.
 
 **If a container stays stuck**, the output names it and suggests the next step:
 
