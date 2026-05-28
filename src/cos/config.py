@@ -97,6 +97,15 @@ class GoogleCalendarConnectorConfig(BaseModel):
     staging_dir: Path = Path("/data/connector-staging/google-calendar")
 
 
+class TelegramConnectorConfig(BaseModel):
+    bot_token: SecretStr
+    chat_id: str
+    api_base_url: str = "https://api.telegram.org"
+    poll_timeout: int = Field(default=30, ge=1, le=120)
+    backoff_initial: float = Field(default=1.0, ge=0.0)
+    backoff_max: float = Field(default=60.0, ge=0.1)
+
+
 class McpNoteIngestConfig(BaseModel):
     staging_dir: Path = Path("/data/connector-staging/mcp")
     near_duplicate_threshold: float = Field(default=0.95, ge=0.0, le=1.0)
@@ -121,6 +130,7 @@ class CosConfig(BaseModel):
     gmail: GmailConnectorConfig | None = None
     google_calendar: GoogleCalendarConnectorConfig | None = None
     mcp_note: McpNoteIngestConfig | None = None
+    telegram: TelegramConnectorConfig | None = None
     retrieval: RetrievalConfig = RetrievalConfig()
 
     @classmethod

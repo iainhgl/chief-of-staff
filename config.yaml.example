@@ -69,10 +69,11 @@ channels:
 
 # ─────────────────────────────────────────────
 # Connectors
-# Lists the external data connectors to activate (e.g. gmail, google_calendar).
-# Leave empty in Epic 1 — connectors are implemented in Epic 6.
+# Lists the external data connectors to activate (e.g. gmail, google_calendar, telegram).
+# Leave empty for local-only deployments.
 # To enable Gmail: add "gmail" and configure the gmail: block below.
 # To enable Google Calendar: add "google_calendar" and configure the google_calendar: block below.
+# To enable Telegram polling: add "telegram" and configure the telegram: block below.
 # ─────────────────────────────────────────────
 connectors: []
 
@@ -189,6 +190,34 @@ chunking:
 #   lookahead_days: 14
 #   max_results: 100
 #   staging_dir: /data/connector-staging/google-calendar
+
+# ─────────────────────────────────────────────
+# Telegram Connector (optional — requires "telegram" in connectors list above)
+# Enables the Telegram bot for outbound delivery and inbound polling.
+#
+# How to create a bot:
+#   1. Open Telegram and search for @BotFather.
+#   2. Send /newbot and follow the prompts to get your bot_token.
+#   3. Start a conversation with your bot and send a message.
+#   4. Retrieve the chat_id with:
+#      curl "https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates"
+#
+# bot_token: the HTTP API token from BotFather (treated as a secret — never logged).
+# chat_id: the numeric Telegram chat ID the bot should deliver messages to and accept messages from.
+# api_base_url: override the Telegram API base URL (default: https://api.telegram.org).
+# poll_timeout: long-poll timeout in seconds for getUpdates (1–120, default 30).
+# backoff_initial: initial retry delay in seconds after a transient error (default 1.0).
+# backoff_max: maximum retry delay in seconds (default 60.0).
+#
+# To activate: uncomment the block below, fill in your values, and add "telegram" to connectors.
+# ─────────────────────────────────────────────
+# telegram:
+#   bot_token: YOUR_TELEGRAM_BOT_TOKEN
+#   chat_id: "123456789"
+#   api_base_url: https://api.telegram.org
+#   poll_timeout: 30
+#   backoff_initial: 1.0
+#   backoff_max: 60.0
 
 # ─────────────────────────────────────────────
 # MCP Note Ingest (optional — controls ingest_document tool behaviour)

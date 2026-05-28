@@ -1,5 +1,5 @@
 # generated: 2026-04-17
-# last_updated: 2026-05-28  # epic 7 done
+# last_updated: 2026-05-28  # story 8.1 review
 # project: CoS
 # project_key: NOKEY
 # tracking_system: file-system
@@ -37,7 +37,7 @@
 # - Epics 1-5 represent the implemented baseline; Epic 6 onward reflects the change-course backlog
 
 generated: 2026-04-17
-last_updated: 2026-05-28  # epic 7 done
+last_updated: 2026-05-28  # story 8.1 review
 project: CoS
 project_key: NOKEY
 tracking_system: file-system
@@ -150,8 +150,8 @@ development_status:
   # Epic 8: Interactive Telegram Messaging (Growth)
   # Users interact reactively via Telegram before web augmentation or proactive scheduling
   # ─────────────────────────────────────────────
-  epic-8: backlog
-  8-1-telegram-bot-setup-and-output-channel: backlog
+  epic-8: in-progress
+  8-1-telegram-bot-setup-and-output-channel: review
   8-2-telegram-inbound-qa: backlog
   8-3-telegram-note-capture: backlog
   8-4-operator-validation-interactive-telegram-live: backlog

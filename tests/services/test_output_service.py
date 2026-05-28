@@ -1,5 +1,5 @@
 import logging
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -42,8 +42,9 @@ async def test_output_service_send_invalid_channel_suppresses(
 @pytest.mark.asyncio
 async def test_output_service_delegates_to_router_send() -> None:
     router = MagicMock()
+    router.send = AsyncMock()
     service = OutputService(router=router)
 
     await service.send("local", "test content")
 
-    router.send.assert_called_once_with("local", "test content")
+    router.send.assert_awaited_once_with("local", "test content")

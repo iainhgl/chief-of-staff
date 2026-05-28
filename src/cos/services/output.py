@@ -6,4 +6,4 @@ class OutputService:
         self._router = router
 
     async def send(self, channel: str, content: str) -> None:
-        self._router.send(channel, content)
+        await self._router.send(channel, content)

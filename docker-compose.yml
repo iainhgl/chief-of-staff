@@ -62,5 +62,21 @@ services:
       - ./tokens:/app/tokens
     restart: on-failure
 
+  telegram-bot:
+    build: .
+    command: ["uv", "run", "cos-telegram-bot"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      tika:
+        condition: service_healthy
+    volumes:
+      - ./data:/data
+      - ./config.yaml:/app/config.yaml:ro
+      - ./role_packs:/app/role_packs:ro
+      - ./local/certs:/certs:ro
+      - ./tokens:/app/tokens
+    restart: on-failure
+
 volumes:
   postgres_data:
