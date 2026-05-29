@@ -1,6 +1,6 @@
 # Story EN.1: Instance Packaging and Isolated Runtime Scaffold
 
-Status: review
+Status: done
 
 ## Story
 
@@ -56,6 +56,16 @@ so that I can run real knowledge-base instances side by side without mixing conf
   - [x] Add a manual test covering image build, instance initialization, Compose config validation, and startup.
   - [x] Add a manual test note for Gmail/Substack label ingestion using an instance-local token directory and data store.
 
+### Review Findings
+
+- [x] [Review][Patch] Sanitized instance-name collisions can share Compose resources and ports [scripts/init-instance.sh:43]
+- [x] [Review][Patch] Generated host ports can collide or already be occupied [scripts/init-instance.sh:78]
+- [x] [Review][Patch] Worker and Telegram services can race migrations on a fresh isolated Postgres volume [templates/instance/compose.yaml.template:61]
+- [x] [Review][Patch] Tika healthcheck uses shell-specific syntax that can report incorrectly [templates/instance/compose.yaml.template:35]
+- [x] [Review][Patch] Printed next-step commands break when repo or instance paths contain spaces [scripts/init-instance.sh:136]
+- [x] [Review][Patch] Compose project names are not bounded for very long instance names [scripts/init-instance.sh:43]
+- [x] [Review][Patch] Sanitization test used `lstrip` rather than literal prefix removal [tests/test_init_instance.py:94]
+
 ## Dev Notes
 
 This is a standalone operational enabler created after Epic 8 completion. It is intentionally not part of Epic 9 and should not pull Epic 9 planning work forward.
@@ -103,6 +113,8 @@ claude-sonnet-4-6
 - `uv run --project <repo>` pattern documented for running `cos auth gmail` from the instance folder.
 - Pre-existing test failure in `tests/services/test_retrieval_service.py::test_query_citations_match_pruned_evidence_set` confirmed pre-dates this branch (fails on `main` without any changes).
 - 10 new tests pass; 590 existing tests pass. No regressions introduced.
+- Code review patches added stable path/name-hashed Compose project names, explicit port overrides with availability checks, quoted next-step paths, long-name truncation, a Bash-explicit Tika healthcheck, and a one-shot migration service before app/worker/bot startup.
+- Focused instance tests now cover 14 cases and pass.
 
 ### File List
 

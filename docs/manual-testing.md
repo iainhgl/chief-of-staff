@@ -1947,7 +1947,7 @@ This pack covers the one-time verification of `scripts/init-instance.sh`. Run it
 
 ### Automated coverage
 
-The automated tests in `tests/test_init_instance.py` cover structure, distinct identifiers, overwrite refusal, name sanitization, role pack copying, and Compose config validation. Run them first:
+The automated tests in `tests/test_init_instance.py` cover structure, distinct identifiers, sanitized-name collision handling, explicit port overrides, quoted printed paths, overwrite refusal, name sanitization, role pack copying, migration-service rendering, and Compose config validation. Run them first:
 
 ```bash
 uv run pytest tests/test_init_instance.py -v
@@ -1971,6 +1971,14 @@ uv run pytest tests/test_init_instance.py -v
 
    Expected: output shows folder created, next steps printed, no errors.
 
+   Optional fixed-port variant:
+
+   ```bash
+   scripts/init-instance.sh /tmp/cos-test-instance test-instance --postgres-port 25432 --tika-port 29998
+   ```
+
+   Expected: generated `.env` contains the explicit ports.
+
 3. **Edit the generated config** and add a valid `llm.api_key`:
 
    ```bash
@@ -1984,7 +1992,7 @@ uv run pytest tests/test_init_instance.py -v
    docker compose up -d
    ```
 
-   Expected: services start; `docker compose ps` shows postgres and tika healthy within ~60 seconds.
+   Expected: services start; `docker compose ps` shows postgres and tika healthy within ~60 seconds, the one-shot `migrate` service exits successfully, and `worker` starts after migration completion.
 
 5. **Check platform status**:
 
@@ -2000,7 +2008,7 @@ uv run pytest tests/test_init_instance.py -v
    docker volume ls | grep postgres
    ```
 
-   Expected: the test instance volume is named `cos-test-instance_postgres_data` (or similar), distinct from the repo dev volume.
+   Expected: the test instance volume is namespaced by the generated `COMPOSE_PROJECT_NAME`, distinct from the repo dev volume.
 
 7. **Cleanup**:
 

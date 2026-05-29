@@ -21,9 +21,9 @@ An **instance** is a small, isolated folder that contains only runtime assets: a
 | Knowledge base files | `./data/` | `<instance>/data/` |
 | OAuth tokens | `./tokens/` | `<instance>/tokens/` |
 | TLS certificates | `./local/certs/` | `<instance>/local/certs/` |
-| Postgres volume | `docker-compose.yml` project default | `cos-<name>_postgres_data` |
-| Postgres host port | 5432 | computed from instance name (20000–55000) |
-| Tika host port | 9998 | Postgres port + 1 |
+| Postgres volume | `docker-compose.yml` project default | namespaced by generated `COMPOSE_PROJECT_NAME` |
+| Postgres host port | 5432 | computed from instance name and path, or overridden |
+| Tika host port | 9998 | computed from Postgres port, or overridden |
 
 ---
 
@@ -35,9 +35,16 @@ Run the initializer from the repo root:
 scripts/init-instance.sh ~/cos-instances/ai-reading ai-reading
 ```
 
+Optional explicit ports:
+
+```bash
+scripts/init-instance.sh ~/cos-instances/ai-reading ai-reading --postgres-port 25432 --tika-port 29998
+```
+
 Arguments:
 1. **Destination path** — where the instance folder will be created. May be anywhere; does not need to be inside the repo.
 2. **Instance name** — a short identifier used in the Compose project name and `.env` file. Lowercase alphanumeric and hyphens. Other characters are sanitized automatically.
+3. **Optional ports** — use `--postgres-port` and `--tika-port` when you want fixed host ports or need to avoid a local conflict.
 
 The script creates the instance folder with the following contents:
 
@@ -53,7 +60,7 @@ ai-reading/
     └── certs/          Optional TLS root certificates
 ```
 
-Two instances created with different names automatically get distinct `COMPOSE_PROJECT_NAME` values and different host ports so they can run side by side.
+Two instances created with different names and paths automatically get distinct `COMPOSE_PROJECT_NAME` values and different host ports so they can run side by side. The script checks whether generated ports are already in use and nudges them upward before writing `.env`; if you need fixed values, pass explicit ports.
 
 ---
 
@@ -149,13 +156,15 @@ After the worker catches up, articles are searchable through the `retrieve` tool
 
 ## Running Multiple Instances
 
-Each call to `init-instance.sh` with a different name creates an independent instance with:
+Each call to `init-instance.sh` with a different name and path creates an independent instance with:
 
-- A unique `COMPOSE_PROJECT_NAME` (e.g. `cos-ai-reading`, `cos-hr-knowledge`)
+- A unique `COMPOSE_PROJECT_NAME` generated from the sanitized name plus a stable hash
 - Distinct host ports for Postgres and Tika
 - Separate `data/`, `tokens/`, and Postgres named volumes
 
 Both instances can run simultaneously. From each instance folder, standard `docker compose` commands operate on that instance only.
+
+On first startup, the generated Compose file runs a one-shot migration service before the app, worker, or Telegram bot start. This avoids worker startup races against a fresh Postgres volume.
 
 ---
 

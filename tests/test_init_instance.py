@@ -12,9 +12,13 @@ EXPECTED_FILES = ["compose.yaml", ".env", "config.yaml", "role_packs"]
 EXPECTED_DIRS = ["data", "tokens", "local/certs"]
 
 
-def _run_init(dest: Path, name: str) -> subprocess.CompletedProcess:
+def _run_init(
+    dest: Path,
+    name: str,
+    *extra_args: str,
+) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["bash", str(SCRIPT), str(dest), name],
+        ["bash", str(SCRIPT), str(dest), name, *extra_args],
         capture_output=True,
         text=True,
     )
@@ -47,7 +51,9 @@ class TestInitInstance:
         result = _run_init(dest, "inst")
         assert result.returncode == 0
         env = _read_env(dest / ".env")
-        assert env.get("COMPOSE_PROJECT_NAME") == "cos-inst"
+        project_name = env.get("COMPOSE_PROJECT_NAME", "")
+        assert project_name.startswith("cos-inst-")
+        assert project_name.removeprefix("cos-inst-").isdigit()
 
     def test_env_contains_ports(self, tmp_path: Path) -> None:
         dest = tmp_path / "inst"
@@ -73,6 +79,37 @@ class TestInitInstance:
         assert env_a["POSTGRES_PORT"] != env_b["POSTGRES_PORT"]
         assert env_a["TIKA_PORT"] != env_b["TIKA_PORT"]
 
+    def test_sanitized_name_collisions_still_have_distinct_identifiers(
+        self, tmp_path: Path
+    ) -> None:
+        dest_a = tmp_path / "ai-reading-a"
+        dest_b = tmp_path / "ai-reading-b"
+
+        assert _run_init(dest_a, "AI Reading").returncode == 0
+        assert _run_init(dest_b, "ai-reading").returncode == 0
+
+        env_a = _read_env(dest_a / ".env")
+        env_b = _read_env(dest_b / ".env")
+
+        assert env_a["COMPOSE_PROJECT_NAME"] != env_b["COMPOSE_PROJECT_NAME"]
+        assert env_a["POSTGRES_PORT"] != env_b["POSTGRES_PORT"]
+        assert env_a["TIKA_PORT"] != env_b["TIKA_PORT"]
+
+    def test_explicit_ports_are_honored(self, tmp_path: Path) -> None:
+        dest = tmp_path / "inst"
+        result = _run_init(
+            dest,
+            "inst",
+            "--postgres-port",
+            "25432",
+            "--tika-port",
+            "29998",
+        )
+        assert result.returncode == 0
+        env = _read_env(dest / ".env")
+        assert env["POSTGRES_PORT"] == "25432"
+        assert env["TIKA_PORT"] == "29998"
+
     def test_refuses_non_empty_destination(self, tmp_path: Path) -> None:
         dest = tmp_path / "existing"
         dest.mkdir()
@@ -91,7 +128,21 @@ class TestInitInstance:
         # Must be lowercase and Compose-safe
         assert project.startswith("cos-")
         assert project == project.lower()
-        assert all(c.isalnum() or c == "-" for c in project.lstrip("cos-"))
+        assert all(c.isalnum() or c == "-" for c in project.removeprefix("cos-"))
+
+    def test_truncates_very_long_instance_name(self, tmp_path: Path) -> None:
+        dest = tmp_path / "long-name"
+        result = _run_init(dest, "a" * 80)
+        assert result.returncode == 0
+        env = _read_env(dest / ".env")
+        prefix = env["COMPOSE_PROJECT_NAME"].rsplit("-", 1)[0]
+        assert len(prefix.removeprefix("cos-")) == 48
+
+    def test_printed_commands_quote_paths_with_spaces(self, tmp_path: Path) -> None:
+        dest = tmp_path / "instance with spaces"
+        result = _run_init(dest, "spacey")
+        assert result.returncode == 0
+        assert f"cd '{dest}'" in result.stdout
 
     def test_role_packs_copied(self, tmp_path: Path) -> None:
         dest = tmp_path / "inst"
@@ -120,6 +171,8 @@ class TestInitInstance:
         assert "{{" not in compose
         # Image reference present
         assert "cos-platform:" in compose
+        assert "migrate:" in compose
+        assert "service_completed_successfully" in compose
 
     @pytest.mark.skipif(
         shutil.which("docker") is None,
