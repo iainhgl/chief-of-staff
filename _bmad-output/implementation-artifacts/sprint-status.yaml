@@ -1,5 +1,5 @@
 # generated: 2026-04-17
-# last_updated: 2026-05-28  # story 8.5 and epic 8 done
+# last_updated: 2026-05-29  # standalone instance packaging enabler done
 # project: CoS
 # project_key: NOKEY
 # tracking_system: file-system
@@ -37,7 +37,7 @@
 # - Epics 1-5 represent the implemented baseline; Epic 6 onward reflects the change-course backlog
 
 generated: 2026-04-17
-last_updated: 2026-05-28  # story 8.5 and epic 8 done
+last_updated: 2026-05-29  # standalone instance packaging enabler done
 project: CoS
 project_key: NOKEY
 tracking_system: file-system
@@ -157,6 +157,12 @@ development_status:
   8-4-operator-validation-interactive-telegram-live: done
   8-5-documentation-and-housekeeping: done
   epic-8-retrospective: optional
+
+  # ─────────────────────────────────────────────
+  # Operational Enablers
+  # Standalone setup stories that unblock real use without changing roadmap epics
+  # ─────────────────────────────────────────────
+  enabler-instance-packaging-and-isolated-runtime-scaffold: done
 
   # ─────────────────────────────────────────────
   # Epic 9: Structured LLM Boundary & Provider Portability (Growth)

@@ -1938,3 +1938,92 @@ If you ran Test Pack 12 (Telegram live):
 - confirm `telegram.api_base_url` in `config.yaml` is restored to `https://api.telegram.org` (the outage simulation step should have already done this)
 - remove `data/uat-docs/telegram/epic-8-telegram-live-question.md` from the host if you do not want it to remain in the knowledge base
 - the seeded `telegram-note-...` source will remain in the knowledge base after the worker indexes it; remove it via SQL or recreate the UAT database if you want a fully clean state after the run
+
+---
+
+## Manual Test: Isolated Instance Packaging (Enabler EN.1)
+
+This pack covers the one-time verification of `scripts/init-instance.sh`. Run it when the script or templates change, or as a one-off acceptance check.
+
+### Automated coverage
+
+The automated tests in `tests/test_init_instance.py` cover structure, distinct identifiers, sanitized-name collision handling, explicit port overrides, quoted printed paths, overwrite refusal, name sanitization, role pack copying, migration-service rendering, and Compose config validation. Run them first:
+
+```bash
+uv run pytest tests/test_init_instance.py -v
+```
+
+### Manual image build and instance start
+
+1. **Build the local image** from the repo root:
+
+   ```bash
+   docker build -t cos-platform:local .
+   ```
+
+   Expected: image builds successfully and is tagged `cos-platform:local`.
+
+2. **Initialize a test instance**:
+
+   ```bash
+   scripts/init-instance.sh /tmp/cos-test-instance test-instance
+   ```
+
+   Expected: output shows folder created, next steps printed, no errors.
+
+   Optional fixed-port variant:
+
+   ```bash
+   scripts/init-instance.sh /tmp/cos-test-instance test-instance --postgres-port 25432 --tika-port 29998
+   ```
+
+   Expected: generated `.env` contains the explicit ports.
+
+3. **Edit the generated config** and add a valid `llm.api_key`:
+
+   ```bash
+   nano /tmp/cos-test-instance/config.yaml
+   ```
+
+4. **Start the instance**:
+
+   ```bash
+   cd /tmp/cos-test-instance
+   docker compose up -d
+   ```
+
+   Expected: services start; `docker compose ps` shows postgres and tika healthy within ~60 seconds, the one-shot `migrate` service exits successfully, and `worker` starts after migration completion.
+
+5. **Check platform status**:
+
+   ```bash
+   docker compose exec cos uv run cos status
+   ```
+
+   Expected: all rows green.
+
+6. **Confirm data isolation** — compare volume names between the repo instance and the test instance:
+
+   ```bash
+   docker volume ls | grep postgres
+   ```
+
+   Expected: the test instance volume is namespaced by the generated `COMPOSE_PROJECT_NAME`, distinct from the repo dev volume.
+
+7. **Cleanup**:
+
+   ```bash
+   cd /tmp/cos-test-instance && docker compose down -v
+   rm -rf /tmp/cos-test-instance
+   ```
+
+### Manual Gmail / Substack label ingestion note
+
+For the AI-reading use case:
+
+1. Label 10–20 representative Substack emails with `cos-ai-reading` in Gmail.
+2. Configure the instance `config.yaml` with Gmail connector settings (see [connectors.md](connectors.md) and [instances.md](instances.md)).
+3. Authenticate from the instance folder: `uv run --project /path/to/repo cos auth gmail`.
+4. Sync: `docker compose exec cos uv run cos sync gmail` from the instance folder.
+5. Inspect ingested content: `docker compose exec cos uv run cos docs`.
+6. Test retrieval via the MCP server before bulk-labelling the full article set.
