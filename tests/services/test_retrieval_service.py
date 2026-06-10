@@ -8,7 +8,7 @@ import pytest
 from conftest import make_test_config
 
 from cos.llm.adapter import LLMAdapter
-from cos.retrieval.citations import CitedChunk, CitedResponse
+from cos.retrieval.citations import CitedChunk, CitedResponse, RetrievalResult
 from cos.retrieval.telemetry import SearchStats
 from cos.services.retrieval import RetrievalService
 
@@ -1295,3 +1295,158 @@ async def test_telemetry_includes_document_candidate_count(
     assert "document_candidates" in data["candidate_counts"]
     # Two distinct source_locators → 2 document candidates
     assert data["candidate_counts"]["document_candidates"] == 2
+
+
+# ─────────────────────────────────────────────
+# Pure retrieve() — evidence only, no synthesis
+# ─────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_retrieve_returns_evidence_without_calling_llm(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+) -> None:
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with patch(_PATCH, new=AsyncMock(return_value=_search_result([_make_chunk()]))):
+        result = await service.retrieve(
+            "what is workforce segmentation?", role_pack=None
+        )
+
+    assert isinstance(result, RetrievalResult)
+    assert result.outcome == "success"
+    assert len(result.evidence) == 1
+    assert result.synthesis_context  # chunk text available for the caller
+    mock_llm_adapter.complete.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_retrieve_empty_search_returns_no_content_outcome(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+) -> None:
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with patch(_PATCH, new=AsyncMock(return_value=_search_result([]))):
+        result = await service.retrieve("unknown topic", role_pack=None)
+
+    assert result.outcome == "no_content"
+    assert result.evidence == []
+    mock_llm_adapter.complete.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_retrieve_emits_retrieval_only_telemetry(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with caplog.at_level(logging.INFO):
+        with patch(
+            _PATCH, new=AsyncMock(return_value=_search_result([_make_chunk()]))
+        ):
+            await service.retrieve("what is workforce segmentation?", role_pack=None)
+
+    data = _parse_telemetry_log(caplog)
+    assert data["outcome"] == "success"
+    # Pure retrieval performs no synthesis, so synthesis latency is null.
+    assert data["latency_ms"]["synthesis"] is None
+
+
+def _count_retrieval_run_logs(caplog: pytest.LogCaptureFixture) -> int:
+    count = 0
+    for record in caplog.records:
+        try:
+            data = json.loads(record.getMessage())
+        except (json.JSONDecodeError, AttributeError):
+            continue
+        if data.get("component") == "retrieval" and data.get("event") == "retrieval_run":
+            count += 1
+    return count
+
+
+@pytest.mark.asyncio
+async def test_retrieve_emits_exactly_one_telemetry_record(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Guards the deferred-logging logic: the pure path must emit one
+    retrieval_run record on success, never zero and never two."""
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with caplog.at_level(logging.INFO):
+        with patch(
+            _PATCH, new=AsyncMock(return_value=_search_result([_make_chunk()]))
+        ):
+            await service.retrieve("what is workforce segmentation?", role_pack=None)
+
+    assert _count_retrieval_run_logs(caplog) == 1
+    mock_llm_adapter.complete.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_answer_emits_exactly_one_telemetry_record(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The answer path must emit a single combined record, not one per phase."""
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with caplog.at_level(logging.INFO):
+        with patch(
+            _PATCH, new=AsyncMock(return_value=_search_result([_make_chunk()]))
+        ):
+            await service.answer("what is workforce segmentation?", role_pack=None)
+
+    assert _count_retrieval_run_logs(caplog) == 1
+
+
+@pytest.mark.asyncio
+async def test_query_is_alias_of_answer(
+    tmp_path: Path,
+    mock_pool: MagicMock,
+    mock_llm_adapter: AsyncMock,
+) -> None:
+    service = RetrievalService(
+        config=make_test_config(tmp_path),
+        pool=mock_pool,
+        llm_adapter=mock_llm_adapter,
+    )
+
+    with patch(_PATCH, new=AsyncMock(return_value=_search_result([_make_chunk()]))):
+        via_query = await service.query("what is X?", role_pack=None)
+    with patch(_PATCH, new=AsyncMock(return_value=_search_result([_make_chunk()]))):
+        via_answer = await service.answer("what is X?", role_pack=None)
+
+    assert isinstance(via_query, CitedResponse)
+    assert via_query.answer == via_answer.answer == "synthesised answer"

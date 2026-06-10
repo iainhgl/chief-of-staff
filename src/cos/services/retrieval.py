@@ -2,6 +2,7 @@ import json
 import logging
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -11,6 +12,7 @@ from cos.config import CosConfig
 from cos.llm.adapter import LLMAdapter
 from cos.retrieval.citations import (
     CitedResponse,
+    RetrievalResult,
     narrow_to_lineage,
     select_document_first_anchors,
     select_synthesis_evidence,
@@ -19,6 +21,8 @@ from cos.retrieval.context_expansion import expand_bounded_context
 from cos.retrieval.search import hybrid_search_with_trace
 from cos.retrieval.strategy import QueryStrategy, select_query_strategy_from_text
 from cos.retrieval.telemetry import SearchStats
+
+_NO_CONTENT_ANSWER = "No relevant content found in the knowledge base."
 
 _TASK_INSTRUCTIONS: dict[str, str] = {
     "draft": (
@@ -157,6 +161,25 @@ def _emit_retrieval_log(
         logging.info(json.dumps(record))
 
 
+@dataclass
+class _RetrievalTelemetry:
+    """Deferred telemetry context for an evidence-bearing retrieval. Carried
+    from the retrieval phase to whichever caller emits the log, so the answer
+    path can emit a single combined record (retrieval + synthesis) while the
+    pure retrieve path emits a retrieval-only record."""
+
+    trace_id: str
+    query_mode: str
+    stats: SearchStats
+    document_candidate_count: int | None
+    post_lineage_count: int | None
+    post_evidence_selection_count: int | None
+    expansion_mode: str
+    expanded_context_count: int | None
+    retrieval_latency_ms: float
+    t_start: float
+
+
 class RetrievalService:
     def __init__(
         self,
@@ -168,7 +191,42 @@ class RetrievalService:
         self._pool = pool
         self._llm_adapter = llm_adapter
 
-    async def query(self, text: str, role_pack: Any) -> CitedResponse:
+    def _emit(
+        self,
+        ctx: _RetrievalTelemetry,
+        *,
+        synthesis_latency_ms: float | None,
+        outcome: str,
+        failure_stage: str | None,
+    ) -> None:
+        _emit_retrieval_log(
+            trace_id=ctx.trace_id,
+            query_mode=ctx.query_mode,
+            stats=ctx.stats,
+            document_candidate_count=ctx.document_candidate_count,
+            post_lineage_count=ctx.post_lineage_count,
+            post_evidence_selection_count=ctx.post_evidence_selection_count,
+            expansion_mode=ctx.expansion_mode,
+            expanded_context_count=ctx.expanded_context_count,
+            retrieval_latency_ms=ctx.retrieval_latency_ms,
+            synthesis_latency_ms=synthesis_latency_ms,
+            total_latency_ms=(time.monotonic() - ctx.t_start) * 1000.0,
+            provider=self._config.llm.provider,
+            model=self._config.llm.model,
+            outcome=outcome,
+            failure_stage=failure_stage,
+        )
+
+    async def _retrieve_with_telemetry(
+        self, text: str, role_pack: Any
+    ) -> tuple[RetrievalResult, _RetrievalTelemetry | None]:
+        """Run the pure retrieval pipeline (search → strategy → evidence).
+
+        Terminal outcomes (no candidates, no surviving evidence, retrieval
+        failure) emit their own log and return ``ctx=None``. An evidence-bearing
+        outcome defers logging: it returns the telemetry context so the caller
+        decides whether to emit a retrieval-only or a combined record.
+        """
         trace_id = str(uuid.uuid4())
         strategy = select_query_strategy_from_text(text)
         query_mode = _detect_query_type(text)
@@ -210,9 +268,15 @@ class RetrievalService:
                         outcome="no_content",
                         failure_stage="retrieval",
                     )
-                    return CitedResponse(
-                        answer="No relevant content found in the knowledge base.",
-                        citations=[],
+                    return (
+                        RetrievalResult(
+                            evidence=[],
+                            synthesis_context=[],
+                            strategy=strategy.value,
+                            trace_id=trace_id,
+                            outcome="no_content",
+                        ),
+                        None,
                     )
 
                 # Route by strategy ──────────────────────────────────────────
@@ -284,72 +348,102 @@ class RetrievalService:
             raise
         retrieval_latency_ms = (time.monotonic() - t_retrieval) * 1000.0
 
+        ctx = _RetrievalTelemetry(
+            trace_id=trace_id,
+            query_mode=query_mode,
+            stats=search_stats,
+            document_candidate_count=document_candidate_count,
+            post_lineage_count=post_lineage_count,
+            post_evidence_selection_count=post_evidence_selection_count,
+            expansion_mode=expansion_mode,
+            expanded_context_count=expanded_context_count,
+            retrieval_latency_ms=retrieval_latency_ms,
+            t_start=t_start,
+        )
+
         if not evidence:
-            _emit_retrieval_log(
-                trace_id=trace_id,
-                query_mode=query_mode,
-                stats=search_stats,
-                document_candidate_count=document_candidate_count,
-                post_lineage_count=post_lineage_count,
-                post_evidence_selection_count=post_evidence_selection_count,
-                expansion_mode=expansion_mode,
-                expanded_context_count=expanded_context_count,
-                retrieval_latency_ms=retrieval_latency_ms,
+            self._emit(
+                ctx,
                 synthesis_latency_ms=None,
-                total_latency_ms=(time.monotonic() - t_start) * 1000.0,
-                provider=self._config.llm.provider,
-                model=self._config.llm.model,
                 outcome="no_content",
                 failure_stage="evidence_selection",
             )
-            return CitedResponse(
-                answer="No relevant content found in the knowledge base.",
-                citations=[],
+            return (
+                RetrievalResult(
+                    evidence=[],
+                    synthesis_context=[],
+                    strategy=strategy.value,
+                    trace_id=trace_id,
+                    outcome="no_content",
+                ),
+                None,
             )
 
-        prompt = _build_synthesis_prompt(text, role_pack)
-        context = [chunk.content for chunk in synthesis_chunks]
-
-        t_synthesis = time.monotonic()
-        try:
-            answer = await self._llm_adapter.complete(prompt=prompt, context=context)
-            synthesis_latency_ms = (time.monotonic() - t_synthesis) * 1000.0
-            _emit_retrieval_log(
+        return (
+            RetrievalResult(
+                evidence=evidence,
+                synthesis_context=[chunk.content for chunk in synthesis_chunks],
+                strategy=strategy.value,
                 trace_id=trace_id,
-                query_mode=query_mode,
-                stats=search_stats,
-                document_candidate_count=document_candidate_count,
-                post_lineage_count=post_lineage_count,
-                post_evidence_selection_count=post_evidence_selection_count,
-                expansion_mode=expansion_mode,
-                expanded_context_count=expanded_context_count,
-                retrieval_latency_ms=retrieval_latency_ms,
-                synthesis_latency_ms=synthesis_latency_ms,
-                total_latency_ms=(time.monotonic() - t_start) * 1000.0,
-                provider=self._config.llm.provider,
-                model=self._config.llm.model,
+                outcome="success",
+            ),
+            ctx,
+        )
+
+    async def retrieve(self, text: str, role_pack: Any) -> RetrievalResult:
+        """Pure retrieval — find and return cited evidence with no LLM call.
+
+        This is the model-agnostic seam: callers (e.g. an external harness)
+        reason over the returned evidence themselves.
+        """
+        result, ctx = await self._retrieve_with_telemetry(text, role_pack)
+        if ctx is not None:
+            # Evidence-bearing retrieval that was not terminally logged: emit a
+            # retrieval-only record (no synthesis on this path).
+            self._emit(
+                ctx,
+                synthesis_latency_ms=None,
                 outcome="success",
                 failure_stage=None,
             )
+        return result
+
+    async def answer(self, text: str, role_pack: Any) -> CitedResponse:
+        """Retrieve then synthesise a cited answer. Emits a single combined
+        (retrieval + synthesis) telemetry record."""
+        result, ctx = await self._retrieve_with_telemetry(text, role_pack)
+        if not result.evidence:
+            return CitedResponse(answer=_NO_CONTENT_ANSWER, citations=[])
+
+        assert ctx is not None  # evidence present ⇒ deferred telemetry context
+        prompt = _build_synthesis_prompt(text, role_pack)
+
+        t_synthesis = time.monotonic()
+        try:
+            answer = await self._llm_adapter.complete(
+                prompt=prompt, context=result.synthesis_context
+            )
         except Exception:
             synthesis_latency_ms = (time.monotonic() - t_synthesis) * 1000.0
-            _emit_retrieval_log(
-                trace_id=trace_id,
-                query_mode=query_mode,
-                stats=search_stats,
-                document_candidate_count=document_candidate_count,
-                post_lineage_count=post_lineage_count,
-                post_evidence_selection_count=post_evidence_selection_count,
-                expansion_mode=expansion_mode,
-                expanded_context_count=expanded_context_count,
-                retrieval_latency_ms=retrieval_latency_ms,
+            self._emit(
+                ctx,
                 synthesis_latency_ms=synthesis_latency_ms,
-                total_latency_ms=(time.monotonic() - t_start) * 1000.0,
-                provider=self._config.llm.provider,
-                model=self._config.llm.model,
                 outcome="synthesis_degraded",
                 failure_stage="synthesis",
             )
-            return CitedResponse(answer=None, citations=evidence)
+            return CitedResponse(answer=None, citations=result.evidence)
 
-        return CitedResponse(answer=answer, citations=evidence)
+        synthesis_latency_ms = (time.monotonic() - t_synthesis) * 1000.0
+        self._emit(
+            ctx,
+            synthesis_latency_ms=synthesis_latency_ms,
+            outcome="success",
+            failure_stage=None,
+        )
+        return CitedResponse(answer=answer, citations=result.evidence)
+
+    async def query(self, text: str, role_pack: Any) -> CitedResponse:
+        """Deprecated alias of :meth:`answer`, retained so existing callers and
+        tests continue to work. New code should call :meth:`answer` (for a
+        synthesised reply) or :meth:`retrieve` (for cited evidence only)."""
+        return await self.answer(text, role_pack)

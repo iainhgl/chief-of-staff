@@ -97,6 +97,21 @@ class CitedResponse:
     citations: CitedResults
 
 
+@dataclass
+class RetrievalResult:
+    """Pure-retrieval output: cited evidence and the context selected for
+    synthesis, with no generated answer. Returned by
+    ``RetrievalService.retrieve`` so callers can reason over grounded evidence
+    themselves. ``synthesis_context`` is the chunk text the answer path would
+    hand to the LLM; ``evidence`` is the citation set."""
+
+    evidence: CitedResults
+    synthesis_context: list[str]
+    strategy: str
+    trace_id: str
+    outcome: str  # "success" | "no_content"
+
+
 def format_citations(results: CitedResults) -> str:
     return "\n".join(
         f"[{index}] {chunk.source_alias} "

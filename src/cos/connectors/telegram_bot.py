@@ -442,7 +442,7 @@ async def _handle_update(
 
             _log("info", "accepted question", **_log_ids(update_id, message_id))
             response: CitedResponse = await asyncio.wait_for(
-                retrieval_service.query(question_text, role_pack),
+                retrieval_service.answer(question_text, role_pack),
                 timeout=_RETRIEVAL_TIMEOUT_SECONDS,
             )
             if response.answer is None:
