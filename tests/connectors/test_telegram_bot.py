@@ -432,7 +432,7 @@ async def test_handle_update_ignores_non_text_message(
         )
 
     assert any("non-text message" in r.message for r in caplog.records)
-    retrieval.query.assert_not_called()
+    retrieval.answer.assert_not_called()
     output.send.assert_not_called()
 
 
@@ -448,7 +448,7 @@ async def test_handle_update_routes_question_to_retrieval() -> None:
         citations=[_make_cited_chunk()],
     )
     retrieval = AsyncMock()
-    retrieval.query = AsyncMock(return_value=mock_response)
+    retrieval.answer = AsyncMock(return_value=mock_response)
     output = AsyncMock()
     role_pack = MagicMock()
 
@@ -460,7 +460,7 @@ async def test_handle_update_routes_question_to_retrieval() -> None:
         role_pack=role_pack,
     )
 
-    retrieval.query.assert_called_once_with(
+    retrieval.answer.assert_called_once_with(
         "what is the leave policy?", role_pack
     )
     output.send.assert_called_once()
@@ -476,7 +476,7 @@ async def test_handle_update_strips_ask_command_before_retrieval() -> None:
         "message": {"chat": {"id": 111222333}, "text": "/ask what is the policy?"},
     }
     retrieval = AsyncMock()
-    retrieval.query = AsyncMock(return_value=CitedResponse(
+    retrieval.answer = AsyncMock(return_value=CitedResponse(
         answer="Policy answer.",
         citations=[_make_cited_chunk()],
     ))
@@ -491,7 +491,7 @@ async def test_handle_update_strips_ask_command_before_retrieval() -> None:
         role_pack=role_pack,
     )
 
-    retrieval.query.assert_called_once_with("what is the policy?", role_pack)
+    retrieval.answer.assert_called_once_with("what is the policy?", role_pack)
 
 
 @pytest.mark.asyncio
@@ -511,7 +511,7 @@ async def test_handle_update_ask_command_without_question_sends_guidance() -> No
         output_service=output,
     )
 
-    retrieval.query.assert_not_called()
+    retrieval.answer.assert_not_called()
     output.send.assert_called_once()
     channel, content = output.send.call_args[0]
     assert channel == "telegram"
@@ -532,7 +532,7 @@ async def test_handle_update_sends_unsupported_reply_for_non_question() -> None:
         update, cfg, retrieval_service=retrieval, output_service=output
     )
 
-    retrieval.query.assert_not_called()
+    retrieval.answer.assert_not_called()
     output.send.assert_called_once()
     channel, content = output.send.call_args[0]
     assert channel == "telegram"
@@ -553,7 +553,7 @@ async def test_handle_update_does_not_reply_to_unconfigured_chat() -> None:
         update, cfg, retrieval_service=retrieval, output_service=output
     )
 
-    retrieval.query.assert_not_called()
+    retrieval.answer.assert_not_called()
     output.send.assert_not_called()
 
 
@@ -565,7 +565,7 @@ async def test_handle_update_sends_recovery_on_retrieval_exception() -> None:
         "message": {"chat": {"id": 111222333}, "text": "what is the leave policy?"},
     }
     retrieval = AsyncMock()
-    retrieval.query = AsyncMock(side_effect=RuntimeError("db error"))
+    retrieval.answer = AsyncMock(side_effect=RuntimeError("db error"))
     output = AsyncMock()
 
     await _handle_update(
@@ -593,7 +593,7 @@ async def test_handle_update_sends_recovery_on_retrieval_timeout(
         return CitedResponse(answer="Too late.", citations=[])
 
     retrieval = AsyncMock()
-    retrieval.query = AsyncMock(side_effect=_slow_query)
+    retrieval.answer = AsyncMock(side_effect=_slow_query)
     output = AsyncMock()
     monkeypatch.setattr("cos.connectors.telegram_bot._RETRIEVAL_TIMEOUT_SECONDS", 0.01)
 
@@ -615,7 +615,7 @@ async def test_handle_update_no_content_sends_no_relevant_content_reply() -> Non
         "message": {"chat": {"id": 111222333}, "text": "what is the leave policy?"},
     }
     retrieval = AsyncMock()
-    retrieval.query = AsyncMock(return_value=CitedResponse(
+    retrieval.answer = AsyncMock(return_value=CitedResponse(
         answer="No relevant content found in the knowledge base.",
         citations=[],
     ))
@@ -639,7 +639,7 @@ async def test_handle_update_synthesis_degraded_sends_degraded_reply() -> None:
         "message": {"chat": {"id": 111222333}, "text": "what is the leave policy?"},
     }
     retrieval = AsyncMock()
-    retrieval.query = AsyncMock(return_value=CitedResponse(
+    retrieval.answer = AsyncMock(return_value=CitedResponse(
         answer=None,
         citations=[_make_cited_chunk(source_alias="policy-doc", chunk_index=1)],
     ))
@@ -665,7 +665,7 @@ async def test_handle_update_logs_structured_events_for_question(
         "message": {"chat": {"id": 111222333}, "text": "what is the leave policy?"},
     }
     retrieval = AsyncMock()
-    retrieval.query = AsyncMock(return_value=CitedResponse(
+    retrieval.answer = AsyncMock(return_value=CitedResponse(
         answer="25 days.",
         citations=[_make_cited_chunk()],
     ))
@@ -694,7 +694,7 @@ async def test_handle_update_logs_message_id_when_available(
         },
     }
     retrieval = AsyncMock()
-    retrieval.query = AsyncMock(return_value=CitedResponse(
+    retrieval.answer = AsyncMock(return_value=CitedResponse(
         answer="25 days.",
         citations=[_make_cited_chunk()],
     ))
@@ -734,7 +734,7 @@ async def test_run_polling_continues_after_malformed_update(
         raise asyncio.CancelledError()
 
     retrieval = AsyncMock()
-    retrieval.query = AsyncMock(return_value=CitedResponse(
+    retrieval.answer = AsyncMock(return_value=CitedResponse(
         answer="Policy answer.",
         citations=[_make_cited_chunk()],
     ))
@@ -1454,7 +1454,7 @@ async def test_handle_update_qa_routing_unchanged_after_note_changes() -> None:
     }
     mock_response = CitedResponse(answer="25 days.", citations=[_make_cited_chunk()])
     retrieval = AsyncMock()
-    retrieval.query = AsyncMock(return_value=mock_response)
+    retrieval.answer = AsyncMock(return_value=mock_response)
     output = AsyncMock()
     pool, _ = _make_note_pool()
 
@@ -1466,7 +1466,7 @@ async def test_handle_update_qa_routing_unchanged_after_note_changes() -> None:
         pool=pool,
     )
 
-    retrieval.query.assert_called_once()
+    retrieval.answer.assert_called_once()
     output.send.assert_called_once()
 
 

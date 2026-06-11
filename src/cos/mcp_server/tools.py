@@ -46,9 +46,20 @@ async def get_status() -> str:
     )
 
 
+def _citation_dict(citation: Any) -> dict[str, Any]:
+    return {
+        "source_alias": citation.source_alias,
+        "source_locator": citation.source_locator,
+        "document_version_id": citation.document_version_id,
+        "chunk_index": citation.chunk_index,
+        "score": citation.score,
+    }
+
+
 @mcp.tool()
 async def retrieve(query: str) -> str:
-    """Retrieve relevant documents for a query."""
+    """Retrieve cited source chunks for a query. Returns grounded evidence only
+    — no generated answer. Use this to reason over the sources yourself."""
     retrieval_service = get_retrieval_service()
     if retrieval_service is None:
         return json.dumps(
@@ -63,7 +74,7 @@ async def retrieve(query: str) -> str:
     role_pack = role_pack_svc.get_active() if role_pack_svc is not None else None
 
     try:
-        response = await retrieval_service.query(query, role_pack=role_pack)
+        result = await retrieval_service.retrieve(query, role_pack=role_pack)
     except Exception:
         logging.error(
             json.dumps(
@@ -83,16 +94,63 @@ async def retrieve(query: str) -> str:
             }
         )
 
-    citations_data = [
-        {
-            "source_alias": citation.source_alias,
-            "source_locator": citation.source_locator,
-            "document_version_id": citation.document_version_id,
-            "chunk_index": citation.chunk_index,
-            "score": citation.score,
-        }
-        for citation in response.citations
+    citations_data = [_citation_dict(c) for c in result.evidence]
+    chunks_data = [
+        {**_citation_dict(c), "content": c.content} for c in result.evidence
     ]
+
+    return json.dumps(
+        {
+            "status": "ok",
+            "data": {
+                "chunks": chunks_data,
+                "strategy": result.strategy,
+                "outcome": result.outcome,
+            },
+            "citations": citations_data,
+        }
+    )
+
+
+@mcp.tool()
+async def answer(query: str) -> str:
+    """Answer a query with a synthesised, cited response. Use this for a
+    finished answer rather than raw evidence."""
+    retrieval_service = get_retrieval_service()
+    if retrieval_service is None:
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "Server not initialized",
+                "detail": "retrieval service not ready",
+            }
+        )
+
+    role_pack_svc = get_role_pack_service()
+    role_pack = role_pack_svc.get_active() if role_pack_svc is not None else None
+
+    try:
+        response = await retrieval_service.answer(query, role_pack=role_pack)
+    except Exception:
+        logging.error(
+            json.dumps(
+                {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "level": "ERROR",
+                    "component": "mcp_server",
+                    "message": "Answer tool failed",
+                }
+            )
+        )
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "Retrieval failed",
+                "detail": "An internal error occurred. Run cos logs for diagnostics.",
+            }
+        )
+
+    citations_data = [_citation_dict(c) for c in response.citations]
 
     if response.answer is None:
         return json.dumps(

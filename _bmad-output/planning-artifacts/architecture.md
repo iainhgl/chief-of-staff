@@ -591,6 +591,11 @@ tests/
 - `LLMAdapter` protocol in `cos/llm/adapter.py` is the only interface the retrieval and output layers use
 - Swapping provider = implementing the protocol in a new file + updating config
 
+**Retrieval Contract Boundary (EN.2):**
+- `RetrievalService` exposes two methods: `retrieve()` returns cited evidence (`RetrievalResult`) with **no** LLM call; `answer()` returns a synthesised `CitedResponse`. `query()` is a deprecated alias of `answer()`.
+- The MCP `retrieve` tool is **pure** (cited chunks, no egress); the MCP `answer` tool synthesises and is the **only** retrieval path that emits to an output channel.
+- New synthesis behaviour belongs on the `answer` path; never add an LLM call to `retrieve`. See **Enabler Implementation Notes (EN.2)** below.
+
 ### Data Flow
 
 **Ingestion path:**
@@ -604,15 +609,21 @@ cos ingest <path>
                    chunks, embeddings, provenance — transactional)
 ```
 
-**Query path:**
+**Query paths (EN.2 — two tools):**
 ```
+Pure retrieval (model-agnostic; caller reasons):
 MCP client calls `retrieve` tool
-  → OutputService validates channel
-    → RetrievalService.query()
+  → RetrievalService.retrieve()
       → retrieval/search.py (keyword + semantic, role pack weights applied)
-      → retrieval/citations.py (format cited results)
-    → LLMAdapter.complete() (synthesise response from retrieved chunks)
-  → OutputRouter.send(channel="local", content=response)
+      → strategy routing + evidence selection
+  → returns cited chunks (no LLM call, no egress)
+
+Synthesised answer (thin clients: CLI, Telegram):
+MCP client calls `answer` tool
+  → RetrievalService.answer()
+      → retrieve() (as above)
+      → LLMAdapter.complete() (synthesise response from selected context)
+  → OutputService → OutputRouter.send(channel="local", content=response)
 ```
 
 **Startup sequence:**
@@ -992,3 +1003,20 @@ Epic 8 adds reactive Telegram messaging. Future agents should treat all of the f
 | 5 | **Telegram note provenance** | Telegram notes use `source_type="telegram_note"`. `source_alias` follows the pattern `telegram-note-YYYY-MM-DDTHHMMSSZ-<id>.md`. `source_locator` uses `telegram://chat/{chat_id}/message/{message_id}` when a message ID is available. These notes flow through the same canonical ingest pipeline as MCP notes and local files. `"Note saved."` means the note was durably staged and queued — not that embeddings are searchable; worker completion is a separate step. |
 | 6 | **Deduplication at enqueue time** | A Telegram note whose `source_locator` and content fingerprint match an already-queued or already-processed note returns `"Note saved."` without creating a duplicate ingest job or canonical record. Duplicate deliveries of the same Telegram message are idempotent; resending the same text as a new Telegram message may create a separate note. This is consistent with the four deterministic ingest outcomes (`new_content`, `unchanged`, `changed_content`, `new_source_known_content`) established in Epic 6. |
 | 7 | **Failure isolation** | When `getUpdates` returns a non-success HTTP response or the Telegram API is unreachable, the polling loop logs the error (`"polling error — retrying after backoff"`) and retries with exponential backoff (`backoff_initial` → `backoff_max`). The `cos` MCP server, `worker`, and all retrieval paths remain available during a Telegram outage. |
+
+## Enabler Implementation Notes (EN.2 — Retrieval Contract Split)
+
+EN.2 splits the retrieval surface into pure retrieval and synthesis. Future agents should treat all of the following as implemented baseline. Source design note: `_bmad-output/planning-artifacts/retrieval-contract-and-pluggable-retriever-design-2026-06-10.md`. Story: `_bmad-output/implementation-artifacts/enabler-retrieval-contract-split.md`.
+
+**Why this exists.** The platform's durable asset is its context layer exposed over MCP (see `docs/build-configure-use.md`). Previously the `retrieve` tool synthesised an answer server-side, coupling the portable context layer to a specific reasoning step and model. EN.2 separates *evidence* from *answer* so an external harness can retrieve grounded, cited evidence and reason over it with its own (newest) model, while thin clients still get a finished answer. This is a deliberate move to keep CoS relevant as models and harnesses evolve.
+
+| # | Addition | Detail |
+|---|----------|--------|
+| 1 | **`RetrievalService.retrieve()` — pure** | Returns a `RetrievalResult` (`evidence`, `synthesis_context`, `strategy`, `trace_id`, `outcome`) and performs **no** LLM call. This is the model-agnostic seam. |
+| 2 | **`RetrievalService.answer()` — synthesis** | Returns a `CitedResponse`; equals the previous `query()` behaviour (retrieve + `LLMAdapter.complete`) including telemetry. |
+| 3 | **`RetrievalService.query()` — deprecated alias** | Calls `answer()`. Retained only to avoid churning existing callers/tests. New code calls `answer` (prose) or `retrieve` (evidence). |
+| 4 | **MCP `retrieve` tool is pure** | Returns `data.chunks` (citation fields **plus** `content`), `data.strategy`, `data.outcome`. It emits to **no** output channel. Schema is intentionally stable so future retrieval-mechanism changes need not move it. |
+| 5 | **MCP `answer` tool added** | Synthesised prose + citations; routes egress via `OutputService → OutputRouter`. This is the **only** retrieval path that emits to a channel (FR21/FR36 unchanged). |
+| 6 | **Thin clients call `answer`** | `src/cos/connectors/telegram_bot.py` (and CLI question flows) use `answer()`. |
+| 7 | **Telemetry split** | The `answer` path emits the single combined (retrieval + synthesis) `retrieval_run` record as before. The pure `retrieve` path emits a retrieval-only record with `latency_ms.synthesis = null`. An internal `_retrieve_with_telemetry()` defers logging on the evidence-bearing path so existing telemetry contracts are preserved. |
+| 8 | **Deferred: pluggable `Retriever` seam** | EN.2 implements only the contract split. The vector/file/graph/fusion `Retriever` abstraction from the design note (Stories C+D) is **not** built. Today retrieval mechanism is still `retrieval/search.py` hybrid search called directly inside `retrieve()`. The design note remains the reference if/when a second mechanism is wanted; it is order-independent and blocks nothing. |

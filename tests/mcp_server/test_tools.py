@@ -5,13 +5,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import cos.mcp_server.server as _server
 import cos.mcp_server.tools  # noqa: F401 — ensure decorators run
 from cos.mcp_server.tools import (
+    answer,
     get_role_context,
     get_status,
     ingest_document,
     list_documents,
     retrieve,
 )
-from cos.retrieval.citations import CitedChunk, CitedResponse
+from cos.retrieval.citations import CitedChunk, CitedResponse, RetrievalResult
 from cos.rolepack.loader import RolePackConfig
 from cos.services.health import ComponentStatus
 from cos.services.ingestion import IngestResult
@@ -42,11 +43,23 @@ def _make_chunk() -> CitedChunk:
 def _make_mock_retrieval_service(
     answer: str | None = "synthesised answer",
 ) -> AsyncMock:
+    """Mock service wired for both tools: `answer` (synthesis) and the pure
+    `retrieve` (evidence-only)."""
     svc = AsyncMock()
+    citations = [_make_chunk()] if answer is not None else []
+    svc.answer = AsyncMock(
+        return_value=CitedResponse(answer=answer, citations=citations)
+    )
     svc.query = AsyncMock(
-        return_value=CitedResponse(
-            answer=answer,
-            citations=[_make_chunk()] if answer is not None else [],
+        return_value=CitedResponse(answer=answer, citations=citations)
+    )
+    svc.retrieve = AsyncMock(
+        return_value=RetrievalResult(
+            evidence=[_make_chunk()],
+            synthesis_context=["test content"],
+            strategy="default",
+            trace_id="trace-1",
+            outcome="success",
         )
     )
     return svc
@@ -166,32 +179,46 @@ async def test_get_status_no_config_returns_error(monkeypatch):
     assert "detail" in result
 
 
-async def test_retrieve_returns_ok_envelope(monkeypatch):
+# ─────────────────────────────────────────────
+# retrieve tool (pure — cited chunks, no synthesis)
+# ─────────────────────────────────────────────
+
+
+async def test_retrieve_returns_chunks_not_answer(monkeypatch):
     monkeypatch.setattr(_server, "_retrieval_service", _make_mock_retrieval_service())
-    monkeypatch.setattr(_server, "_output_service", _make_mock_output_service())
+    output_service = _make_mock_output_service()
+    monkeypatch.setattr(_server, "_output_service", output_service)
     result = json.loads(await retrieve(query="what is workforce segmentation?"))
 
     assert result["status"] == "ok"
-    assert "answer" in result["data"]
-    assert isinstance(result["data"]["answer"], str)
+    assert "answer" not in result["data"]
+    assert isinstance(result["data"]["chunks"], list)
+    assert result["data"]["chunks"][0]["content"] == "test content"
+    assert result["data"]["strategy"] == "default"
+    assert result["data"]["outcome"] == "success"
     assert isinstance(result["citations"], list)
+    # pure retrieval must not emit to any output channel
+    output_service.send.assert_not_called()
 
 
-async def test_retrieve_no_content_found(monkeypatch):
+async def test_retrieve_no_content_returns_empty_chunks(monkeypatch):
     svc = AsyncMock()
-    svc.query = AsyncMock(
-        return_value=CitedResponse(
-            answer="No relevant content found in the knowledge base.",
-            citations=[],
+    svc.retrieve = AsyncMock(
+        return_value=RetrievalResult(
+            evidence=[],
+            synthesis_context=[],
+            strategy="default",
+            trace_id="trace-1",
+            outcome="no_content",
         )
     )
     monkeypatch.setattr(_server, "_retrieval_service", svc)
-    monkeypatch.setattr(_server, "_output_service", _make_mock_output_service())
     result = json.loads(await retrieve(query="unknown topic"))
 
     assert result["status"] == "ok"
-    assert "no relevant content" in result["data"]["answer"].lower()
-    assert result["data"]["citations"] == []
+    assert result["data"]["chunks"] == []
+    assert result["data"]["outcome"] == "no_content"
+    assert result["citations"] == []
 
 
 async def test_retrieve_server_not_initialized(monkeypatch):
@@ -203,12 +230,91 @@ async def test_retrieve_server_not_initialized(monkeypatch):
     assert "detail" in result
 
 
-async def test_retrieve_synthesis_failure(monkeypatch):
+async def test_retrieve_service_exception(monkeypatch):
     svc = AsyncMock()
-    svc.query = AsyncMock(return_value=CitedResponse(answer=None, citations=[]))
+    svc.retrieve = AsyncMock(side_effect=RuntimeError("DB connection lost"))
+    monkeypatch.setattr(_server, "_retrieval_service", svc)
+    result = json.loads(await retrieve(query="test"))
+
+    assert result["status"] == "error"
+    assert "error" in result
+    assert "detail" in result
+    assert "DB connection lost" not in result["detail"]
+    assert "cos logs" in result["detail"]
+
+
+async def test_retrieve_passes_role_pack_to_service(monkeypatch):
+    role_pack_service = _make_role_pack_service()
+    retrieval_service = _make_mock_retrieval_service()
+    monkeypatch.setattr(_server, "_role_pack_service", role_pack_service)
+    monkeypatch.setattr(_server, "_retrieval_service", retrieval_service)
+
+    result = json.loads(await retrieve(query="test"))
+
+    assert result["status"] == "ok"
+    assert (
+        retrieval_service.retrieve.call_args.kwargs["role_pack"]
+        == role_pack_service.get_active()
+    )
+
+
+# ─────────────────────────────────────────────
+# answer tool (synthesis — cited prose)
+# ─────────────────────────────────────────────
+
+
+async def test_answer_returns_ok_envelope(monkeypatch):
+    monkeypatch.setattr(_server, "_retrieval_service", _make_mock_retrieval_service())
+    monkeypatch.setattr(_server, "_output_service", _make_mock_output_service())
+    result = json.loads(await answer(query="what is workforce segmentation?"))
+
+    assert result["status"] == "ok"
+    assert "answer" in result["data"]
+    assert isinstance(result["data"]["answer"], str)
+    assert isinstance(result["citations"], list)
+
+
+async def test_answer_emits_to_output_channel(monkeypatch):
+    monkeypatch.setattr(_server, "_retrieval_service", _make_mock_retrieval_service())
+    output_service = _make_mock_output_service()
+    monkeypatch.setattr(_server, "_output_service", output_service)
+    await answer(query="what is workforce segmentation?")
+
+    output_service.send.assert_awaited_once()
+
+
+async def test_answer_no_content_found(monkeypatch):
+    svc = AsyncMock()
+    svc.answer = AsyncMock(
+        return_value=CitedResponse(
+            answer="No relevant content found in the knowledge base.",
+            citations=[],
+        )
+    )
     monkeypatch.setattr(_server, "_retrieval_service", svc)
     monkeypatch.setattr(_server, "_output_service", _make_mock_output_service())
-    result = json.loads(await retrieve(query="test"))
+    result = json.loads(await answer(query="unknown topic"))
+
+    assert result["status"] == "ok"
+    assert "no relevant content" in result["data"]["answer"].lower()
+    assert result["data"]["citations"] == []
+
+
+async def test_answer_server_not_initialized(monkeypatch):
+    monkeypatch.setattr(_server, "_retrieval_service", None)
+    result = json.loads(await answer(query="test"))
+
+    assert result["status"] == "error"
+    assert "error" in result
+    assert "detail" in result
+
+
+async def test_answer_synthesis_failure(monkeypatch):
+    svc = AsyncMock()
+    svc.answer = AsyncMock(return_value=CitedResponse(answer=None, citations=[]))
+    monkeypatch.setattr(_server, "_retrieval_service", svc)
+    monkeypatch.setattr(_server, "_output_service", _make_mock_output_service())
+    result = json.loads(await answer(query="test"))
 
     assert result["status"] == "error"
     assert "error" in result
@@ -216,12 +322,12 @@ async def test_retrieve_synthesis_failure(monkeypatch):
     assert "citations" not in result
 
 
-async def test_retrieve_service_exception(monkeypatch):
+async def test_answer_service_exception(monkeypatch):
     svc = AsyncMock()
-    svc.query = AsyncMock(side_effect=RuntimeError("DB connection lost"))
+    svc.answer = AsyncMock(side_effect=RuntimeError("DB connection lost"))
     monkeypatch.setattr(_server, "_retrieval_service", svc)
     monkeypatch.setattr(_server, "_output_service", _make_mock_output_service())
-    result = json.loads(await retrieve(query="test"))
+    result = json.loads(await answer(query="test"))
 
     assert result["status"] == "error"
     assert "error" in result
@@ -303,10 +409,10 @@ async def test_list_documents_document_fields_present(monkeypatch):
     assert "chunk_count" in doc
 
 
-async def test_retrieve_citations_include_source_alias_and_locator(monkeypatch):
+async def test_answer_citations_include_source_alias_and_locator(monkeypatch):
     monkeypatch.setattr(_server, "_retrieval_service", _make_mock_retrieval_service())
     monkeypatch.setattr(_server, "_output_service", _make_mock_output_service())
-    result = json.loads(await retrieve(query="workforce segmentation"))
+    result = json.loads(await answer(query="workforce segmentation"))
 
     assert result["status"] == "ok"
     citations = result["citations"]
@@ -365,7 +471,7 @@ async def test_get_role_context_no_role_pack_service_returns_error(monkeypatch):
     assert "detail" in result
 
 
-async def test_retrieve_passes_role_pack_to_service(monkeypatch):
+async def test_answer_passes_role_pack_to_service(monkeypatch):
     role_pack_service = _make_role_pack_service()
     retrieval_service = _make_mock_retrieval_service()
     output_service = _make_mock_output_service()
@@ -373,11 +479,11 @@ async def test_retrieve_passes_role_pack_to_service(monkeypatch):
     monkeypatch.setattr(_server, "_retrieval_service", retrieval_service)
     monkeypatch.setattr(_server, "_output_service", output_service)
 
-    result = json.loads(await retrieve(query="test"))
+    result = json.loads(await answer(query="test"))
 
     assert result["status"] == "ok"
     assert (
-        retrieval_service.query.call_args.kwargs["role_pack"]
+        retrieval_service.answer.call_args.kwargs["role_pack"]
         == role_pack_service.get_active()
     )
 
@@ -522,7 +628,7 @@ async def test_ingest_document_service_exception_returns_error(monkeypatch):
 # ── Story 6.13: citation pruning propagation ─────────────────────────────────
 
 
-async def test_retrieve_envelope_contains_only_service_returned_citations(monkeypatch):
+async def test_answer_envelope_contains_only_service_returned_citations(monkeypatch):
     pruned_citations = [
         CitedChunk(
             content="first supporting chunk",
@@ -544,7 +650,7 @@ async def test_retrieve_envelope_contains_only_service_returned_citations(monkey
         ),
     ]
     svc = AsyncMock()
-    svc.query = AsyncMock(
+    svc.answer = AsyncMock(
         return_value=CitedResponse(
             answer="synthesised answer", citations=pruned_citations
         )
@@ -552,7 +658,7 @@ async def test_retrieve_envelope_contains_only_service_returned_citations(monkey
     monkeypatch.setattr(_server, "_retrieval_service", svc)
     monkeypatch.setattr(_server, "_output_service", _make_mock_output_service())
 
-    result = json.loads(await retrieve(query="what is HR planning?"))
+    result = json.loads(await answer(query="what is HR planning?"))
 
     assert result["status"] == "ok"
     citations = result["citations"]
@@ -569,7 +675,7 @@ async def test_retrieve_envelope_contains_only_service_returned_citations(monkey
 # ── Story 6.14: grounded citation lineage in MCP response ────────────────────
 
 
-async def test_retrieve_grounded_citations_share_single_lineage(monkeypatch):
+async def test_answer_grounded_citations_share_single_lineage(monkeypatch):
     # Service returns only the winning lineage after grounding (simulated here)
     grounded_citation = CitedChunk(
         content="leave policy from email body",
@@ -581,7 +687,7 @@ async def test_retrieve_grounded_citations_share_single_lineage(monkeypatch):
         score=0.9,
     )
     svc = AsyncMock()
-    svc.query = AsyncMock(
+    svc.answer = AsyncMock(
         return_value=CitedResponse(
             answer="The leave policy allows 20 days per year.",
             citations=[grounded_citation],
@@ -590,7 +696,7 @@ async def test_retrieve_grounded_citations_share_single_lineage(monkeypatch):
     monkeypatch.setattr(_server, "_retrieval_service", svc)
     monkeypatch.setattr(_server, "_output_service", _make_mock_output_service())
 
-    result = json.loads(await retrieve(query="what is the leave policy?"))
+    result = json.loads(await answer(query="what is the leave policy?"))
 
     assert result["status"] == "ok"
     # Top-level citations and data.citations must both reflect the grounded lineage
@@ -603,7 +709,7 @@ async def test_retrieve_grounded_citations_share_single_lineage(monkeypatch):
     assert result["data"]["citations"][0] == top_citation
 
 
-async def test_retrieve_grounded_legacy_citations_use_source_locator(monkeypatch):
+async def test_answer_grounded_legacy_citations_use_source_locator(monkeypatch):
     # Legacy record with no document_version_id — source_locator is the lineage key
     legacy_citation = CitedChunk(
         content="leave policy content",
@@ -615,7 +721,7 @@ async def test_retrieve_grounded_legacy_citations_use_source_locator(monkeypatch
         score=0.85,
     )
     svc = AsyncMock()
-    svc.query = AsyncMock(
+    svc.answer = AsyncMock(
         return_value=CitedResponse(
             answer="The leave policy is detailed in docs.",
             citations=[legacy_citation],
@@ -624,7 +730,7 @@ async def test_retrieve_grounded_legacy_citations_use_source_locator(monkeypatch
     monkeypatch.setattr(_server, "_retrieval_service", svc)
     monkeypatch.setattr(_server, "_output_service", _make_mock_output_service())
 
-    result = json.loads(await retrieve(query="what does the leave doc say?"))
+    result = json.loads(await answer(query="what does the leave doc say?"))
 
     assert result["status"] == "ok"
     top_citation = result["citations"][0]
