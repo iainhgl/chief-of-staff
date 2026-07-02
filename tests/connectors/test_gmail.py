@@ -7,11 +7,13 @@ from googleapiclient.errors import HttpError
 
 from cos.config import GmailConnectorConfig
 from cos.connectors.gmail import (
+    GmailLabel,
     _decode_b64url,
     _execute_with_retry,
     extract_body_text,
     fetch_attachment_bytes,
     get_message_header,
+    list_labels,
     list_message_ids,
     walk_mime_parts,
 )
@@ -69,6 +71,34 @@ def test_list_message_ids_omits_query_when_none() -> None:
     call_kwargs = service.users.return_value.messages.return_value.list.call_args.kwargs
     assert "q" not in call_kwargs
     assert "labelIds" not in call_kwargs
+
+
+# ── list_labels ───────────────────────────────────────────────────────────────
+
+def _set_labels_response(service: MagicMock, response: dict) -> None:
+    (service.users.return_value.labels.return_value
+     .list.return_value.execute.return_value) = response
+
+
+def test_list_labels_returns_label_metadata() -> None:
+    service = MagicMock()
+    _set_labels_response(
+        service,
+        {
+            "labels": [
+                {"id": "Label_123", "name": "cos-uat", "type": "user"},
+                {"id": "INBOX", "name": "INBOX", "type": "system"},
+            ]
+        },
+    )
+
+    result = list_labels(service)
+
+    assert result == [
+        GmailLabel(id="Label_123", name="cos-uat", type="user"),
+        GmailLabel(id="INBOX", name="INBOX", type="system"),
+    ]
+    service.users.return_value.labels.return_value.list.assert_called_with(userId="me")
 
 
 # ── walk_mime_parts ───────────────────────────────────────────────────────────

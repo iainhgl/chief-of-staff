@@ -176,13 +176,49 @@ Authenticated gmail successfully.
 Token saved to tokens/gmail.json
 ```
 
-### 4. Token storage and refresh
+### 4. Find Gmail API label IDs
+
+If you want Gmail sync to poll a specific Gmail label, list the mailbox labels after authenticating Gmail:
+
+```bash
+uv run cos gmail labels
+```
+
+The command prints the Gmail display name, the API label ID, and whether the label is a Gmail system label or a custom user label:
+
+```text
+NAME      ID         TYPE
+INBOX     INBOX      system
+cos-uat   Label_123  user
+```
+
+For normal setup, use the Gmail display label in `gmail.label_names`. Keep temporal or search filters, such as `newer_than:7d`, in `gmail.query`:
+
+```yaml
+gmail:
+  query: "newer_than:7d"
+  label_names: ["cos-uat"]
+```
+
+At sync time, the connector resolves `label_names` to Gmail API IDs once and passes those IDs to Gmail. If a label name is missing, sync fails before polling messages and suggests `cos gmail labels`.
+
+Advanced configurations may use `gmail.label_ids` directly instead of `gmail.label_names`:
+
+```yaml
+gmail:
+  query: "newer_than:7d"
+  label_ids: ["Label_123"]
+```
+
+Do not set `label_names` and `label_ids` together. System labels often use readable IDs such as `INBOX` or `IMPORTANT`. Custom Gmail labels may use opaque IDs such as `Label_123`, even when their display name is something friendly like `cos-uat`.
+
+### 5. Token storage and refresh
 
 - Token files live in `tokens/` which is **gitignored** — they are never committed
 - The `docker-compose.yml` mounts `./tokens` into the container as `/app/tokens` so connector-side token refresh survives container rebuilds
 - Tokens refresh automatically in the background when they expire — no manual re-consent is needed as long as the refresh token is valid
 
-### 5. Recovery: token missing or revoked
+### 6. Recovery: token missing or revoked
 
 If a connector cannot authenticate, the platform logs a structured error and leaves the MCP retrieval path available. To recover, re-run the auth command for the affected connector:
 

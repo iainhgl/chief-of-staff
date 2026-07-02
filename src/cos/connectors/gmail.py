@@ -3,8 +3,9 @@ import base64
 import json
 import logging
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 
 from googleapiclient.discovery import build as _google_build
 from googleapiclient.errors import HttpError
@@ -18,6 +19,13 @@ _RETRYABLE_403_REASONS = frozenset(
 )
 _MAX_RETRIES = 5
 _INITIAL_BACKOFF = 1.0
+
+
+@dataclass(frozen=True)
+class GmailLabel:
+    id: str
+    name: str
+    type: str
 
 
 def get_gmail_credentials(config: CosConfig) -> Any:
@@ -45,6 +53,20 @@ def list_message_ids(service: Any, gmail_config: GmailConnectorConfig) -> list[s
 
     response = _execute_with_retry(service.users().messages().list(**params))
     return [m["id"] for m in response.get("messages", [])]
+
+
+def list_labels(service: Any) -> list[GmailLabel]:
+    """Return Gmail labels with the API IDs needed by labelIds filters."""
+    response = _execute_with_retry(service.users().labels().list(userId="me"))
+    labels = cast(list[dict[str, Any]], response.get("labels", []))
+    return [
+        GmailLabel(
+            id=str(label.get("id", "")),
+            name=str(label.get("name", "")),
+            type=str(label.get("type", "")),
+        )
+        for label in labels
+    ]
 
 
 def fetch_message(service: Any, message_id: str) -> dict[str, Any]:

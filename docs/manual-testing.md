@@ -329,8 +329,9 @@ google_oauth:
   client_secret: YOUR_GOOGLE_OAUTH_CLIENT_SECRET
 
 gmail:
-  query: "label:cos-uat newer_than:7d"
-  label_ids: []
+  query: "newer_than:7d"
+  label_names:
+    - cos-uat
   max_results: 25
   include_spam_trash: false
   staging_dir: /data/connector-staging/gmail
@@ -460,7 +461,9 @@ google_oauth:
   client_secret: YOUR_GOOGLE_OAUTH_CLIENT_SECRET
 
 gmail:
-  query: "label:cos-uat newer_than:7d"
+  query: "newer_than:7d"
+  label_names:
+    - cos-uat
 ```
 
 Create a shared attachment on the host:

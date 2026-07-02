@@ -16,6 +16,7 @@ What is working today:
 - **`cos docs --json`** — machine-readable JSON; each object includes `id`, `source_alias`, `source_locator`, `ingested_at`, `current_version`, `chunk_count`
 - **Originals preserved** — every ingested file is stored byte-for-byte in `/data/originals/` (in-container path); Markdown working copies in `/data/markdown/`
 - **`cos auth gmail`** / **`cos auth calendar`** — OAuth browser consent flow; run from the **host** so the browser can open; writes token files to `tokens/`
+- **`cos gmail labels`** — list Gmail display labels with their API label IDs for Gmail connector configuration/debugging; run from the **host** after Gmail auth
 - **`cos sync gmail`** / **`cos sync calendar`** — poll the connected source for new content and enqueue background ingest jobs; run inside the `cos` container
 - **`cos migrate`** — backfill legacy Phase 1 path-centric documents onto the canonical identity model; safe to rerun; idempotent
 - **`cos benchmark`** — run the retrieval evaluation harness against the committed gold corpus; seeds fixture documents, runs all gold queries, cleans up, then prints a per-class summary and, when `--output` is supplied, writes a JSON report; run from the **host** with a host-accessible config (`--config config.host.yaml`); gold-only runs on a **clean benchmark database** are the authoritative release gate; add `--include-fuzz` for optional adversarial diagnostic coverage; see [docs/manual-testing.md](docs/manual-testing.md) for the full regression runbook

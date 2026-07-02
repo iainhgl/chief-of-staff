@@ -5,9 +5,11 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import psycopg
+import pytest
 from conftest import TEST_DSN, make_test_config
 
 from cos.config import GmailConnectorConfig
+from cos.connectors.gmail import GmailLabel
 from cos.services.gmail import GmailPollResult, poll_gmail
 
 
@@ -513,6 +515,109 @@ async def test_poll_gmail_uses_default_config_when_gmail_is_none(
             result = await poll_gmail(config, conn)
 
     assert result.messages_scanned == 1
+
+
+# ── label name resolution ─────────────────────────────────────────────────────
+
+async def test_poll_gmail_resolves_label_names_before_listing_messages(
+    migrated_db: None,
+    tmp_path: Path,
+) -> None:
+    service = MagicMock()
+    config = make_test_config(tmp_path)
+    config = config.model_copy(
+        update={
+            "connectors": ["gmail"],
+            "gmail": GmailConnectorConfig(
+                query="newer_than:7d",
+                label_names=["cos-uat"],
+                staging_dir=tmp_path / "staging",
+            ),
+        }
+    )
+
+    captured_config: dict[str, GmailConnectorConfig] = {}
+
+    def _list_messages(_service: Any, gmail_config: GmailConnectorConfig) -> list[str]:
+        captured_config["gmail"] = gmail_config
+        return ["msg-050"]
+
+    msg = _plain_message("msg-050")
+    with (
+        patch("cos.services.gmail.build_gmail_service", return_value=service),
+        patch(
+            "cos.services.gmail.list_labels",
+            return_value=[GmailLabel(id="Label_123", name="cos-uat", type="user")],
+        ) as mock_list_labels,
+        patch("cos.services.gmail.list_message_ids", side_effect=_list_messages),
+        patch("cos.services.gmail.fetch_message", return_value=msg),
+    ):
+        async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+            result = await poll_gmail(config, conn)
+
+    assert result.messages_scanned == 1
+    mock_list_labels.assert_called_once_with(service)
+    assert captured_config["gmail"].query == "newer_than:7d"
+    assert captured_config["gmail"].label_ids == ["Label_123"]
+
+
+async def test_poll_gmail_keeps_explicit_label_ids_without_label_lookup(
+    migrated_db: None,
+    tmp_path: Path,
+) -> None:
+    config = make_test_config(tmp_path)
+    config = config.model_copy(
+        update={
+            "connectors": ["gmail"],
+            "gmail": GmailConnectorConfig(
+                label_ids=["Label_123"],
+                staging_dir=tmp_path / "staging",
+            ),
+        }
+    )
+
+    msg = _plain_message("msg-051")
+    with (
+        patch("cos.services.gmail.build_gmail_service", return_value=MagicMock()),
+        patch("cos.services.gmail.list_labels") as mock_list_labels,
+        patch("cos.services.gmail.list_message_ids", return_value=["msg-051"]),
+        patch("cos.services.gmail.fetch_message", return_value=msg),
+    ):
+        async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+            result = await poll_gmail(config, conn)
+
+    assert result.messages_scanned == 1
+    mock_list_labels.assert_not_called()
+
+
+async def test_poll_gmail_fails_when_configured_label_name_is_missing(
+    migrated_db: None,
+    tmp_path: Path,
+) -> None:
+    config = make_test_config(tmp_path)
+    config = config.model_copy(
+        update={
+            "connectors": ["gmail"],
+            "gmail": GmailConnectorConfig(
+                label_names=["cos-uat"],
+                staging_dir=tmp_path / "staging",
+            ),
+        }
+    )
+
+    with (
+        patch("cos.services.gmail.build_gmail_service", return_value=MagicMock()),
+        patch(
+            "cos.services.gmail.list_labels",
+            return_value=[GmailLabel(id="INBOX", name="INBOX", type="system")],
+        ),
+        patch("cos.services.gmail.list_message_ids") as mock_list_messages,
+    ):
+        async with await psycopg.AsyncConnection.connect(TEST_DSN) as conn:
+            with pytest.raises(ValueError, match="cos gmail labels"):
+                await poll_gmail(config, conn)
+
+    mock_list_messages.assert_not_called()
 
 
 # ── integration: blob deduplication ──────────────────────────────────────────
@@ -1087,7 +1192,8 @@ async def test_force_reenqueue_uses_distinct_staged_paths(
         rows = await (
             await conn.execute(
                 "SELECT payload->>'staged_path' FROM jobs "
-                "WHERE payload->>'source_locator' = 'gmail://message/msg-force-stage-001/body' "
+                "WHERE payload->>'source_locator' = "
+                "'gmail://message/msg-force-stage-001/body' "
                 "ORDER BY created_at ASC"
             )
         ).fetchall()
@@ -1105,7 +1211,7 @@ def _multipart_message_with_txt_attachment(
     att_data: bytes,
     attachment_id: str = "att-id-001",
 ) -> dict[str, Any]:
-    """Like _multipart_message_with_attachment but uses text/plain for no-Tika testing."""
+    """Like attachment helper, but uses text/plain for no-Tika testing."""
     return {
         "id": message_id,
         "threadId": f"thread-{message_id}",
@@ -1132,7 +1238,7 @@ def _multipart_message_with_txt_attachment(
 
 
 def _multipart_message_no_attachment(message_id: str) -> dict[str, Any]:
-    """Multipart message structure with same headers/body as _multipart_message_with_txt_attachment but no attachment."""
+    """Multipart message with same headers/body as txt helper but no attachment."""
     return {
         "id": message_id,
         "threadId": f"thread-{message_id}",
