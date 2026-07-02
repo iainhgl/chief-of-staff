@@ -51,7 +51,7 @@ C4Context
     System_Ext(embedding_api, "Embedding Provider API", "Vector embeddings")
     System_Ext(gmail_api, "Gmail API (Google)", "Read email, ingest attachments. OAuth 2.0.")
     System_Ext(calendar_api, "Google Calendar API", "Read upcoming events for meeting prep and daily brief. OAuth 2.0.")
-    System_Ext(telegram_api, "Telegram Bot API", "Bidirectional: inbound Q&A and note capture (Epic 8); outbound scheduled briefs (Epic 11).")
+    System_Ext(telegram_api, "Telegram Bot API", "Bidirectional: inbound Q&A and note capture (Epic 8); outbound scheduled briefs (Epic 12).")
     System_Ext(web_search, "Web Search API (Brave / Tavily)", "Live internet search when local knowledge is insufficient.")
 
     Rel(iain, cos, "Operates instances", "CLI")
@@ -120,7 +120,7 @@ C4Container
     }
 
     Rel(users, telegram_api, "Sends questions and notes")
-    Rel(cos, telegram_api, "Polls for inbound messages; sends reactive responses (Epic 8); sends scheduled briefs (Epic 11)", "HTTPS / Bot API")
+    Rel(cos, telegram_api, "Polls for inbound messages; sends reactive responses (Epic 8); sends scheduled briefs (Epic 12)", "HTTPS / Bot API")
     Rel(cos, gmail_api, "Reads email; ingests attachments", "HTTPS / OAuth 2.0")
     Rel(cos, calendar_api, "Reads upcoming events for meeting prep", "HTTPS / OAuth 2.0")
     Rel(cos, web_search, "Calls when local retrieval is insufficient", "HTTPS")
@@ -326,7 +326,7 @@ sequenceDiagram
     Note over COS: Platform operational. Claude Desktop can now connect.
 ```
 
-### 4.4 Scheduled Morning Brief (Epic 11)
+### 4.4 Scheduled Morning Brief (Epic 12)
 
 ```mermaid
 sequenceDiagram
@@ -502,30 +502,32 @@ flowchart LR
         OR1["OutputRouter\n(local channel)"]
     end
 
-    subgraph P2["Approved Growth Sequence — Epics 7-11"]
+    subgraph P2["Approved Growth Sequence — Epics 7-12"]
         direction TB
         E7["Epic 7\nRetrieval trust + eval + observability"]
         E8["Epic 8\nInteractive Telegram messaging"]
-        E9["Epic 9\nStructured LLM boundary + provider portability"]
-        E10["Epic 10\nWeb augmentation"]
-        E11["Epic 11\nProactive briefings + meeting prep"]
+        E9["Epic 9\nLLM-maintained wiki + derived knowledge"]
+        E10["Epic 10\nStructured LLM boundary + provider portability"]
+        E11["Epic 11\nWeb augmentation"]
+        E12["Epic 12\nProactive briefings + meeting prep"]
         JOBS2[("jobs table\n(background work substrate)")]
         TG2["Telegram Channel\n(OutputRouter)"]
     end
 
-    subgraph P3["Later Roadmap — Epics 12-14"]
+    subgraph P3["Later Roadmap — Epics 13-15"]
         direction TB
-        E12["Epic 12\nAgent-safe task runtime"]
-        E13["Epic 13\nModel routing + local endpoints"]
-        E14["Epic 14\nAdvanced retrieval + orchestration pilots"]
+        E13["Epic 13\nAgent-safe task runtime"]
+        E14["Epic 14\nModel routing + local endpoints"]
+        E15["Epic 15\nAdvanced retrieval + orchestration pilots"]
     end
 
     P1 --> P2 --> P3
-    E7 --> E8 --> E9 --> E10 --> E11
-    E11 --> E12
-    E12 --> E13 --> E14
+    E7 --> E8 --> E9 --> E10 --> E11 --> E12
+    E12 --> E13
+    E13 --> E14 --> E15
     JOBS2 --> E8
-    JOBS2 --> E11
+    JOBS2 --> E9
+    JOBS2 --> E12
 ```
 
 ---
@@ -573,17 +575,18 @@ Epic 7 hardening is the prerequisite for all amplification layers:
 flowchart LR
     E7["Epic 7\nRetrieval trust\neval + observability"]
     E8["Epic 8\nInteractive Telegram\nmessaging"]
-    E9["Epic 9\nStructured LLM boundary\n+ provider portability"]
-    E10["Epic 10\nWeb augmentation\n+ external context"]
-    E11["Epic 11\nProactive briefings\n+ meeting prep"]
-    E14["Epic 14\nAdvanced retrieval modes\n(benchmark-gated)"]
+    E9["Epic 9\nLLM-maintained wiki\n+ derived knowledge"]
+    E10["Epic 10\nStructured LLM boundary\n+ provider portability"]
+    E11["Epic 11\nWeb augmentation\n+ external context"]
+    E12["Epic 12\nProactive briefings\n+ meeting prep"]
+    E15["Epic 15\nAdvanced retrieval modes\n(benchmark-gated)"]
 
     E7 -->|"benchmark gate\nmust pass"| E8
-    E8 --> E9 --> E10 --> E11
-    E7 -.->|"benchmark-gated\nafter E9–E11"| E14
+    E8 --> E9 --> E10 --> E11 --> E12
+    E7 -.->|"benchmark-gated\nafter E9-E12"| E15
 ```
 
-Epic 7 must land before Telegram messaging, web augmentation, and proactive scheduling. Advanced retrieval modes (Epic 14) are explicitly benchmark-gated and come after the full growth sequence.
+Epic 7 must land before Telegram messaging, web augmentation, and proactive scheduling. Advanced retrieval modes (Epic 15) are explicitly benchmark-gated and come after the full growth sequence.
 
 ---
 

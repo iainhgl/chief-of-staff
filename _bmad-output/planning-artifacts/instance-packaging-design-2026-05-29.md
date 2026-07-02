@@ -15,14 +15,14 @@ This does **not** need a full course-correct.
 Recommended path:
 
 1. Create one standalone story for **Instance Packaging and Isolated Runtime Scaffold**.
-2. Treat it as a small enablement story before continuing normal Epic 9 work.
+2. Treat it as a small enablement story before continuing normal Epic 10 work.
 3. Use this document as source context for `bmad-create-story`.
 
 Why not course-correct:
 
 - The platform roadmap remains valid.
 - This is an operational packaging capability, not a change to product direction.
-- It does not invalidate Epic 9, 10, or 11 sequencing.
+- It does not invalidate Epic 10, 11, or 12 sequencing.
 - It is small enough to implement and validate independently.
 
 A course-correct would only be warranted if we decide to make multi-instance packaging a major product theme with installers, upgrade management, instance registries, secrets migration, backup/restore, and user-facing distribution.

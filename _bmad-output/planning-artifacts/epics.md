@@ -165,11 +165,11 @@ _Not applicable — this is an API backend platform with no UI. The primary inte
 | FR13 | Epic 3, Epic 7 | Document + chunk-level citations |
 | FR14 | Epic 3 | Role pack retrieval priorities |
 | FR15 | Epic 3 | List documents with metadata |
-| FR16 | Epic 10 | Web search augmentation (Growth) |
+| FR16 | Epic 11 | Web search augmentation (Growth) |
 | FR17 | Epic 3, Epic 7 | Synthesise response in role pack tone |
 | FR18 | Epic 3 | Common workflow outputs |
-| FR19 | Epic 11 | Scheduled briefing via channel (Growth) |
-| FR20 | Epic 11 | Meeting prep from calendar (Growth) |
+| FR19 | Epic 12 | Scheduled briefing via channel (Growth) |
+| FR20 | Epic 12 | Meeting prep from calendar (Growth) |
 | FR21 | Epic 3 | Egress control — configured channels only |
 | FR22 | Epic 4 | Define role pack in config file |
 | FR23 | Epic 4 | Activate different role pack, no code change |
@@ -184,7 +184,7 @@ _Not applicable — this is an API backend platform with no UI. The primary inte
 | FR32 | Epic 6 | Google Calendar read (Growth) |
 | FR33 | Epic 6 | Gmail read and ingest (Growth) |
 | FR34 | Epic 8 | Telegram Q&A and note capture (Growth) |
-| FR35 | Epic 11 | Scheduled briefs via configured Telegram or email channel (Growth) |
+| FR35 | Epic 12 | Scheduled briefs via configured Telegram or email channel (Growth) |
 | FR36 | Epic 3 | Enforce egress control |
 | FR37 | Epic 2 | Originals never modified or deleted |
 | FR38 | Epic 2 | View documents with provenance history |
@@ -1858,13 +1858,273 @@ So that users and future agents do not assume web augmentation or proactive brie
 **When** reviewed together,
 **Then** the Telegram capability is described consistently as reactive messaging only.
 
-## Epic 9: Structured LLM Boundary & Provider Portability
+## Epic 9: LLM-Maintained Wiki & Derived Knowledge Layer
+
+The platform adds a derived, rebuildable wiki layer on top of existing source ingestion, canonical storage, Markdown working copies, retrieval, jobs, and MCP foundations. The wiki is a governed synthesis layer for orientation and cross-document memory; raw originals and normalized Markdown remain the authoritative substrate, and every wiki page retains source citations.
+**FRs covered:** Vision-track derived knowledge layer; supports FR11, FR13, FR17, FR18, FR21, FR37, FR38
+**NFRs:** NFR1, NFR12, NFR14, NFR15
+
+### Story 9.1: Wiki Schema, Storage & Page Model
+
+As an operator,
+I want the platform to have an explicit wiki storage root and metadata schema,
+So that derived wiki pages can be persisted without becoming a second source of truth.
+
+**Acceptance Criteria:**
+
+**Given** the configuration model is reviewed,
+**When** wiki storage is added,
+**Then** `CosConfig.storage` includes a `wiki_dir` path with a documented default of `/data/wiki`.
+
+**Given** migrations are applied,
+**When** the database schema is inspected,
+**Then** wiki metadata tables exist for pages, page versions, citations, and page links using the repository's raw SQL migration conventions.
+
+**Given** a wiki page record is created,
+**When** its type and slug are validated,
+**Then** the page follows a documented taxonomy and filesystem layout for at least topic, person, project, and decision pages.
+
+**Given** the app starts with no existing wiki directory,
+**When** wiki storage is initialized,
+**Then** `data/wiki/` can be created without disturbing originals, Markdown working copies, chunks, embeddings, or retrieval state.
+
+---
+
+### Story 9.2: Wiki Metadata Service & Citation Contract
+
+As a maintainer,
+I want a service boundary for wiki page metadata, versions, citations, and links,
+So that future compilers and read tools use one governed contract.
+
+**Acceptance Criteria:**
+
+**Given** `src/cos/services/` is the cross-module boundary,
+**When** wiki service code is added,
+**Then** callers can create, update, list, and load wiki page metadata through `cos.services` rather than importing store internals directly.
+
+**Given** a wiki page cites source material,
+**When** citations are stored,
+**Then** each citation links to canonical source lineage using `document_version_id` and source alias metadata, with chunk anchors where available.
+
+**Given** a wiki page is updated,
+**When** the rendered content changes,
+**Then** a new page version is recorded without overwriting source artifacts or losing prior wiki provenance.
+
+**Given** page links are stored,
+**When** a page references another page,
+**Then** the relationship is queryable for index and freshness workflows.
+
+---
+
+### Story 9.3: Markdown Corpus Compiler v1
+
+As a user,
+I want the platform to compile useful wiki pages from normalized Markdown,
+So that I can browse durable summaries and entity/context pages grounded in my corpus.
+
+**Acceptance Criteria:**
+
+**Given** normalized Markdown working copies exist,
+**When** the compiler runs,
+**Then** it reads Markdown plus canonical provenance metadata rather than raw binaries or retrieval snippets alone.
+
+**Given** fixture Markdown inputs are compiled,
+**When** topic and decision page outputs are generated,
+**Then** the rendered Markdown is deterministic for unchanged inputs and includes source citation references.
+
+**Given** source content changes,
+**When** the compiler reruns,
+**Then** changed upstream content creates a new wiki page version or marks the existing page stale before refresh.
+
+**Given** no useful source evidence exists for a candidate page,
+**When** compilation is attempted,
+**Then** the compiler avoids creating uncited generated claims.
+
+---
+
+### Story 9.4: Wiki Compile Jobs & Rebuild CLI
+
+As an operator,
+I want wiki compilation to use the existing jobs substrate and have explicit rebuild commands,
+So that derived pages can be maintained and repaired without manual database work.
+
+**Acceptance Criteria:**
+
+**Given** the existing `jobs` table and worker pattern,
+**When** wiki compilation work is queued,
+**Then** it uses a distinct job type such as `wiki_compile` with bounded retry and failure visibility.
+
+**Given** an operator runs `cos wiki compile`,
+**When** target inputs are provided,
+**Then** the command compiles the requested page or page family and reports the result.
+
+**Given** an operator runs `cos wiki rebuild`,
+**When** the current corpus is available,
+**Then** the wiki can be regenerated from Markdown and provenance metadata without hand-editing rows.
+
+**Given** an operator runs `cos wiki status`,
+**When** wiki health is inspected,
+**Then** page counts, stale page counts, and recent compile failures are visible.
+
+---
+
+### Story 9.5: MCP & CLI Wiki Read Surface
+
+As a user,
+I want to list and read wiki pages through the platform interfaces,
+So that the derived knowledge layer is useful before it changes retrieval behavior.
+
+**Acceptance Criteria:**
+
+**Given** wiki pages exist,
+**When** an MCP client calls `list_wiki_pages`,
+**Then** it receives page identity, type, title, slug, freshness, and compiled-at metadata in the standard response envelope.
+
+**Given** a page slug or id is provided,
+**When** an MCP client calls `get_wiki_page`,
+**Then** it receives rendered Markdown plus underlying source citations.
+
+**Given** an operator uses the CLI,
+**When** they list or read wiki pages locally,
+**Then** the output matches the MCP read contract closely enough for debugging and handoff.
+
+**Given** existing `retrieve`, `answer`, `list_documents`, and `get_role_context` tools are exercised,
+**When** wiki read tools are added,
+**Then** their current behavior remains unchanged.
+
+---
+
+### Story 9.6: Compile-on-Ingest Change Propagation
+
+As a user,
+I want wiki pages to update when the corpus changes,
+So that the wiki remains a current derived view rather than a stale snapshot.
+
+**Acceptance Criteria:**
+
+**Given** a new or changed source is ingested,
+**When** ingestion succeeds,
+**Then** the platform can enqueue targeted wiki compilation work for affected page candidates.
+
+**Given** an ingest result is unchanged or a duplicate,
+**When** change propagation is evaluated,
+**Then** duplicate wiki work is avoided unless an operator forces a recompile.
+
+**Given** an upstream document version changes,
+**When** dependent wiki pages are known,
+**Then** those pages are marked stale until the next successful compile.
+
+**Given** wiki compile jobs fail,
+**When** operator status is inspected,
+**Then** failure details are visible without breaking normal ingestion or retrieval.
+
+---
+
+### Story 9.7: Freshness, Linting & Governance Controls
+
+As an operator,
+I want the wiki to expose freshness and grounding issues,
+So that synthesized pages do not become an ungoverned second truth store.
+
+**Acceptance Criteria:**
+
+**Given** wiki pages exist,
+**When** linting runs,
+**Then** it can detect stale pages, missing citations, orphan pages, duplicate entity candidates, and broken page links.
+
+**Given** a page has weak or missing grounding,
+**When** it is listed or loaded,
+**Then** the response includes a clear freshness or grounding signal.
+
+**Given** an operator wants to repair wiki health,
+**When** repair commands are run,
+**Then** stale or invalid pages can be recompiled or flagged without manual database surgery.
+
+**Given** sensitive page types such as people or decisions are produced,
+**When** governance metadata is reviewed,
+**Then** the operator can identify source lineage and compile history.
+
+---
+
+### Story 9.8: Wiki-Assisted Synthesis Routing Decision Gate
+
+As a maintainer,
+I want a deliberate decision gate before wiki-assisted answers become part of normal retrieval,
+So that source-first citation behavior remains stable until the wiki is proven trustworthy.
+
+**Acceptance Criteria:**
+
+**Given** wiki read tools and validation evidence exist,
+**When** query routing is designed,
+**Then** direct factual questions remain source-first by default.
+
+**Given** synthesis-heavy prompts such as briefings, comparisons, and orientation questions are evaluated,
+**When** the wiki is used as condensed context,
+**Then** final answers still cite underlying source material rather than wiki pages alone.
+
+**Given** routing confidence is low,
+**When** a query is classified,
+**Then** the platform defaults back to source-first retrieval.
+
+**Given** wiki assistance is used,
+**When** the response is returned,
+**Then** the user can tell that wiki assistance contributed to the answer.
+
+---
+
+### Story 9.9: Operator Validation - Browsable Wiki with Source Citations
+
+As Iain,
+I want an end-to-end validation pass for the wiki layer,
+So that I can confirm the derived knowledge layer is useful, cited, and rebuildable before routing depends on it.
+
+**Acceptance Criteria:**
+
+**Given** a representative corpus is ingested,
+**When** wiki compilation runs,
+**Then** topic and decision pages are generated with readable Markdown and source citations.
+
+**Given** the wiki is rebuilt from the current corpus,
+**When** outputs are compared,
+**Then** unchanged inputs do not create duplicate page versions or uncited drift.
+
+**Given** MCP and CLI read paths are exercised,
+**When** pages are listed and loaded,
+**Then** citation metadata, freshness metadata, and rendered content are visible.
+
+**Given** existing retrieval validation is rerun,
+**When** wiki functionality is present,
+**Then** source-first `retrieve` and `answer` behavior remains stable.
+
+---
+
+### Story 9.10: Documentation & Housekeeping
+
+As Iain,
+I want the LLM wiki layer documented as a derived, governed knowledge layer,
+So that future BMAD work does not confuse it with source truth or ordinary retrieval.
+
+**Acceptance Criteria:**
+
+**Given** Epic 9 is complete,
+**When** architecture and operator docs are reviewed,
+**Then** they explain originals as truth, Markdown as compiler input, wiki pages as derived artifacts, and Postgres metadata as governance.
+
+**Given** setup and usage docs are updated,
+**When** an operator reads them,
+**Then** they can configure wiki storage, compile or rebuild the wiki, inspect status, and use MCP/CLI read tools.
+
+**Given** roadmap artifacts are cross-checked,
+**When** they are reviewed together,
+**Then** Epic 9 numbering and downstream renumbering remain consistent across epics, sprint status, and active docs.
+
+## Epic 10: Structured LLM Boundary & Provider Portability
 
 The model boundary is upgraded before routing policy or local endpoint expansion. The platform gains richer request/response contracts, explicit model/provider metadata, and direct support for additional providers without disturbing retrieval or ingestion layers.
 **FRs covered:** Supports the existing provider-agnostic intent behind FR17 and FR31
 **NFRs:** NFR5, NFR6, NFR19
 
-### Story 9.1: LLM Request/Response Contract & Metadata
+### Story 10.1: LLM Request/Response Contract & Metadata
 
 As a maintainer,
 I want a richer internal LLM contract than plain `complete(prompt, context)`,
@@ -1886,7 +2146,7 @@ So that future providers, audits, and workflow-specific model decisions have a s
 
 ---
 
-### Story 9.2: OpenAI Provider Adapter
+### Story 10.2: OpenAI Provider Adapter
 
 As an operator,
 I want OpenAI to be a first-class provider option,
@@ -1908,7 +2168,7 @@ So that the platform is no longer tied to a single model vendor.
 
 ---
 
-### Story 9.3: Gemini Provider Adapter
+### Story 10.3: Gemini Provider Adapter
 
 As an operator,
 I want Gemini to be a first-class provider option,
@@ -1930,7 +2190,7 @@ So that provider diversity and fallback options improve further.
 
 ---
 
-### Story 9.4: Multi-Provider Config & Selection Semantics
+### Story 10.4: Multi-Provider Config & Selection Semantics
 
 As a maintainer,
 I want the configuration model to support multiple registered providers cleanly,
@@ -1952,7 +2212,7 @@ So that later routing and fallback work can build on explicit product-level sema
 
 ---
 
-### Story 9.5: Operator Validation — Provider Portability
+### Story 10.5: Operator Validation — Provider Portability
 
 As Iain (operator and maintainer),
 I want a portability validation pass across supported providers,
@@ -1974,7 +2234,7 @@ So that the platform proves the model boundary is genuinely swappable before lat
 
 ---
 
-### Story 9.6: Documentation & Housekeeping
+### Story 10.6: Documentation & Housekeeping
 
 As Iain (operator and platform maintainer),
 I want the structured LLM boundary and provider setup documented,
@@ -1982,7 +2242,7 @@ So that future BMAD implementation work extends the same abstraction instead of 
 
 **Acceptance Criteria:**
 
-**Given** Epic 9 is complete,
+**Given** Epic 10 is complete,
 **When** architecture and setup documents are reviewed,
 **Then** they describe the structured request/response boundary, provider registration, and audit metadata expectations.
 
@@ -1990,17 +2250,17 @@ So that future BMAD implementation work extends the same abstraction instead of 
 **When** they are reviewed,
 **Then** they explain how to configure supported providers and interpret provider-specific validation output.
 
-**Given** Epic 9 planning artifacts are cross-checked,
+**Given** Epic 10 planning artifacts are cross-checked,
 **When** reviewed together,
 **Then** provider terminology and configuration semantics are consistent across PRD, architecture, epics, and sprint tracking.
 
-## Epic 10: Web Augmentation & External Context
+## Epic 11: Web Augmentation & External Context
 
 Local retrieval remains primary, but the platform can augment it with live external context once retrieval trust, interactive messaging, and provider portability are in place. This epic keeps web augmentation explicit and bounded rather than making it part of the first Telegram slice.
 **FRs covered:** FR16
 **NFRs:** NFR11
 
-### Story 10.1: Web Search MCP Tool
+### Story 11.1: Web Search MCP Tool
 
 As a user,
 I want the platform to search the live web when local knowledge is insufficient,
@@ -2022,7 +2282,7 @@ So that grounded answers can incorporate current external context when needed.
 
 ---
 
-### Story 10.2: Local + Web Citation Contract
+### Story 11.2: Local + Web Citation Contract
 
 As a user,
 I want mixed local and web evidence to stay distinguishable,
@@ -2044,7 +2304,7 @@ So that I can tell what came from my knowledge base versus the live internet.
 
 ---
 
-### Story 10.3: Web Search Cache & Failure Handling
+### Story 11.3: Web Search Cache & Failure Handling
 
 As an operator,
 I want web augmentation to be cost-aware and failure-tolerant,
@@ -2066,7 +2326,7 @@ So that external-context lookup does not create unnecessary spend or brittle run
 
 ---
 
-### Story 10.4: Operator Validation — Web-Augmented Retrieval
+### Story 11.4: Operator Validation — Web-Augmented Retrieval
 
 As Iain (operator and maintainer),
 I want a documented validation pass for web-augmented retrieval,
@@ -2088,7 +2348,7 @@ So that current-external-context behavior is verified before proactive briefing 
 
 ---
 
-### Story 10.5: Documentation & Housekeeping
+### Story 11.5: Documentation & Housekeeping
 
 As Iain (operator and platform maintainer),
 I want web augmentation documented as a separate later growth layer,
@@ -2096,7 +2356,7 @@ So that future work does not treat it as interchangeable with local retrieval or
 
 **Acceptance Criteria:**
 
-**Given** Epic 10 documentation is reviewed,
+**Given** Epic 11 documentation is reviewed,
 **When** it is updated,
 **Then** it explains configuration, validation, and mixed local/web citation behavior.
 
@@ -2108,13 +2368,13 @@ So that future work does not treat it as interchangeable with local retrieval or
 **When** it is reviewed,
 **Then** it sets expectations about what kinds of answers may use live external context.
 
-## Epic 11: Proactive Briefings & Meeting Prep
+## Epic 12: Proactive Briefings & Meeting Prep
 
 Proactive scheduling follows validated retrieval, interactive messaging, and web-augmentation layers. The platform can now deliver morning briefs and meeting prep through configured channels without bundling those behaviors into the first reactive Telegram implementation.
 **FRs covered:** FR19, FR20, FR35
 **NFRs:** NFR11, NFR14
 
-### Story 11.1: Scheduler Infrastructure & Morning Brief
+### Story 12.1: Scheduler Infrastructure & Morning Brief
 
 As a user,
 I want to receive a proactive morning brief at a configured time each day,
@@ -2136,7 +2396,7 @@ So that the platform surfaces relevant knowledge before I start work, without me
 
 ---
 
-### Story 11.2: Meeting Prep from Calendar Events
+### Story 12.2: Meeting Prep from Calendar Events
 
 As a user,
 I want to receive contextual prep notes before calendar meetings,
@@ -2158,7 +2418,7 @@ So that I arrive at meetings with relevant knowledge already surfaced.
 
 ---
 
-### Story 11.3: Delivery Failure Handling & Job Visibility
+### Story 12.3: Delivery Failure Handling & Job Visibility
 
 As an operator,
 I want proactive delivery failures to be visible and recoverable,
@@ -2180,7 +2440,7 @@ So that one bad delivery does not silently disable scheduled behavior.
 
 ---
 
-### Story 11.4: Operator Validation — Proactive Briefings Live
+### Story 12.4: Operator Validation — Proactive Briefings Live
 
 As Iain (operator and first user),
 I want a documented end-to-end validation pass for proactive briefings,
@@ -2202,7 +2462,7 @@ So that scheduled value delivery is proven after the reactive and trust layers a
 
 ---
 
-### Story 11.5: Documentation & Housekeeping
+### Story 12.5: Documentation & Housekeeping
 
 As Iain (operator and platform maintainer),
 I want the proactive scheduling layer documented clearly,
@@ -2222,13 +2482,13 @@ So that it remains distinct from the earlier Telegram and web-augmentation slice
 **When** it is updated,
 **Then** it sets expectations about what will be delivered proactively and when.
 
-## Epic 12: Agent-Safe Task Runtime
+## Epic 13: Agent-Safe Task Runtime
 
 The platform gains a durable task substrate for asynchronous, resumable, approval-aware work only after the first real user flows are in place. This is a platformization epic, not a free-form autonomous-agent leap.
 **FRs covered:** Vision-track platform foundation; no direct MVP/Growth FR closure
 **NFRs:** NFR10, NFR12, NFR14
 
-### Story 12.1: General Task Records & State Model
+### Story 13.1: General Task Records & State Model
 
 As a maintainer,
 I want the current jobs substrate generalized into a task model,
@@ -2250,7 +2510,7 @@ So that non-ingest async work can be represented durably and consistently.
 
 ---
 
-### Story 12.2: Task Events, Artifacts & Audit Trail
+### Story 13.2: Task Events, Artifacts & Audit Trail
 
 As an operator,
 I want long-running tasks to leave behind a readable event and artifact trail,
@@ -2272,7 +2532,7 @@ So that progress and outcomes can be reconstructed after the fact.
 
 ---
 
-### Story 12.3: Pause/Resume & Approval Gates
+### Story 13.3: Pause/Resume & Approval Gates
 
 As a user and operator,
 I want long-running workflows to pause, resume, and wait for approval explicitly,
@@ -2294,7 +2554,7 @@ So that the platform can support durable iterative work without becoming opaque 
 
 ---
 
-### Story 12.4: Operator Validation — Task Runtime
+### Story 13.4: Operator Validation — Task Runtime
 
 As Iain (operator and maintainer),
 I want a validation pass for the generalized task runtime,
@@ -2316,7 +2576,7 @@ So that resumability and approval-aware behavior are proven before heavier routi
 
 ---
 
-### Story 12.5: Documentation & Housekeeping
+### Story 13.5: Documentation & Housekeeping
 
 As Iain (operator and platform maintainer),
 I want the task runtime documented as a narrow durable substrate,
@@ -2324,7 +2584,7 @@ So that future BMAD workflows do not mistake it for a fully autonomous orchestra
 
 **Acceptance Criteria:**
 
-**Given** Epic 12 documentation is updated,
+**Given** Epic 13 documentation is updated,
 **When** it is reviewed,
 **Then** it explains the task model, event/artifact records, and approval/resume semantics.
 
@@ -2336,13 +2596,13 @@ So that future BMAD workflows do not mistake it for a fully autonomous orchestra
 **When** it is updated,
 **Then** it warns against bypassing the task model with ad hoc long-running loops.
 
-## Epic 13: Internal Model Routing & Local Endpoints
+## Epic 14: Internal Model Routing & Local Endpoints
 
-Routing policy and OpenAI-compatible local endpoint support build on the richer provider boundary from Epic 9 and the durable task/platform substrate from Epic 12. The platform owns routing policy internally rather than delegating that responsibility to an external aggregator by default.
+Routing policy and OpenAI-compatible local endpoint support build on the richer provider boundary from Epic 10 and the durable task/platform substrate from Epic 13. The platform owns routing policy internally rather than delegating that responsibility to an external aggregator by default.
 **FRs covered:** Vision-track platform portability; no direct MVP/Growth FR closure
 **NFRs:** NFR5, NFR6, NFR19
 
-### Story 13.1: Provider Registry & Routing Policy Scaffold
+### Story 14.1: Provider Registry & Routing Policy Scaffold
 
 As a maintainer,
 I want an internal provider registry and routing policy scaffold,
@@ -2364,7 +2624,7 @@ So that model selection becomes explicit product behavior instead of a hidden in
 
 ---
 
-### Story 13.2: OpenAI-Compatible Local Endpoint Adapter
+### Story 14.2: OpenAI-Compatible Local Endpoint Adapter
 
 As an operator,
 I want the platform to support OpenAI-compatible local or self-hosted model endpoints,
@@ -2386,7 +2646,7 @@ So that local-model experimentation and private inference paths remain open.
 
 ---
 
-### Story 13.3: Pinned, Fallback & Workflow-Based Routing
+### Story 14.3: Pinned, Fallback & Workflow-Based Routing
 
 As a maintainer,
 I want a small set of explicit routing modes,
@@ -2408,7 +2668,7 @@ So that the platform gains practical flexibility without becoming an opaque poli
 
 ---
 
-### Story 13.4: Operator Validation — Routing & Local Endpoints
+### Story 14.4: Operator Validation — Routing & Local Endpoints
 
 As Iain (operator and maintainer),
 I want a validation pass for routing behavior and local endpoint support,
@@ -2430,7 +2690,7 @@ So that the platform proves routing policy works before more advanced retrieval/
 
 ---
 
-### Story 13.5: Documentation & Housekeeping
+### Story 14.5: Documentation & Housekeeping
 
 As Iain (operator and platform maintainer),
 I want routing and local-endpoint support documented clearly,
@@ -2438,7 +2698,7 @@ So that future implementation work builds on explicit internal policy rather tha
 
 **Acceptance Criteria:**
 
-**Given** Epic 13 documentation is updated,
+**Given** Epic 14 documentation is updated,
 **When** it is reviewed,
 **Then** it explains supported routing modes, provider registry expectations, and local-endpoint configuration.
 
@@ -2450,13 +2710,13 @@ So that future implementation work builds on explicit internal policy rather tha
 **When** it is updated,
 **Then** it explains how to validate routing behavior and interpret fallback outcomes.
 
-## Epic 14: Advanced Retrieval Modes & Orchestration Pilots
+## Epic 15: Advanced Retrieval Modes & Orchestration Pilots
 
 More complex retrieval and orchestration work is explicitly gated behind benchmarks and prior platform layers. The goal is to explore full-context retrieval, hierarchical summaries, graph retrieval, and orchestration adoption only where they outperform the established baseline for the right query classes.
 **FRs covered:** Vision-track experimentation; no direct MVP/Growth FR closure
 **NFRs:** NFR1, NFR12, NFR19
 
-### Story 14.1: Full-Context Retrieval Mode Pilot
+### Story 15.1: Full-Context Retrieval Mode Pilot
 
 As a maintainer,
 I want to pilot a full-context retrieval mode for bounded tasks,
@@ -2478,7 +2738,7 @@ So that single-document and tightly scoped questions can preserve more original 
 
 ---
 
-### Story 14.2: Hierarchical Summary Retrieval Pilot
+### Story 15.2: Hierarchical Summary Retrieval Pilot
 
 As a maintainer,
 I want to pilot hierarchical summary retrieval,
@@ -2500,7 +2760,7 @@ So that briefing-style and corpus-wide synthesis questions can be evaluated agai
 
 ---
 
-### Story 14.3: Graph Retrieval Pilot
+### Story 15.3: Graph Retrieval Pilot
 
 As a maintainer,
 I want to pilot graph-based retrieval for relationship-heavy questions,
@@ -2522,7 +2782,7 @@ So that the platform can test whether graph structure earns its complexity on th
 
 ---
 
-### Story 14.4: Orchestration Adoption Decision Record
+### Story 15.4: Orchestration Adoption Decision Record
 
 As an architect and maintainer,
 I want an explicit build-vs-adopt decision record for durable orchestration,
@@ -2544,7 +2804,7 @@ So that the platform does not drift into a homegrown workflow engine without a d
 
 ---
 
-### Story 14.5: Documentation & Housekeeping
+### Story 15.5: Documentation & Housekeeping
 
 As Iain (operator and platform maintainer),
 I want all advanced retrieval and orchestration pilot work documented clearly,
@@ -2552,7 +2812,7 @@ So that experimental layers remain distinguishable from the production baseline.
 
 **Acceptance Criteria:**
 
-**Given** Epic 14 documentation is updated,
+**Given** Epic 15 documentation is updated,
 **When** it is reviewed,
 **Then** it describes each pilot, the benchmark gates, and the non-default status of experimental modes.
 

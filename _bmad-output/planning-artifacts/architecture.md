@@ -88,15 +88,17 @@ The approved BMAD course correction preserves Epics 1 through 6 as implemented h
 
 1. **Epic 7 — Retrieval Trust, Evaluation & Observability**
 2. **Epic 8 — Interactive Telegram Messaging**
-3. **Epic 9 — Structured LLM Boundary & Provider Portability**
-4. **Epic 10 — Web Augmentation & External Context**
-5. **Epic 11 — Proactive Briefings & Meeting Prep**
-6. **Epic 12 — Agent-Safe Task Runtime**
-7. **Epic 13 — Internal Model Routing & Local Endpoints**
-8. **Epic 14 — Advanced Retrieval Modes & Orchestration Pilots**
+3. **Epic 9 — LLM-Maintained Wiki & Derived Knowledge Layer**
+4. **Epic 10 — Structured LLM Boundary & Provider Portability**
+5. **Epic 11 — Web Augmentation & External Context**
+6. **Epic 12 — Proactive Briefings & Meeting Prep**
+7. **Epic 13 — Agent-Safe Task Runtime**
+8. **Epic 14 — Internal Model Routing & Local Endpoints**
+9. **Epic 15 — Advanced Retrieval Modes & Orchestration Pilots**
 
 This sequence is intentional:
 - retrieval trust and measurement land before amplification through ambient channels
+- the derived wiki layer builds on completed source, retrieval, jobs, and MCP foundations before advanced routing
 - interactive Telegram lands before web augmentation and proactive scheduling
 - provider portability lands before routing policy
 - durable orchestration and advanced retrieval modes stay out of the first interactive-user slice
@@ -999,7 +1001,7 @@ Epic 8 adds reactive Telegram messaging. Future agents should treat all of the f
 | 1 | **`telegram-bot` service added to Docker Compose** | Epic 8 adds a fifth Docker Compose service: `telegram-bot` (image: same Dockerfile, entrypoint: `uv run cos-telegram-bot`). It runs `src/cos/connectors/telegram_bot.py` as its persistent process and long-polls the Telegram Bot API using `getUpdates`. It shares `data/`, `config.yaml`, `role_packs/`, `tokens/`, and `local/certs/` volume mounts with the `cos` and `worker` services. The service is defined in `docker-compose.yml` unconditionally; its process exits cleanly at startup when `"telegram"` is not in the `connectors:` list or the `telegram:` config block is absent. Use `docker compose logs telegram-bot` to confirm it is polling when Telegram is configured. |
 | 2 | **Connector config model: `connectors:` list + top-level block** | `CosConfig` (in `src/cos/config.py`) has `connectors: list[str]` as the activation gate and an optional top-level `telegram: TelegramConnectorConfig` block for Telegram settings. There is no nested `connectors.telegram` object. Telegram requires this block when enabled because `bot_token` and `chat_id` have no defaults. `TelegramConnectorConfig` fields: `bot_token`, `chat_id`, `api_base_url`, `poll_timeout`, `backoff_initial`, `backoff_max`, `staging_dir`. The same top-level-block pattern applies to `gmail:` and `google_calendar:` blocks. |
 | 3 | **OutputRouter is instantiated from role-pack `output_channels`, not from `config.channels`** | `OutputRouter` is constructed with `configured_channels=role_pack.output_channels` in both `src/cos/mcp_server/server.py` and `src/cos/connectors/telegram_bot.py`. The top-level `channels:` field in `config.yaml` is declared in `CosConfig` but is not read by the router; role-pack `output_channels` is the sole egress permission source. The built-in `role_packs/chro.yaml` includes both `"local"` and `"telegram"` in `output_channels`. |
-| 4 | **Telegram is reactive-only in Epic 8** | The bot classifies inbound text as `question`, `note`, or `unsupported`. Questions trigger `RetrievalService.query` and return a concise cited reply through `OutputService → TelegramChannel`. Notes prefixed with `Note:` are normalised, staged to `staging_dir`, and submitted as `telegram_note` ingest jobs for the `worker` to process through the canonical pipeline. Unsupported text such as bare greetings or unknown commands receives usage guidance; empty `Note:` messages receive note-format guidance; non-text messages are ignored. None of those unsupported paths become knowledge-base documents. **Proactive delivery (morning briefs, scheduled digests, meeting prep) is not part of Epic 8.** Those belong to Epic 11. |
+| 4 | **Telegram is reactive-only in Epic 8** | The bot classifies inbound text as `question`, `note`, or `unsupported`. Questions trigger `RetrievalService.query` and return a concise cited reply through `OutputService → TelegramChannel`. Notes prefixed with `Note:` are normalised, staged to `staging_dir`, and submitted as `telegram_note` ingest jobs for the `worker` to process through the canonical pipeline. Unsupported text such as bare greetings or unknown commands receives usage guidance; empty `Note:` messages receive note-format guidance; non-text messages are ignored. None of those unsupported paths become knowledge-base documents. **Proactive delivery (morning briefs, scheduled digests, meeting prep) is not part of Epic 8.** Those belong to Epic 12. |
 | 5 | **Telegram note provenance** | Telegram notes use `source_type="telegram_note"`. `source_alias` follows the pattern `telegram-note-YYYY-MM-DDTHHMMSSZ-<id>.md`. `source_locator` uses `telegram://chat/{chat_id}/message/{message_id}` when a message ID is available. These notes flow through the same canonical ingest pipeline as MCP notes and local files. `"Note saved."` means the note was durably staged and queued — not that embeddings are searchable; worker completion is a separate step. |
 | 6 | **Deduplication at enqueue time** | A Telegram note whose `source_locator` and content fingerprint match an already-queued or already-processed note returns `"Note saved."` without creating a duplicate ingest job or canonical record. Duplicate deliveries of the same Telegram message are idempotent; resending the same text as a new Telegram message may create a separate note. This is consistent with the four deterministic ingest outcomes (`new_content`, `unchanged`, `changed_content`, `new_source_known_content`) established in Epic 6. |
 | 7 | **Failure isolation** | When `getUpdates` returns a non-success HTTP response or the Telegram API is unreachable, the polling loop logs the error (`"polling error — retrying after backoff"`) and retries with exponential backoff (`backoff_initial` → `backoff_max`). The `cos` MCP server, `worker`, and all retrieval paths remain available during a Telegram outage. |

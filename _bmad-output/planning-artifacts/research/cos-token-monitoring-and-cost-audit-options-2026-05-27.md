@@ -553,7 +553,7 @@ Disadvantages:
 
 Assessment:
 
-Attractive after Epic 9/13-style provider portability and routing decisions. Too early as the core token-audit answer.
+Attractive after Epic 10/14-style provider portability and routing decisions. Too early as the core token-audit answer.
 
 ## Option 5: Structured Logs Only, Queried Externally
 
@@ -1028,14 +1028,14 @@ Fields:
 This topic overlaps with several existing or planned areas:
 
 - **Epic 7 Retrieval Trust, Evaluation & Observability**: current structured retrieval logging is the immediate ancestor of this work.
-- **Epic 9 Structured LLM Boundary & Provider Portability**: the LLM adapter likely needs to return structured response metadata, not just text.
-- **Epic 11 Proactive Briefings & Meeting Prep**: scheduled workflows need budget visibility before they become frequent.
-- **Epic 12 Agent-Safe Task Runtime**: long-running agent tasks need per-step budget accounting.
-- **Epic 13 Internal Model Routing & Local Endpoints**: routing decisions need historical usage/cost data.
+- **Epic 10 Structured LLM Boundary & Provider Portability**: the LLM adapter likely needs to return structured response metadata, not just text.
+- **Epic 12 Proactive Briefings & Meeting Prep**: scheduled workflows need budget visibility before they become frequent.
+- **Epic 13 Agent-Safe Task Runtime**: long-running agent tasks need per-step budget accounting.
+- **Epic 14 Internal Model Routing & Local Endpoints**: routing decisions need historical usage/cost data.
 
 Best placement:
 
-> Create this as a new cross-cutting epic after or alongside Epic 9, with a thin preparatory story possible before Epic 9 if it only introduces run/span ids and a metadata-safe ledger skeleton.
+> Create this as a new cross-cutting epic after or alongside Epic 10, with a thin preparatory story possible before Epic 10 if it only introduces run/span ids and a metadata-safe ledger skeleton.
 
 ## Proposed BMAD Epic Seed
 
@@ -1094,7 +1094,7 @@ Acceptance criteria:
 - retrieval service records synthesis token usage
 - no raw prompt/context/output content enters the ledger
 
-This story may belong in Epic 9 if that epic already refactors the LLM boundary.
+This story may belong in Epic 10 if that epic already refactors the LLM boundary.
 
 ### Story 3: MCP and Retrieval Run Attribution
 
@@ -1187,7 +1187,7 @@ Defer these until the ledger proves useful:
 4. Should usage writes be synchronous, best-effort async, or outbox-backed?
 5. Should the ledger include exact source aliases/citation ids, or only counts by default?
 6. Should "estimated host-side MCP token count" be shown in reports as a separate non-billing approximation?
-7. Should the first implementation wait for Epic 9's structured LLM contract, or create a narrow Anthropic-only usage capture patch first?
+7. Should the first implementation wait for Epic 10's structured LLM contract, or create a narrow Anthropic-only usage capture patch first?
 
 ## Recommended Decision
 

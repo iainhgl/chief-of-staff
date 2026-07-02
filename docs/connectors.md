@@ -51,7 +51,7 @@ Optional settings (`google_calendar:` block) are described in `config.yaml.examp
 
 ## Telegram Connector
 
-Epic 8 adds a reactive Telegram bot. The bot accepts user-initiated questions and note-capture messages from the configured chat. It does **not** send morning briefs, scheduled digests, meeting prep, or any proactive content — those belong to a later epic (Epic 11). Every Telegram interaction is user-initiated.
+Epic 8 adds a reactive Telegram bot. The bot accepts user-initiated questions and note-capture messages from the configured chat. It does **not** send morning briefs, scheduled digests, meeting prep, or any proactive content — those belong to a later epic (Epic 12). Every Telegram interaction is user-initiated.
 
 ### 1. Create a Telegram Bot
 
@@ -198,7 +198,7 @@ Epic 8 Telegram is **reactive messaging only**:
 - User-initiated `Note:` capture → worker-backed knowledge-base indexing
 - Connector failure isolation → outages do not affect local MCP retrieval or the rest of the platform
 
-Not included in Epic 8: web search augmentation, morning briefs, scheduled digests, meeting prep, provider routing, or local model endpoints. Those belong to later epics (Epic 10, 11).
+Not included in Epic 8: web search augmentation, morning briefs, scheduled digests, meeting prep, provider routing, or local model endpoints. Those belong to later epics (Epic 11 for web, Epic 12 for proactive delivery, Epic 14 for provider routing and local endpoints).
 
 ---
 

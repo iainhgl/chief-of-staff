@@ -166,74 +166,91 @@ development_status:
   enabler-retrieval-contract-split: done
 
   # ─────────────────────────────────────────────
-  # Epic 9: Structured LLM Boundary & Provider Portability (Growth)
-  # The model boundary is enriched before routing policy or local endpoint expansion
+  # Epic 9: LLM-Maintained Wiki & Derived Knowledge Layer
+  # Derived wiki pages are compiled from Markdown with source citations before advanced routing
   # ─────────────────────────────────────────────
   epic-9: backlog
-  9-1-llm-request-response-contract-and-metadata: backlog
-  9-2-openai-provider-adapter: backlog
-  9-3-gemini-provider-adapter: backlog
-  9-4-multi-provider-config-and-selection-semantics: backlog
-  9-5-operator-validation-provider-portability: backlog
-  9-6-documentation-and-housekeeping: backlog
+  9-1-wiki-schema-storage-and-page-model: backlog
+  9-2-wiki-metadata-service-and-citation-contract: backlog
+  9-3-markdown-corpus-compiler-v1: backlog
+  9-4-wiki-compile-jobs-and-rebuild-cli: backlog
+  9-5-mcp-and-cli-wiki-read-surface: backlog
+  9-6-compile-on-ingest-change-propagation: backlog
+  9-7-freshness-linting-and-governance-controls: backlog
+  9-8-wiki-assisted-synthesis-routing-decision-gate: backlog
+  9-9-operator-validation-browsable-wiki-with-citations: backlog
+  9-10-documentation-and-housekeeping: backlog
   epic-9-retrospective: optional
 
   # ─────────────────────────────────────────────
-  # Epic 10: Web Augmentation & External Context (Growth)
-  # Local retrieval remains primary; live web context is added as a later augmentation layer
+  # Epic 10: Structured LLM Boundary & Provider Portability (Growth)
+  # The model boundary is enriched before routing policy or local endpoint expansion
   # ─────────────────────────────────────────────
   epic-10: backlog
-  10-1-web-search-mcp-tool: backlog
-  10-2-local-plus-web-citation-contract: backlog
-  10-3-web-search-cache-and-failure-handling: backlog
-  10-4-operator-validation-web-augmented-retrieval: backlog
-  10-5-documentation-and-housekeeping: backlog
+  10-1-llm-request-response-contract-and-metadata: backlog
+  10-2-openai-provider-adapter: backlog
+  10-3-gemini-provider-adapter: backlog
+  10-4-multi-provider-config-and-selection-semantics: backlog
+  10-5-operator-validation-provider-portability: backlog
+  10-6-documentation-and-housekeeping: backlog
   epic-10-retrospective: optional
 
   # ─────────────────────────────────────────────
-  # Epic 11: Proactive Briefings & Meeting Prep (Growth)
-  # Proactive delivery follows validated retrieval, messaging, and external-context layers
+  # Epic 11: Web Augmentation & External Context (Growth)
+  # Local retrieval remains primary; live web context is added as a later augmentation layer
   # ─────────────────────────────────────────────
   epic-11: backlog
-  11-1-scheduler-infrastructure-and-morning-brief: backlog
-  11-2-meeting-prep-from-calendar-events: backlog
-  11-3-delivery-failure-handling-and-job-visibility: backlog
-  11-4-operator-validation-proactive-briefings-live: backlog
+  11-1-web-search-mcp-tool: backlog
+  11-2-local-plus-web-citation-contract: backlog
+  11-3-web-search-cache-and-failure-handling: backlog
+  11-4-operator-validation-web-augmented-retrieval: backlog
   11-5-documentation-and-housekeeping: backlog
   epic-11-retrospective: optional
 
   # ─────────────────────────────────────────────
-  # Epic 12: Agent-Safe Task Runtime
-  # General task records and resumable async execution are added after the growth user flows
+  # Epic 12: Proactive Briefings & Meeting Prep (Growth)
+  # Proactive delivery follows validated retrieval, messaging, and external-context layers
   # ─────────────────────────────────────────────
   epic-12: backlog
-  12-1-general-task-records-and-state-model: backlog
-  12-2-task-events-artifacts-and-audit-trail: backlog
-  12-3-pause-resume-and-approval-gates: backlog
-  12-4-operator-validation-task-runtime: backlog
+  12-1-scheduler-infrastructure-and-morning-brief: backlog
+  12-2-meeting-prep-from-calendar-events: backlog
+  12-3-delivery-failure-handling-and-job-visibility: backlog
+  12-4-operator-validation-proactive-briefings-live: backlog
   12-5-documentation-and-housekeeping: backlog
   epic-12-retrospective: optional
 
   # ─────────────────────────────────────────────
-  # Epic 13: Internal Model Routing & Local Endpoints
-  # Routing policy and OpenAI-compatible local endpoints build on the richer LLM contract
+  # Epic 13: Agent-Safe Task Runtime
+  # General task records and resumable async execution are added after the growth user flows
   # ─────────────────────────────────────────────
   epic-13: backlog
-  13-1-provider-registry-and-routing-policy-scaffold: backlog
-  13-2-openai-compatible-local-endpoint-adapter: backlog
-  13-3-pinned-fallback-and-workflow-based-routing: backlog
-  13-4-operator-validation-routing-and-local-endpoints: backlog
+  13-1-general-task-records-and-state-model: backlog
+  13-2-task-events-artifacts-and-audit-trail: backlog
+  13-3-pause-resume-and-approval-gates: backlog
+  13-4-operator-validation-task-runtime: backlog
   13-5-documentation-and-housekeeping: backlog
   epic-13-retrospective: optional
 
   # ─────────────────────────────────────────────
-  # Epic 14: Advanced Retrieval Modes & Orchestration Pilots
-  # More complex retrieval and orchestration work is explicitly gated behind benchmarks
+  # Epic 14: Internal Model Routing & Local Endpoints
+  # Routing policy and OpenAI-compatible local endpoints build on the richer LLM contract
   # ─────────────────────────────────────────────
   epic-14: backlog
-  14-1-full-context-retrieval-mode-pilot: backlog
-  14-2-hierarchical-summary-retrieval-pilot: backlog
-  14-3-graph-retrieval-pilot: backlog
-  14-4-orchestration-adoption-decision-record: backlog
+  14-1-provider-registry-and-routing-policy-scaffold: backlog
+  14-2-openai-compatible-local-endpoint-adapter: backlog
+  14-3-pinned-fallback-and-workflow-based-routing: backlog
+  14-4-operator-validation-routing-and-local-endpoints: backlog
   14-5-documentation-and-housekeeping: backlog
   epic-14-retrospective: optional
+
+  # ─────────────────────────────────────────────
+  # Epic 15: Advanced Retrieval Modes & Orchestration Pilots
+  # More complex retrieval and orchestration work is explicitly gated behind benchmarks
+  # ─────────────────────────────────────────────
+  epic-15: backlog
+  15-1-full-context-retrieval-mode-pilot: backlog
+  15-2-hierarchical-summary-retrieval-pilot: backlog
+  15-3-graph-retrieval-pilot: backlog
+  15-4-orchestration-adoption-decision-record: backlog
+  15-5-documentation-and-housekeeping: backlog
+  epic-15-retrospective: optional

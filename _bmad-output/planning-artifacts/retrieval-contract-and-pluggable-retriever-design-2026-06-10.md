@@ -13,8 +13,8 @@ related-artifacts:
   - _bmad-output/planning-artifacts/epics.md
   - docs/build-configure-use.md
 related-epics:
-  - Epic 9 — Structured LLM Boundary & Provider Portability
-  - Epic 14 — Advanced Retrieval Modes & Orchestration Pilots
+  - Epic 10 — Structured LLM Boundary & Provider Portability
+  - Epic 15 — Advanced Retrieval Modes & Orchestration Pilots
 ---
 
 # Retrieval Contract Split & Pluggable Retriever Mechanism
@@ -36,12 +36,12 @@ relevance as models and harnesses keep changing:
    fusion strategies — can be swapped behind a **stable MCP contract**,
    selected by config, mirroring the existing `LLMAdapter`/factory pattern.
 
-Together these convert the **Epic 14** retrieval pilots from bespoke spikes into
+Together these convert the **Epic 15** retrieval pilots from bespoke spikes into
 "implement one `Retriever`, run the existing Epic 7 benchmark."
 
 **Order-independence:** this work stands on its own and delivers value whether or
-not Epic 14 ever happens. It does **not** need to be sequenced before anything.
-The two seams are independently shippable, and each Epic 14 pilot becomes cheaper
+not Epic 15 ever happens. It does **not** need to be sequenced before anything.
+The two seams are independently shippable, and each Epic 15 pilot becomes cheaper
 *if* this is already in place but is not blocked by it. Treat sequencing as a
 convenience, not a dependency.
 
@@ -94,15 +94,15 @@ a single call site.
 - Keep the **MCP tool schemas stable** as mechanisms change — this is the moat.
 - Keep **citation discipline and egress control** (FR13, FR21, FR36) intact on
   both paths.
-- Make **Epic 14 pilots cheap**: each becomes a `Retriever` implementation +
+- Make **Epic 15 pilots cheap**: each becomes a `Retriever` implementation +
   a benchmark run, not a bespoke integration.
 
 ## Non-goals
 
 - Building graph or hierarchical-summary mechanisms here. This note defines the
-  **seam**; the mechanisms themselves remain **Epic 14 benchmark-gated pilots**.
-- Changing the `LLMAdapter` contract (owned by Epic 9).
-- Adding model routing (owned by Epic 13).
+  **seam**; the mechanisms themselves remain **Epic 15 benchmark-gated pilots**.
+- Changing the `LLMAdapter` contract (owned by Epic 10).
+- Adding model routing (owned by Epic 14).
 - Introducing multi-agent orchestration or a durable workflow engine.
 
 ## The two seams, and why they are orthogonal
@@ -146,10 +146,10 @@ flowchart TD
         F["FusionRetriever (RRF)"]
         HY["HybridRetriever<br/>(keyword + pgvector) — today"]
         FILE["FileGrepRetriever<br/>(lexical over Markdown) — next"]
-        GR["GraphRetriever<br/>— Epic 14 pilot"]
+        GR["GraphRetriever<br/>— Epic 15 pilot"]
     end
 
-    LLM["LLMAdapter<br/>(Epic 9 contract)"]
+    LLM["LLMAdapter<br/>(Epic 10 contract)"]
     OUT["OutputService → OutputRouter<br/>(egress control, FR21/FR36)"]
     DB[("Postgres + pgvector<br/>+ Markdown working copies")]
 
@@ -170,7 +170,7 @@ flowchart TD
     GR -.pilot.-> DB
 ```
 
-The dashed paths are Epic 14 pilots. The solid paths are this foundation. Note
+The dashed paths are Epic 15 pilots. The solid paths are this foundation. Note
 the **answer path still routes egress through `OutputService`/`OutputRouter`**;
 the pure retrieve path returns a tool result to the calling harness and does not
 itself emit to a channel.
@@ -260,7 +260,7 @@ formatting) is untouched.
 |-----------|-----------|---------|-----------|--------|
 | **Hybrid (keyword + pgvector)** | conceptual recall, paraphrase | exact tokens, IDs, quotes, freshness; chunking loses structure | built | baseline today |
 | **File / lexical** (`ILIKE`/ripgrep over Markdown working copies + `content_blobs`) | exact terms, names, verbatim quotes, recency, *agentic iterative* search | synonyms, concepts | **low** — data already stored | **recommended next** |
-| **Graph** (entities + relationships) | multi-hop, **stakeholder-map** questions, timelines | extraction brittleness, maintenance cost | **high** | **Epic 14 pilot only** |
+| **Graph** (entities + relationships) | multi-hop, **stakeholder-map** questions, timelines | extraction brittleness, maintenance cost | **high** | **Epic 15 pilot only** |
 | **Fusion (RRF)** of the above | robust default; members cover each other's blind spots | minor latency; tuning | **low** once members exist | **recommended default** |
 
 Two CoS-specific notes:
@@ -299,7 +299,7 @@ retrieval:
   `outcome`.
 - No SQL migration required for the contract split or for hybrid/file retrievers
   (file search reads existing Markdown working copies / `content_blobs`). A graph
-  mechanism *would* need migrations, but that is deferred to the Epic 14 pilot
+  mechanism *would* need migrations, but that is deferred to the Epic 15 pilot
   and out of scope here.
 
 ## Backward compatibility & migration
@@ -321,7 +321,7 @@ retrieval:
 
 - Reuse the **Epic 7** benchmark harness. Each retriever is judged on the
   existing query classes for factuality, citation discipline, latency, and cost
-  — never "by intuition" (consistent with Epic 14's stated gate).
+  — never "by intuition" (consistent with Epic 15's stated gate).
 - `SearchStats` gains a `retriever` label (and per-member counts under fusion) so
   reports attribute candidates to the mechanism that produced them.
 - A new retriever may only become the **default** if it wins on the benchmark for
@@ -343,17 +343,17 @@ retrieval:
 | Breaking external `retrieve` callers | Ship `answer` first; migrate known callers in the same epic; keep `query()` alias one release |
 | "Strategy" naming collision with `QueryStrategy` | Use `Retriever` for the mechanism axis; document the three-axis model (above) in code + epic |
 | Fusion adds latency | RRF is cheap; benchmark-gate; fusion is opt-in, `hybrid` stays default until proven |
-| Scope creep into graph/orchestration | Hard non-goal here; graph stays an Epic 14 pilot consuming this seam |
+| Scope creep into graph/orchestration | Hard non-goal here; graph stays an Epic 15 pilot consuming this seam |
 | Pure-retrieve evidence misused without citations | Tool returns citations inline; document the contract; egress unaffected |
 
 ## Proposed epic & story breakdown (for BMAD)
 
 > **Sequencing note:** this epic is **order-independent** — implement it whenever
 > convenient. It has **no hard dependency** on other epics: it touches only the
-> retrieval/MCP layer that already exists today. It *relates* to Epic 9 (the
-> `answer` path will use whatever the `LLMAdapter` becomes) and to Epic 14 (each
+> retrieval/MCP layer that already exists today. It *relates* to Epic 10 (the
+> `answer` path will use whatever the `LLMAdapter` becomes) and to Epic 15 (each
 > pilot becomes a `Retriever`), but neither is a blocker in either direction. If
-> done before Epic 14 it de-duplicates the 14.x pilots; if done after, the seam is
+> done before Epic 15 it de-duplicates the 15.x pilots; if done after, the seam is
 > retrofitted and the pilots fold into it. Final numbering/placement is the
 > planner's call — design the stories to be self-contained.
 >
@@ -372,7 +372,7 @@ mechanisms plug into.
 **FRs touched:** FR11, FR12, FR13, FR14, FR21, FR36 (no new FR closed; this is a
 vision-track architecture enabler that strengthens existing FRs).
 **NFRs:** portability, observability, latency measurement (align to the NFR ids
-Epic 14 already cites: NFR1, NFR12, NFR19).
+Epic 15 already cites: NFR1, NFR12, NFR19).
 
 The story set follows the house pattern (Operator Validation second-to-last,
 Documentation & Housekeeping last).
@@ -461,7 +461,7 @@ documented so experimental mechanisms stay distinguishable from the baseline.
   experimental.
 - **Given** `architecture.md`, **When** updated, **Then** it records the
   `Retriever` boundary alongside the existing LLM and Output boundaries, and the
-  Epic 14 pilots reference this foundation.
+  Epic 15 pilots reference this foundation.
 
 ## Relationship to existing epics (all soft, no blockers)
 
@@ -471,22 +471,22 @@ purpose — this epic can ship before or after any of them.
 ```mermaid
 flowchart LR
     F["This epic:<br/>Contract + Retriever seam<br/>(self-contained)"]
-    E9["Epic 9<br/>Structured LLM Boundary"] -. answer path uses LLMAdapter .-> F
-    F -. each pilot becomes a Retriever .-> E14["Epic 14<br/>Advanced Retrieval Pilots"]
-    E13["Epic 13<br/>Model Routing"] -. orthogonal .- F
-    E14 --- P1["14.1 Full-context = a Retriever"]
-    E14 --- P2["14.2 Hierarchical summary = a Retriever"]
-    E14 --- P3["14.3 Graph = a Retriever"]
+    E10["Epic 10<br/>Structured LLM Boundary"] -. answer path uses LLMAdapter .-> F
+    F -. each pilot becomes a Retriever .-> E15["Epic 15<br/>Advanced Retrieval Pilots"]
+    E14["Epic 14<br/>Model Routing"] -. orthogonal .- F
+    E15 --- P1["15.1 Full-context = a Retriever"]
+    E15 --- P2["15.2 Hierarchical summary = a Retriever"]
+    E15 --- P3["15.3 Graph = a Retriever"]
 ```
 
-- **Epic 9 (Structured LLM Boundary):** soft affinity. The `answer` path uses
+- **Epic 10 (Structured LLM Boundary):** soft affinity. The `answer` path uses
   whatever the `LLMAdapter` becomes; this note does not change that contract and
   works against the current one.
-- **Epic 13 (Model Routing):** orthogonal — routing is about *which model*, this
+- **Epic 14 (Model Routing):** orthogonal — routing is about *which model*, this
   is about *evidence vs. answer* and *which retriever*.
-- **Epic 14 (Advanced Retrieval Modes):** natural beneficiary, not a dependant.
-  If this seam exists first, Stories 14.1/14.2/14.3 can be expressed as
-  `Retriever` implementations judged on the Epic 7 benchmark. If Epic 14 runs
+- **Epic 15 (Advanced Retrieval Modes):** natural beneficiary, not a dependant.
+  If this seam exists first, Stories 15.1/15.2/15.3 can be expressed as
+  `Retriever` implementations judged on the Epic 7 benchmark. If Epic 15 runs
   first, its pilots can be retrofitted onto the seam later. Either order works.
 
 ## Open questions (for elicitation)
@@ -496,7 +496,7 @@ flowchart LR
    call, or stay strictly config-driven? Recommendation: config default + optional
    override.
 2. Does `FileGrepRetriever` belong in this foundation epic (Story D) or as the
-   first Epic 14 pilot? Recommendation: keep it here — it is cheap, needs no new
+   first Epic 15 pilot? Recommendation: keep it here — it is cheap, needs no new
    data, and proves the seam with a second real mechanism.
 
 _(Former Q1 — tool naming — is resolved; see Decisions.)_
