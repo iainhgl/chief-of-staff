@@ -160,8 +160,11 @@ chunking:
 # query: Gmail search query string (same syntax as the Gmail search box).
 #   Example: "is:unread newer_than:1d" polls only recent unread messages.
 #   Leave null to fetch the most recent messages with no filter.
-# label_ids: restrict polling to specific labels (e.g. ["INBOX", "IMPORTANT"]).
-#   Leave empty to search across all labels.
+# label_names: restrict polling to specific Gmail display labels (e.g. ["cos-uat"]).
+#   Use this for normal custom-label configuration; names are resolved to API IDs once per sync.
+# label_ids: advanced alternative using Gmail API label IDs directly (e.g. ["INBOX", "IMPORTANT"]).
+#   For custom labels, use `cos gmail labels` after Gmail auth to inspect API IDs.
+#   Do not set label_names and label_ids together. Leave both empty to search across all labels.
 # max_results: maximum messages per poll cycle (1–500, default 25).
 # include_spam_trash: set to true to include Spam and Trash folders (default false).
 # staging_dir: shared volume path where the connector stages files before enqueueing.
@@ -170,6 +173,7 @@ chunking:
 # ─────────────────────────────────────────────
 # gmail:
 #   query: null
+#   label_names: []
 #   label_ids: []
 #   max_results: 25
 #   include_spam_trash: false

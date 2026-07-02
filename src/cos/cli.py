@@ -9,6 +9,7 @@ import psycopg
 import typer
 
 from cos.config import CosConfig
+from cos.connectors.gmail import GmailLabel
 from cos.connectors.google_auth import AuthError, run_oauth_flow
 from cos.services.health import ComponentStatus, HealthService
 from cos.services.ingestion import SUPPORTED_SUFFIXES, IngestService
@@ -19,8 +20,10 @@ from cos.store.models import BackfillResult
 app = typer.Typer(name="cos", help="CoS platform CLI")
 auth_app = typer.Typer(name="auth", help="Authenticate external service connectors.")
 sync_app = typer.Typer(name="sync", help="Sync external connectors.")
+gmail_app = typer.Typer(name="gmail", help="Inspect Gmail connector metadata.")
 app.add_typer(auth_app, name="auth")
 app.add_typer(sync_app, name="sync")
+app.add_typer(gmail_app, name="gmail")
 
 _RESTART_TIMEOUT = 30
 _POLL_INTERVAL = 2
@@ -76,8 +79,12 @@ def sync_gmail(
     typer.echo(f"  {result.messages_scanned} messages scanned")
     typer.echo(f"  {result.body_jobs_enqueued} body jobs enqueued")
     typer.echo(f"  {result.attachment_jobs_enqueued} attachment jobs enqueued")
-    typer.echo(f"  {result.artifacts_already_processed} artifacts already processed (skipped)")
-    typer.echo(f"  {result.artifacts_already_queued} artifacts already queued (skipped)")
+    typer.echo(
+        f"  {result.artifacts_already_processed} artifacts already processed (skipped)"
+    )
+    typer.echo(
+        f"  {result.artifacts_already_queued} artifacts already queued (skipped)"
+    )
     typer.echo(f"  {result.attachments_skipped} unsupported attachments skipped")
 
 
@@ -121,6 +128,30 @@ def sync_calendar() -> None:
     typer.echo(f"  {result.jobs_enqueued} jobs enqueued")
 
 
+@gmail_app.command("labels")
+def gmail_labels() -> None:
+    """List Gmail label names with their API IDs for connector configuration."""
+    try:
+        config = CosConfig.load()
+        labels = _list_gmail_labels(config)
+    except SystemExit as exc:
+        typer.echo(f"Gmail labels configuration error: {exc}", err=True)
+        raise typer.Exit(code=1)
+    except AuthError as exc:
+        typer.echo(f"Authentication error: {exc}", err=True)
+        raise typer.Exit(code=1)
+    except Exception as exc:
+        typer.echo(f"Gmail labels failed: {exc}", err=True)
+        raise typer.Exit(code=1)
+
+    if not labels:
+        typer.echo("No Gmail labels found.")
+        return
+
+    for line in _render_gmail_labels(labels):
+        typer.echo(line)
+
+
 async def _do_sync_gmail(config: CosConfig, force: bool = False) -> Any:
     from cos.services.gmail import poll_gmail
 
@@ -137,6 +168,27 @@ async def _do_sync_calendar(config: CosConfig) -> Any:
         config.database.libpq_dsn
     ) as conn:
         return await _sync_calendar(config, conn)
+
+
+def _list_gmail_labels(config: CosConfig) -> list[GmailLabel]:
+    from cos.connectors.gmail import build_gmail_service, list_labels
+
+    service = build_gmail_service(config)
+    return list_labels(service)
+
+
+def _render_gmail_labels(labels: list[GmailLabel]) -> list[str]:
+    rows = [("NAME", "ID", "TYPE")]
+    rows.extend(
+        (label.name, label.id, label.type)
+        for label in sorted(labels, key=lambda label: (label.name.lower(), label.id))
+    )
+    name_width = max(len(row[0]) for row in rows)
+    id_width = max(len(row[1]) for row in rows)
+    return [
+        f"{name:<{name_width}}  {label_id:<{id_width}}  {label_type}"
+        for name, label_id, label_type in rows
+    ]
 
 
 def _run_connector_auth(connector: str, token_path: str) -> None:  # type: ignore[type-arg]
@@ -430,7 +482,9 @@ async def _run_benchmark(
     pool = await create_pool(config.database.libpq_dsn)
     try:
         service = RetrievalEvalService(config, pool)
-        return await service.run_benchmark(corpus_path, include_stress_fuzz=include_fuzz)
+        return await service.run_benchmark(
+            corpus_path, include_stress_fuzz=include_fuzz
+        )
     finally:
         await pool.close()
 

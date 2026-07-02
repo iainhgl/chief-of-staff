@@ -13,12 +13,14 @@ import psycopg
 
 from cos.config import CosConfig, GmailConnectorConfig
 from cos.connectors.gmail import (
+    GmailLabel,
     _decode_b64url,
     build_gmail_service,
     extract_body_text,
     fetch_attachment_bytes,
     fetch_message,
     get_message_header,
+    list_labels,
     list_message_ids,
     walk_mime_parts,
 )
@@ -62,6 +64,7 @@ async def poll_gmail(
     staging_dir.mkdir(parents=True, exist_ok=True)
 
     service = build_gmail_service(config)
+    gmail_config = _resolve_label_names(service, gmail_config)
     message_ids = list_message_ids(service, gmail_config)
 
     body_jobs = 0
@@ -100,7 +103,9 @@ async def poll_gmail(
         if force:
             body_metadata["force_reenqueue"] = True
 
-        skip = await _check_skip(conn, "gmail_message_body", body_locator, body_fingerprint, force)
+        skip = await _check_skip(
+            conn, "gmail_message_body", body_locator, body_fingerprint, force
+        )
         if skip == "processed":
             already_processed += 1
         elif skip == "pending":
@@ -182,7 +187,9 @@ async def poll_gmail(
             if force:
                 att_metadata["force_reenqueue"] = True
 
-            skip = await _check_skip(conn, "gmail_attachment", att_locator, att_fingerprint, force)
+            skip = await _check_skip(
+                conn, "gmail_attachment", att_locator, att_fingerprint, force
+            )
             if skip == "processed":
                 already_processed += 1
                 continue
@@ -217,6 +224,63 @@ async def poll_gmail(
         attachments_skipped=attachments_skipped,
         artifacts_already_processed=already_processed,
         artifacts_already_queued=already_queued,
+    )
+
+
+def _resolve_label_names(
+    service: Any,
+    gmail_config: GmailConnectorConfig,
+) -> GmailConnectorConfig:
+    if not gmail_config.label_names:
+        return gmail_config
+
+    labels = list_labels(service)
+    labels_by_name = {label.name: label for label in labels}
+    missing_names = [
+        label_name
+        for label_name in gmail_config.label_names
+        if label_name not in labels_by_name
+    ]
+    if missing_names:
+        available_names = ", ".join(sorted(labels_by_name)) or "none"
+        missing = ", ".join(missing_names)
+        raise ValueError(
+            "Gmail label name(s) not found: "
+            f"{missing}. Run `cos gmail labels` to inspect available labels. "
+            f"Available labels: {available_names}"
+        )
+
+    resolved_ids = [
+        labels_by_name[label_name].id for label_name in gmail_config.label_names
+    ]
+    _log_resolved_label_names(gmail_config.label_names, resolved_ids, labels)
+    return gmail_config.model_copy(update={"label_ids": resolved_ids})
+
+
+def _log_resolved_label_names(
+    label_names: list[str],
+    label_ids: list[str],
+    labels: list[GmailLabel],
+) -> None:
+    type_by_id = {label.id: label.type for label in labels}
+    logging.info(
+        json.dumps(
+            {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "level": "INFO",
+                "component": "connector",
+                "connector": _CONNECTOR,
+                "message": "resolved Gmail label names",
+                "labels": [
+                    {
+                        "name": name,
+                        "id": label_id,
+                        "type": type_by_id.get(label_id, ""),
+                    }
+                    for name, label_id in zip(label_names, label_ids, strict=True)
+                ],
+            }
+        )
     )
 
 

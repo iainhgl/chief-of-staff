@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from cos.config import CosConfig, GoogleOAuthConfig
+from cos.config import CosConfig, GmailConnectorConfig, GoogleOAuthConfig
 
 VALID_CONFIG_YAML = """\
 llm:
@@ -280,6 +280,41 @@ def test_google_calendar_config_rejects_negative_lookahead_days(tmp_path):
 
     with pytest.raises(Exception):
         GoogleCalendarConnectorConfig(lookahead_days=-1)
+
+
+def test_gmail_config_defaults():
+    cfg = GmailConnectorConfig()
+    assert cfg.label_names == []
+    assert cfg.label_ids == []
+
+
+def test_gmail_config_accepts_label_names():
+    cfg = GmailConnectorConfig(label_names=["cos-uat"])
+    assert cfg.label_names == ["cos-uat"]
+    assert cfg.label_ids == []
+
+
+def test_gmail_config_rejects_label_names_and_label_ids_together():
+    with pytest.raises(Exception, match="mutually exclusive"):
+        GmailConnectorConfig(label_names=["cos-uat"], label_ids=["Label_123"])
+
+
+def test_gmail_config_rejects_label_names_and_label_ids_on_load(tmp_path):
+    yaml_with_gmail = VALID_CONFIG_YAML + (
+        "\ngmail:\n"
+        "  query: newer_than:7d\n"
+        "  label_names:\n"
+        "    - cos-uat\n"
+        "  label_ids:\n"
+        "    - Label_123\n"
+    )
+    cfg_file = _write_config(tmp_path, yaml_with_gmail)
+
+    with pytest.raises(SystemExit) as exc_info:
+        CosConfig.load(cfg_file)
+
+    assert "label_names" in str(exc_info.value)
+    assert "label_ids" in str(exc_info.value)
 
 
 def test_existing_config_loads_unchanged_without_calendar_block(tmp_path):

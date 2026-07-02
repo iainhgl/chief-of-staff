@@ -3,7 +3,14 @@ from typing import Literal
 from urllib.parse import quote
 
 import yaml  # type: ignore[import-untyped]
-from pydantic import BaseModel, Field, SecretStr, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    SecretStr,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 LogComponent = Literal[
     "ingestion",
@@ -83,10 +90,19 @@ class GoogleOAuthConfig(BaseModel):
 
 class GmailConnectorConfig(BaseModel):
     query: str | None = None
-    label_ids: list[str] = []
+    label_names: list[str] = Field(default_factory=list)
+    label_ids: list[str] = Field(default_factory=list)
     max_results: int = Field(default=25, ge=1, le=500)
     include_spam_trash: bool = False
     staging_dir: Path = Path("/data/connector-staging/gmail")
+
+    @model_validator(mode="after")
+    def _require_one_label_filter_mode(self) -> "GmailConnectorConfig":
+        if self.label_names and self.label_ids:
+            raise ValueError(
+                "gmail.label_names and gmail.label_ids are mutually exclusive"
+            )
+        return self
 
 
 class GoogleCalendarConnectorConfig(BaseModel):
