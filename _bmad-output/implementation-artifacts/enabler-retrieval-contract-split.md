@@ -1,6 +1,6 @@
 # Story EN.2: Retrieval Contract Split — Pure `retrieve` and Synthesis `answer`
 
-Status: review
+Status: done
 
 ## Story
 
@@ -110,3 +110,4 @@ claude-opus-4-8
 | Date | Version | Description | Author |
 |------|---------|-------------|--------|
 | 2026-06-10 | 1.0 | Initial standalone enabler story created from retrieval contract design note; contract split implemented. | Claude (Opus 4.8) |
+| 2026-07-02 | 1.1 | Marked done after PR #65 was merged and review findings were confirmed non-blocking or patched. | Codex |

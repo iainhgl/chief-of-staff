@@ -163,7 +163,7 @@ development_status:
   # Standalone setup stories that unblock real use without changing roadmap epics
   # ─────────────────────────────────────────────
   enabler-instance-packaging-and-isolated-runtime-scaffold: done
-  enabler-retrieval-contract-split: review
+  enabler-retrieval-contract-split: done
 
   # ─────────────────────────────────────────────
   # Epic 9: Structured LLM Boundary & Provider Portability (Growth)
